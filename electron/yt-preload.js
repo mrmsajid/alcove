@@ -8,7 +8,7 @@
 const { contextBridge, webFrame, ipcRenderer } = require("electron");
 
 // Executed inside YouTube's own page (main world), before any of its scripts.
-function youtubePage() {
+function youtubePage(sponsorBlock) {
   if (window.__alcoveYT) return;
   window.__alcoveYT = true;
 
@@ -19,6 +19,22 @@ function youtubePage() {
   let watched = null;
   let adSince = 0;       // when the current ad state began
   let reported = false;  // diagnostic sent for this ad state
+
+  // SponsorBlock: segments come from the app (see main.js) and are skipped as playback reaches them.
+  let sbFor = null;
+  let segments = [];
+  const SB_LABELS = { sponsor: "Skipped sponsor", selfpromo: "Skipped self-promotion", interaction: "Skipped subscribe reminder" };
+  window.addEventListener("message", e => {
+    const r = e.source === window && e.data && e.data.__alcoveSBResult;
+    if (r && r.id === sbFor) segments = r.segments || [];
+  });
+  const skippedNote = (p, category) => {
+    const note = document.createElement("div");
+    note.className = "alcove-sb";
+    note.textContent = SB_LABELS[category] || "Skipped segment";
+    p.appendChild(note);
+    setTimeout(() => note.remove(), 2200);
+  };
   const tick = () => {
     const p = document.getElementById("movie_player");
     if (p && p !== watched) {
@@ -61,6 +77,13 @@ function youtubePage() {
       if (isFinite(v.duration) && v.duration > 0.5 && v.currentTime < v.duration - 0.3) v.currentTime = v.duration - 0.1;
       document.querySelectorAll(".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern").forEach(b => b.click());
     } else {
+      if (sponsorBlock && location.pathname === "/watch") {
+        const id = videoId();
+        if (id && id !== sbFor) { sbFor = id; segments = []; window.postMessage({ __alcoveSB: id }, "*"); }
+        for (const s of segments) {
+          if (v.currentTime >= s.start && v.currentTime < s.end - 0.4) { v.currentTime = s.end; skippedNote(p, s.category); break; }
+        }
+      }
       adSince = 0;
       reported = false;
       p.removeAttribute("data-alcove-stuck");
@@ -79,13 +102,18 @@ const YT = /^(?:www\.|m\.|music\.)?youtube\.com$/;
 if (window === window.top && YT.test(location.hostname)) {
   // Forward the page's stuck-ad report to the app (the page itself has no app access).
   window.addEventListener("message", e => {
-    if (e.source === window && e.data && e.data.__alcoveDiag) ipcRenderer.send("alcove-yt-diag", e.data.__alcoveDiag);
+    if (e.source !== window || !e.data) return;
+    if (e.data.__alcoveDiag) ipcRenderer.send("alcove-yt-diag", e.data.__alcoveDiag);
+    if (e.data.__alcoveSB) {
+      const id = String(e.data.__alcoveSB);
+      ipcRenderer.invoke("alcove-sb", id).then(segments => window.postMessage({ __alcoveSBResult: { id, segments } }, "*"), () => {});
+    }
   });
   const mode = ipcRenderer.sendSync("alcove-yt-mode", location.hostname); // { css } or null when off
   if (mode) {
     webFrame.insertCSS(mode.css);
     // Runs synchronously, so it is in place before YouTube's own scripts.
-    if (contextBridge.executeInMainWorld) contextBridge.executeInMainWorld({ func: youtubePage });
-    else webFrame.executeJavaScript(`(${youtubePage.toString()})()`);
+    if (contextBridge.executeInMainWorld) contextBridge.executeInMainWorld({ func: youtubePage, args: [!!mode.sponsor] });
+    else webFrame.executeJavaScript(`(${youtubePage.toString()})(${!!mode.sponsor})`);
   }
 }

@@ -29,7 +29,12 @@
         "dmg"
       ],
       "identity": null,
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSCameraUsageDescription": "Websites you allow can use your camera.",
+        "NSMicrophoneUsageDescription": "Websites you allow can use your microphone.",
+        "NSLocationWhenInUseUsageDescription": "Websites you allow can know your location."
+      }
     },
     "win": {
       "target": [

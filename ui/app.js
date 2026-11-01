@@ -18,7 +18,10 @@ let state = read(STATE_KEY, null) || {
   spaces: [{ id: uid(), name: "Space 1", color: COLORS[0], tabs: [], active: null }],
   space: 0,
 };
-for (const sp of state.spaces) sp.groups ||= []; // tab groups: { id, name, color, collapsed }
+for (const sp of state.spaces) {
+  sp.groups ||= []; // tab groups: { id, name, color, collapsed }
+  sp.split = null;  // split view isn't restored after a restart
+}
 const GROUP_COLORS = ["#7c8cff", "#ff7c9c", "#5fd6a0", "#ffb86b", "#c27cff", "#6cc7ff", "#9aa0a6"];
 let renamingGroup = null; // group id whose name is being edited
 const opened = new Set(); // tab ids with a live webview this session
@@ -73,9 +76,66 @@ async function newTab(url = HOME) {
   await activate(tab.id);
 }
 
+// Opened with Cmd/Ctrl+click or "Open Link in Background": placed after the current tab, loaded when first shown.
+function backgroundTab(url) {
+  const s = space();
+  const cur = activeTab();
+  const tab = { id: uid(), url, title: hostOf(url) || "New Tab", pinned: false, groupId: cur && !cur.pinned ? cur.groupId || null : null };
+  const i = cur ? s.tabs.indexOf(cur) : -1;
+  s.tabs.splice(i >= 0 ? i + 1 : s.tabs.length, 0, tab);
+  render();
+  return tab;
+}
+
+// Most-recently-used tabs per space, for Ctrl+Tab.
+const recentTabs = new Map(); // space id -> [tab ids], newest first
+function noteRecent(id) {
+  if (!id) return;
+  const list = (recentTabs.get(space().id) || []).filter(x => x !== id && findTab(x));
+  list.unshift(id);
+  recentTabs.set(space().id, list.slice(0, 20));
+}
+const orderedTabs = () => [...space().tabs.filter(t => t.pinned), ...space().tabs.filter(t => !t.pinned)];
+const previousTab = () => (recentTabs.get(space().id) || []).find(x => x !== space().active && space().tabs.some(t => t.id === x));
+
+// ---- split view ----
+
+const inSplit = id => !!space().split && (space().split.left === id || space().split.right === id);
+
+async function ensureOpen(id) {
+  const t = findTab(id);
+  if (t && !opened.has(id)) {
+    await invoke("open_tab", { id, url: t.url });
+    opened.add(id);
+  }
+}
+
+async function startSplit(leftId, rightId) {
+  if (!leftId || !rightId || leftId === rightId) return;
+  await ensureOpen(leftId);
+  await ensureOpen(rightId);
+  const s = space();
+  s.split = { left: leftId, right: rightId, ratio: (s.split && s.split.ratio) || 0.5 };
+  s.active = rightId;
+  noteRecent(rightId);
+  await call("set_split", { split: s.split });
+  render();
+}
+
+async function exitSplit() {
+  const s = space();
+  if (!s.split) return;
+  s.split = null;
+  await call("set_split", { split: null });
+  await activate(s.active);
+}
+
 async function activate(id) {
   const s = space();
+  if (s.split && !inSplit(id)) s.split = null; // picking a tab outside the split leaves split view
+  await call("set_split", { split: s.split || null });
   s.active = id;
+  noteRecent(id);
   const tab = activeTab();
   if (tab && !opened.has(tab.id)) {
     await invoke("open_tab", { id: tab.id, url: tab.url });
@@ -101,6 +161,7 @@ async function closeTab(id) {
   const i = s.tabs.findIndex(t => t.id === id);
   if (i < 0) return;
   const t = s.tabs[i];
+  if (inSplit(id)) s.split = null;
   const el = document.querySelector(`.tab[data-id="${id}"]`);
   if (el && !t.pinned) { el.classList.add("leaving"); await sleep(150); }
   if (opened.delete(id)) await invoke("close_tab", { id });
@@ -482,7 +543,7 @@ function favNode(t) {
 
 function tabEl(t) {
   const el = document.createElement("div");
-  el.className = "tab" + (t.pinned ? " pin" : "") + (t.id === space().active ? " active" : "")
+  el.className = "tab" + (t.pinned ? " pin" : "") + (t.id === space().active ? " active" : "") + (inSplit(t.id) ? " in-split" : "")
     + (opened.has(t.id) ? "" : " unloaded");
   el.draggable = true;
   el.dataset.id = t.id;
@@ -516,8 +577,12 @@ function tabEl(t) {
       ...space().groups.filter(g => g.id !== t.groupId).map(g => ({ label: `Move to “${g.name}”`, fn: () => setTabGroup(t.id, g.id) })),
       ...(t.groupId ? [{ label: "Remove from group", fn: () => setTabGroup(t.id, null) }] : []),
     ];
+    const cur = space().active;
+    const splitItems = inSplit(t.id) ? [{ label: "Exit split view", fn: exitSplit }]
+      : cur && cur !== t.id ? [{ label: "Split view with current tab", fn: () => startSplit(cur, t.id) }] : [];
     showMenu(e.clientX, e.clientY, [
       { label: t.pinned ? "Unpin tab" : "Pin tab", fn: () => togglePin(t.id) },
+      ...splitItems,
       ...groupItems,
       { label: "Duplicate", fn: () => newTab(t.url) },
       { label: "Copy link", fn: () => navigator.clipboard.writeText(t.url).then(() => toast("Link copied")) },
@@ -549,7 +614,7 @@ function render() {
   write(STATE_KEY, state);
   const s = space();
   // Drop groups that no longer have tabs (except one being named right now).
-  s.groups = s.groups.filter(g => g.id === renamingGroup || s.tabs.some(t => !t.pinned && t.groupId === g.id));
+  s.groups = (s.groups || []).filter(g => g.id === renamingGroup || s.tabs.some(t => !t.pinned && t.groupId === g.id));
   for (const t of s.tabs) if (t.groupId && !s.groups.some(g => g.id === t.groupId)) t.groupId = null;
   $("pinned").replaceChildren(...s.tabs.filter(t => t.pinned).map(tabEl));
   // Don't rebuild the list while a group name is being typed, or the text box would be replaced mid-edit.
@@ -568,12 +633,19 @@ function render() {
 
   $("spaces").replaceChildren(...state.spaces.map((sp, i) => {
     const d = document.createElement("div");
-    d.className = "space-dot" + (i === state.space ? " active" : "");
-    d.style.background = sp.color;
+    d.className = "space-dot" + (i === state.space ? " active" : "") + (sp.icon ? " emoji" : "");
+    if (sp.icon) d.textContent = sp.icon;
+    else d.style.background = sp.color;
     d.title = sp.name;
     d.addEventListener("click", () => switchSpace(i));
+    d.addEventListener("contextmenu", e => { e.preventDefault(); spaceMenu(i, e.clientX, e.clientY); });
     return d;
   }));
+  const title = $("space-title");
+  if (!title.querySelector("input")) {
+    title.textContent = (s.icon ? s.icon + "  " : "") + s.name;
+    title.title = "Double-click to rename · right-click for space options";
+  }
 
   const t = activeTab();
   const addr = $("addr");
@@ -596,6 +668,8 @@ let videoJob = null; // the running download, if any
 
 function renderChrome() {
   document.documentElement.style.setProperty("--space", space().color);
+  document.body.classList.toggle("theme-light", space().theme === "light");
+  document.body.classList.toggle("theme-dark", space().theme === "dark");
   const t = activeTab();
   $("yt-banner").hidden = !(t && YT_RE.test(t.url));
   const full = videoTools.ready && videoTools.ffmpeg;
@@ -633,9 +707,63 @@ async function switchSpace(i) {
   await activate(space().active);
 }
 
+// ---- space options ----
+
+function spaceMenu(i, x, y) {
+  const sp = state.spaces[i];
+  const themes = { auto: "Match system", light: "Light", dark: "Dark" };
+  const next = { auto: "light", light: "dark", dark: "auto" }[sp.theme || "auto"];
+  showMenu(x, Math.min(y, window.innerHeight - 230), [
+    { label: "Rename space…", fn: () => setTimeout(() => spaceInput(i, "name"), 0) },
+    { label: "Set emoji icon…", fn: () => setTimeout(() => spaceInput(i, "icon"), 0) },
+    ...(sp.icon ? [{ label: "Remove icon", fn: () => { sp.icon = ""; render(); } }] : []),
+    { label: "Change color", fn: () => { sp.color = COLORS[(COLORS.indexOf(sp.color) + 1) % COLORS.length]; render(); } },
+    { label: `Appearance: ${themes[sp.theme || "auto"]} → ${themes[next]}`, fn: () => { sp.theme = next; render(); } },
+    ...(state.spaces.length > 1 ? [{ label: "Delete space…", fn: () => deleteSpace(i) }] : []),
+  ]);
+}
+
+// Inline text box in the menu, used for the space name and emoji icon.
+function spaceInput(i, field) {
+  const sp = state.spaces[i];
+  const input = document.createElement("input");
+  input.className = "menu-input";
+  input.value = field === "name" ? sp.name : sp.icon || "";
+  input.placeholder = field === "name" ? "Space name, then Enter" : "Type or paste an emoji, then Enter";
+  input.addEventListener("keydown", e => {
+    if (e.key === "Escape") hideMenu();
+    if (e.key !== "Enter") return;
+    const v = input.value.trim();
+    if (field === "name" && v) sp.name = v.slice(0, 30);
+    if (field === "icon") sp.icon = [...v].slice(0, 2).join(""); // keep it to one emoji (some are 2 code points)
+    hideMenu();
+    render();
+  });
+  $("menu").replaceChildren(input);
+  const r = $("spaces").getBoundingClientRect();
+  placeMenu(r.left, r.top - 60);
+  input.focus();
+  input.select();
+}
+
+async function deleteSpace(i) {
+  const sp = state.spaces[i];
+  if (state.spaces.length < 2 || !confirm(`Delete “${sp.name}” and close its ${sp.tabs.length} tabs?`)) return;
+  for (const t of sp.tabs) if (opened.delete(t.id)) await invoke("close_tab", { id: t.id });
+  state.spaces.splice(i, 1);
+  if (state.space === i) state.space = 0;
+  else if (state.space > i) state.space -= 1;
+  await activate(space().active);
+}
+
+function stepSpace(delta) {
+  const n = state.spaces.length;
+  if (n > 1) switchSpace((state.space + delta + n) % n);
+}
+
 function newSpace() {
   const n = state.spaces.length;
-  state.spaces.push({ id: uid(), name: "Space " + (n + 1), color: COLORS[n % COLORS.length], tabs: [], active: null });
+  state.spaces.push({ id: uid(), name: "Space " + (n + 1), color: COLORS[n % COLORS.length], tabs: [], active: null, groups: [], split: null });
   return switchSpace(n);
 }
 
@@ -940,6 +1068,22 @@ const actions = {
   "browse-extensions": browseStore,
   "new-space": newSpace,
   "pin-tab": () => { const t = activeTab(); if (t) togglePin(t.id); },
+  "recent-tab": () => { const id = previousTab(); if (id) activate(id); },
+  "tab-last": () => { const list = orderedTabs(); if (list.length) activate(list[list.length - 1].id); },
+  ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map(n => [`tab-${n}`, () => { const t = orderedTabs()[n - 1]; if (t) activate(t.id); }])),
+  ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => [`space-${n}`, () => { if (state.spaces[n - 1]) switchSpace(n - 1); }])),
+  "next-space": () => stepSpace(1),
+  "prev-space": () => stepSpace(-1),
+  "split-recent": () => { const a = space().active, b = previousTab(); if (a && b) startSplit(b, a); else toast("Open another tab first"); },
+  "exit-split": exitSplit,
+  "pip": async () => {
+    const t = activeTab();
+    if (!t || !opened.has(t.id)) return;
+    const r = await call("pip", { id: t.id });
+    if (r === "none") toast("No video on this page");
+    else if (r && String(r).startsWith("error")) toast("Picture in picture isn't available for this video");
+  },
+  "toggle-sponsorblock": () => setSponsorBlock(!sponsorBlock),
   "new-group": () => { const t = activeTab(); if (t && !t.pinned && !t.groupId) newGroup(t.id); else newGroupWithTab(); },
 };
 
@@ -951,7 +1095,20 @@ listen("palette-action", ({ payload: p }) => {
   else if (p.type === "cmd") actions[p.id]?.();
 });
 
-listen("new-tab-request", ({ payload }) => newTab(payload.url));
+listen("new-tab-request", ({ payload }) => {
+  if (payload.background) { backgroundTab(payload.url); toast("Opened in background", 1500); }
+  else newTab(payload.url);
+});
+listen("split-request", ({ payload }) => {
+  const t = backgroundTab(payload.url);
+  startSplit(payload.with, t.id);
+});
+// Clicking into a split pane makes it the active tab (address bar, back/forward follow it).
+listen("tab-focused", ({ payload }) => {
+  const s = space();
+  if (s.split && inSplit(payload.id) && s.active !== payload.id) { s.active = payload.id; noteRecent(payload.id); render(); }
+});
+listen("split-ratio", ({ payload }) => { if (space().split) space().split.ratio = payload.ratio; });
 
 listen("sidebar-state", ({ payload: p }) => {
   document.body.classList.toggle("overlay", p.collapsed && p.peek);
@@ -1008,6 +1165,8 @@ $("addr").addEventListener("focus", () => $("addr").select());
 
 $("new-tab").addEventListener("click", () => newTab());
 $("new-group").addEventListener("click", () => newGroupWithTab());
+$("space-title").addEventListener("dblclick", () => spaceInput(state.space, "name"));
+$("space-title").addEventListener("contextmenu", e => { e.preventDefault(); spaceMenu(state.space, e.clientX, e.clientY); });
 $("new-space").addEventListener("click", newSpace);
 for (const a of ["back", "forward", "reload"]) $(a).addEventListener("click", () => navAction(a));
 $("star").addEventListener("click", toggleBookmark);
@@ -1041,6 +1200,19 @@ async function setAdblock(on) {
   navAction("reload"); // apply to the page being viewed
 }
 
+let sponsorBlock = true;
+async function setSponsorBlock(on) {
+  sponsorBlock = on;
+  await call("set_sponsorblock", { enabled: on });
+  toast(on ? "Sponsor segments will be skipped" : "Sponsor skipping off");
+  navAction("reload");
+}
+let sitePerms = []; // remembered permissions for the current site, loaded when the shield opens
+
+$("shield").addEventListener("mousedown", async () => {
+  const t = activeTab();
+  sitePerms = (t && (await call("site_permissions", { url: t.url }))) || [];
+});
 $("shield").addEventListener("click", e => {
   e.stopPropagation();
   const t = activeTab();
@@ -1053,7 +1225,16 @@ $("shield").addEventListener("click", e => {
     items.push({ label: here ? `Turn on for ${host}` : `Turn off for ${host}`, fn: () => setSiteAllowed(host, !here) });
   }
   items.push(adblock ? { label: "Turn off for all sites", fn: () => setAdblock(false) } : { label: "Turn on", fn: () => setAdblock(true) });
-  showMenu(Math.max(rect.right - 210, 8), rect.bottom + 6, items);
+  if (/(^|\.)youtube\.com$/.test(host)) {
+    items.push({ label: `Skip sponsor segments: ${sponsorBlock ? "On" : "Off"}`, fn: () => setSponsorBlock(!sponsorBlock) });
+  }
+  if (t && sitePerms.length) {
+    items.push({ label: `Reset permissions for ${host} (${sitePerms.length})`, fn: async () => {
+      await call("reset_site_permissions", { url: t.url });
+      toast(`Permissions reset for ${host}`);
+    } });
+  }
+  showMenu(Math.max(rect.right - 230, 8), rect.bottom + 6, items);
 });
 
 // While typing, keep a peeking sidebar on screen even if the pointer wanders off.
@@ -1105,6 +1286,7 @@ call("get_settings").then(s => {
   if (!s) return;
   adblock = s.adblock;
   adblockAllow = s.adblockAllow || [];
+  sponsorBlock = s.sponsorBlock !== false;
   document.body.classList.toggle("collapsed", s.collapsed);
   $("toggle-sidebar").title = s.collapsed ? "Show sidebar" : "Hide sidebar";
   renderChrome();

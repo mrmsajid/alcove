@@ -1,5 +1,5 @@
 const {
-  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net, nativeImage,
+  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net, nativeImage, systemPreferences,
 } = require("electron");
 const AdmZip = require("adm-zip");
 const { spawn, execFileSync } = require("child_process");
@@ -29,6 +29,8 @@ let config = {
   collapsed: false,
   adblock: true,
   adblockAllow: [], // hostnames where the blocker is off
+  sponsorBlock: true, // skip sponsor segments on YouTube
+  sitePermissions: {}, // "origin permission" -> allowed (true/false), for remembered choices
   activeProfile: "default",
   profiles: [{ id: "default", name: "Default", color: COLORS[0] }],
 };
@@ -80,9 +82,17 @@ function layout() {
   const { width, height } = win.getContentBounds();
   const left = Math.round(contentLeft);
   ui.setBounds({ x: Math.round(sidebarX), y: 0, width: SIDEBAR_W, height });
-  for (const v of tabs.values()) {
-    v.setBounds({ x: left, y: 0, width: Math.max(width - left, 1), height });
+  const sb = split ? splitBounds() : null;
+  for (const [k, v] of tabs) {
+    if (sb && k === split.left) v.setBounds({ x: left, y: 0, width: sb.lw, height });
+    else if (sb && k === split.right) v.setBounds({ x: left + sb.lw + DIVIDER_W, y: 0, width: sb.w - sb.lw - DIVIDER_W, height });
+    else v.setBounds({ x: left, y: 0, width: Math.max(width - left, 1), height });
   }
+  if (divider && sb) {
+    // While dragging, the divider covers both panes so it keeps receiving the mouse.
+    divider.setBounds(dividerDragging ? { x: left, y: 0, width: sb.w, height } : { x: left + sb.lw, y: 0, width: DIVIDER_W, height });
+  }
+  placePeek();
   placeShotPopup();
 }
 
@@ -251,6 +261,10 @@ const YT_HIDE_CSS = `
   /* While an ad is being skipped, show the video's own thumbnail (set by the page script) so it
      looks like the video is just loading. */
   #movie_player.ad-showing:not([data-alcove-stuck]) video, #movie_player.ad-interrupting:not([data-alcove-stuck]) video { opacity: 0 !important; }
+  .alcove-sb {
+    position: absolute; left: 16px; bottom: 72px; z-index: 70; pointer-events: none; padding: 6px 11px; border-radius: 8px;
+    background: rgba(0, 0, 0, .72); color: #fff; font: 500 13px -apple-system, "Segoe UI", sans-serif;
+  }
   #movie_player.ad-showing:not([data-alcove-stuck])::after, #movie_player.ad-interrupting:not([data-alcove-stuck])::after {
     content: ""; position: absolute; inset: 0; z-index: 2147483647; pointer-events: none;
     background: #000; background-image: var(--alcove-thumb, none); background-size: cover; background-position: center;
@@ -271,10 +285,32 @@ ipcMain.on("alcove-yt-diag", (_e, info) => {
 });
 
 // The web session's early page script asks whether to run YouTube mode on this host.
+// SponsorBlock (community-marked sponsor segments). The lookup sends only the first 4 hex characters
+// of the video ID's SHA-256, so the service can't tell which video is being watched.
+const sponsorCache = new Map();
+ipcMain.handle("alcove-sb", async (_e, videoId) => {
+  const id = String(videoId);
+  if (!config.sponsorBlock || !/^[\w-]{11}$/.test(id)) return [];
+  if (sponsorCache.has(id)) return sponsorCache.get(id);
+  const prefix = require("crypto").createHash("sha256").update(id).digest("hex").slice(0, 4);
+  const cats = encodeURIComponent(JSON.stringify(["sponsor", "selfpromo", "interaction"]));
+  try {
+    const res = await net.fetch(`https://sponsor.ajay.app/api/skipSegments/${prefix}?categories=${cats}`);
+    const list = res.ok ? await res.json() : [];
+    const hit = Array.isArray(list) ? list.find(x => x.videoID === id) : null;
+    const segs = hit ? hit.segments
+      .filter(x => !x.actionType || x.actionType === "skip")
+      .map(x => ({ start: x.segment[0], end: x.segment[1], category: x.category })) : [];
+    sponsorCache.set(id, segs);
+    if (sponsorCache.size > 200) sponsorCache.delete(sponsorCache.keys().next().value);
+    return segs;
+  } catch { return []; }
+});
+
 ipcMain.on("alcove-yt-mode", (e, host) => {
   const h = String(host).replace(/^www\./, "");
   const off = !config.adblock || config.adblockAllow.some(d => h === d || h.endsWith(`.${d}`));
-  e.returnValue = off ? null : { css: YT_HIDE_CSS };
+  e.returnValue = off ? null : { css: YT_HIDE_CSS, sponsor: config.sponsorBlock };
 });
 
 // Fallback styling for pages where the early script didn't run (safe to apply twice).
@@ -322,6 +358,53 @@ function applyBlocking() {
   } catch (e) { console.error("ad blocker:", e.message); }
 }
 
+// ---- site permissions: ask once per site, remember the answer ----
+
+const ALWAYS_ALLOWED = ["fullscreen", "clipboard-sanitized-write", "pointerLock"];
+const ASKABLE = {
+  media: "use your camera or microphone",
+  geolocation: "know your location",
+  notifications: "show notifications",
+  "clipboard-read": "read what you copy",
+};
+const permKey = (origin, permission) => `${origin} ${permission}`;
+
+function permissionText(permission, details) {
+  if (permission === "media") {
+    const t = details.mediaTypes || [];
+    if (t.includes("video") && t.includes("audio")) return "use your camera and microphone";
+    if (t.includes("video")) return "use your camera";
+    if (t.includes("audio")) return "use your microphone";
+  }
+  return ASKABLE[permission];
+}
+
+async function askPermission(wc, permission, details) {
+  let origin;
+  try { origin = new URL(details.requestingUrl || wc.getURL()).origin; } catch { return false; }
+  const key = permKey(origin, permission);
+  if (key in config.sitePermissions) return config.sitePermissions[key];
+  const { response, checkboxChecked } = await dialog.showMessageBox(win, {
+    type: "question",
+    buttons: ["Allow", "Block"],
+    defaultId: 0,
+    cancelId: 1,
+    message: `${new URL(origin).host} wants to ${permissionText(permission, details)}`,
+    checkboxLabel: "Remember for this site",
+    checkboxChecked: true,
+  });
+  const ok = response === 0;
+  if (checkboxChecked) { config.sitePermissions[key] = ok; saveConfig(); }
+  // macOS also asks once per app before a site can use the camera or microphone.
+  if (ok && permission === "media" && process.platform === "darwin") {
+    for (const t of details.mediaTypes || []) {
+      const kind = t === "video" ? "camera" : "microphone";
+      if (systemPreferences.getMediaAccessStatus(kind) !== "granted") await systemPreferences.askForMediaAccess(kind);
+    }
+  }
+  return ok;
+}
+
 function ensureSession(profileId) {
   const ses = session.fromPartition(webPartition(profileId));
   if (knownSessions.has(ses)) return ses;
@@ -329,8 +412,16 @@ function ensureSession(profileId) {
   // Some sites refuse to work when the UA names Electron.
   ses.setUserAgent(ses.getUserAgent().replace(/\s(Electron|alcove|Alcove)\/\S+/gi, ""));
   // Camera, mic, location, notifications etc. stay denied until the app has a permission prompt.
-  ses.setPermissionRequestHandler((_wc, permission, cb) =>
-    cb(["fullscreen", "clipboard-sanitized-write"].includes(permission)));
+  ses.setPermissionRequestHandler((wc, permission, cb, details) => {
+    if (ALWAYS_ALLOWED.includes(permission)) return cb(true);
+    if (!ASKABLE[permission]) return cb(false);
+    askPermission(wc, permission, details).then(cb, () => cb(false));
+  });
+  ses.setPermissionCheckHandler((_wc, permission, origin) => {
+    if (!ASKABLE[permission]) return true;
+    let o; try { o = new URL(origin).origin; } catch { return false; } // Electron passes it with a trailing slash
+    return config.sitePermissions[permKey(o, permission)] === true;
+  });
   try {
     ses.registerPreloadScript({ type: "frame", filePath: path.join(__dirname, "yt-preload.js") });
   } catch (e) { console.error("youtube preload:", e.message); }
@@ -423,10 +514,16 @@ function openTab(id, url) {
   wc.on("did-navigate", (_e, u) => send("tab-url", { id, url: u }));
   wc.on("did-navigate-in-page", (_e, u, isMainFrame) => { if (isMainFrame) send("tab-url", { id, url: u }); });
   wc.on("page-title-updated", (_e, title) => send("tab-title", { id, title }));
-  wc.setWindowOpenHandler(({ url: u }) => {
-    send("new-tab-request", { url: u });
+  // Cmd/Ctrl+click opens a background tab; Shift+click (a featureless new window) opens Peek.
+  // Popups that ask for a size (sign-in windows, for example) still become normal tabs.
+  wc.setWindowOpenHandler(({ url: u, disposition, features }) => {
+    if (disposition === "background-tab") send("new-tab-request", { url: u, background: true });
+    else if (disposition === "new-window" && !features) openPeek(u);
+    else send("new-tab-request", { url: u });
     return { action: "deny" };
   });
+  wc.on("context-menu", (_e, p) => pageMenu(id, wc, p).popup());
+  wc.on("focus", () => send("tab-focused", { id })); // tells the sidebar which split pane is active
   showOnly(id);
   // Give the ad blocker a moment to load its rules so the first page is filtered too.
   perf(`tab ${id}: created`);
@@ -438,12 +535,179 @@ function openTab(id, url) {
 }
 
 function showOnly(id) {
-  for (const [k, v] of tabs) v.setVisible(k === id);
+  for (const [k, v] of tabs) v.setVisible(split ? k === split.left || k === split.right : k === id);
+}
+
+// ---- split view ----
+
+let split = null;           // { left, right, ratio }: two tab ids shown side by side
+let divider = null;         // thin view between the panes
+let dividerDragging = false;
+const DIVIDER_W = 8;
+
+function splitBounds() {
+  const { width } = win.getContentBounds();
+  const w = Math.max(width - Math.round(contentLeft), 2 * DIVIDER_W);
+  return { w, lw: Math.round((w - DIVIDER_W) * split.ratio) };
+}
+
+function setSplit(next) {
+  split = next && next.left !== next.right && tabs.has(next.left) && tabs.has(next.right)
+    ? { left: next.left, right: next.right, ratio: Math.min(0.8, Math.max(0.2, Number(next.ratio) || 0.5)) }
+    : null;
+  if (split && !divider) {
+    divider = new WebContentsView({
+      webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, partition: uiPartition(config.activeProfile) },
+    });
+    divider.setBackgroundColor("#00000000");
+    divider.webContents.loadFile(uiFile("divider.html"));
+  } else if (!split && divider) {
+    win.contentView.removeChildView(divider);
+    divider.webContents.close();
+    divider = null;
+    dividerDragging = false;
+  }
+  if (divider) win.contentView.addChildView(divider); // keep it above the panes
+  if (split) showOnly();
+  layout();
+}
+
+// ---- peek: links opened in a floating preview over the current page ----
+
+let peekView = null;          // the previewed page
+let peekBackdrop = null;  // dimmed layer behind it with the Open/Close controls
+
+function placePeek() {
+  if (!peekView) return;
+  const { width, height } = win.getContentBounds();
+  const left = Math.round(contentLeft);
+  const w = Math.max(width - left, 1);
+  peekBackdrop.setBounds({ x: left, y: 0, width: w, height });
+  const pw = Math.round(Math.min(w - 48, Math.max(w * 0.84, 360)));
+  peekView.setBounds({ x: left + Math.round((w - pw) / 2), y: 56, width: Math.max(pw, 200), height: Math.max(height - 76, 200) });
+}
+
+const peekInfo = info => { if (peekBackdrop) peekBackdrop.webContents.send("event", "peek-info", info); };
+
+function openPeek(url) {
+  closePeek();
+  peekBackdrop = new WebContentsView({
+    webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, partition: uiPartition(config.activeProfile) },
+  });
+  peekBackdrop.setBackgroundColor("#00000000");
+  peekView = new WebContentsView({
+    webPreferences: { partition: webPartition(config.activeProfile), sandbox: true, contextIsolation: true },
+  });
+  if (typeof peekView.setBorderRadius === "function") peekView.setBorderRadius(12);
+  win.contentView.addChildView(peekBackdrop);
+  win.contentView.addChildView(peekView);
+  placePeek();
+  peekBackdrop.webContents.loadFile(uiFile("peek.html")).then(() => peekInfo({ url })).catch(() => {});
+  const pwc = peekView.webContents;
+  pwc.on("before-input-event", (e, input) => {
+    if (input.type !== "keyDown") return;
+    if (input.key === "Escape") { e.preventDefault(); closePeek(); }
+    else if (input.key === "Enter" && (input.meta || input.control)) { e.preventDefault(); peekToTab(); }
+  });
+  pwc.on("did-navigate", (_e, u) => peekInfo({ url: u }));
+  pwc.on("page-title-updated", (_e, title) => peekInfo({ url: pwc.getURL(), title }));
+  pwc.setWindowOpenHandler(({ url: u }) => { send("new-tab-request", { url: u }); return { action: "deny" }; });
+  pwc.on("context-menu", (_e, p) => pageMenu(null, pwc, p).popup());
+  pwc.loadURL(url).catch(() => {});
+  pwc.focus();
+}
+
+function closePeek() {
+  for (const v of [peekView, peekBackdrop]) {
+    if (!v) continue;
+    win.contentView.removeChildView(v);
+    v.webContents.close();
+  }
+  peekView = peekBackdrop = null;
+}
+
+function peekToTab() {
+  if (!peekView) return;
+  const url = peekView.webContents.getURL();
+  closePeek();
+  send("new-tab-request", { url });
+}
+
+// ---- picture in picture ----
+
+// Picks the playing (or largest) video on the page; a user gesture is required, which executeJavaScript can grant.
+function pictureInPicture(wc) {
+  if (!wc) return Promise.resolve("none");
+  return wc.executeJavaScript(`(async () => {
+    if (document.pictureInPictureElement) { await document.exitPictureInPicture(); return "closed"; }
+    const vids = [...document.querySelectorAll("video")].filter(v => v.readyState > 0);
+    const v = vids.find(x => !x.paused) || vids.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0];
+    if (!v) return "none";
+    v.disablePictureInPicture = false;
+    await v.requestPictureInPicture();
+    return "opened";
+  })()`, true).catch(e => `error: ${e.message}`);
+}
+
+// ---- page right-click menu ----
+
+function pageMenu(tabId, wc, p) {
+  const items = [];
+  const sep = () => { if (items.length && items[items.length - 1].type !== "separator") items.push({ type: "separator" }); };
+  if (p.linkURL && /^https?:/i.test(p.linkURL)) {
+    items.push(
+      { label: "Open Link in New Tab", click: () => send("new-tab-request", { url: p.linkURL }) },
+      { label: "Open Link in Background", click: () => send("new-tab-request", { url: p.linkURL, background: true }) },
+      { label: "Open Link in Peek", click: () => openPeek(p.linkURL) },
+      ...(tabId ? [{ label: "Open Link in Split View", click: () => send("split-request", { url: p.linkURL, with: tabId }) }] : []),
+      { label: "Copy Link Address", click: () => clipboard.writeText(p.linkURL) },
+    );
+    sep();
+  }
+  if (p.mediaType === "image" && p.srcURL) {
+    items.push(
+      { label: "Open Image in New Tab", click: () => send("new-tab-request", { url: p.srcURL }) },
+      { label: "Save Image", click: () => wc.downloadURL(p.srcURL) },
+      { label: "Copy Image", click: () => wc.copyImageAt(p.x, p.y) },
+      { label: "Copy Image Address", click: () => clipboard.writeText(p.srcURL) },
+    );
+    sep();
+  }
+  if (p.mediaType === "video") {
+    items.push({ label: "Picture in Picture", click: () => pictureInPicture(wc) });
+    sep();
+  }
+  const text = (p.selectionText || "").trim();
+  if (p.isEditable) {
+    items.push({ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" });
+    sep();
+  } else if (text) {
+    const short = text.length > 28 ? `${text.slice(0, 28)}…` : text;
+    items.push(
+      { role: "copy" },
+      { label: `Search for “${short}”`, click: () => send("new-tab-request", { url: `https://duckduckgo.com/?q=${encodeURIComponent(text)}` }) },
+    );
+    sep();
+  }
+  if (!p.linkURL && p.mediaType === "none" && !p.isEditable && !text) {
+    items.push(
+      { label: "Back", enabled: wc.navigationHistory.canGoBack(), click: () => wc.navigationHistory.goBack() },
+      { label: "Forward", enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
+      { label: "Reload", click: () => wc.reload() },
+    );
+    sep();
+    if (tabId) items.push({ label: "Take Screenshot…", click: () => send("shortcut", "screenshot-region") });
+    items.push({ label: "View Page Source", click: () => send("new-tab-request", { url: `view-source:${wc.getURL()}` }) });
+  }
+  sep();
+  items.push({ label: "Inspect", click: () => { wc.openDevTools({ mode: "detach" }); wc.inspectElement(p.x, p.y); } });
+  return Menu.buildFromTemplate(items);
 }
 
 function closeTab(id) {
   const v = tabs.get(id);
   if (!v) return;
+  if (split && (split.left === id || split.right === id)) setSplit(null);
   win.contentView.removeChildView(v);
   wcToTab.delete(v.webContents.id);
   v.webContents.close();
@@ -1140,6 +1404,8 @@ function activeProfile() {
 function switchProfile(id) {
   if (id === config.activeProfile || !config.profiles.some(p => p.id === id)) return;
   hidePalette();
+  closePeek();
+  setSplit(null);
   closeRegion();
   closeShotPopup();
   closeExtPopup();
@@ -1189,6 +1455,32 @@ const commands = {
     else if (action === "forward") wc.navigationHistory.goForward();
     else if (action === "reload") wc.reload();
   },
+  set_split: ({ split: next }) => setSplit(next || null),
+  split_drag: ({ active }) => { dividerDragging = !!active; if (divider) win.contentView.addChildView(divider); layout(); },
+  split_ratio: ({ ratio }) => {
+    if (!split) return;
+    split.ratio = Math.min(0.8, Math.max(0.2, Number(ratio) || 0.5));
+    layout();
+    send("split-ratio", { ratio: split.ratio });
+  },
+  open_peek: ({ url }) => openPeek(String(url)),
+  // Test hook (ALCOVE_TEST=1 only): the labels the page menu would show for a given right-click.
+  debug_page_menu: ({ id, params }) => process.env.ALCOVE_TEST === "1" && wcOf(id)
+    ? pageMenu(id, wcOf(id), { mediaType: "none", selectionText: "", isEditable: false, linkURL: "", srcURL: "", x: 0, y: 0, ...params }).items.map(i => i.type === "separator" ? "—" : i.label || i.role)
+    : null,
+  peek_close: () => setImmediate(closePeek),
+  peek_open_tab: () => setImmediate(peekToTab),
+  pip: ({ id }) => pictureInPicture(wcOf(id)),
+  set_sponsorblock: ({ enabled }) => { config.sponsorBlock = !!enabled; saveConfig(); },
+  site_permissions: ({ url }) => {
+    let origin; try { origin = new URL(String(url)).origin; } catch { return []; }
+    return Object.entries(config.sitePermissions).filter(([k]) => k.startsWith(`${origin} `)).map(([k, v]) => ({ permission: k.slice(origin.length + 1), allowed: v }));
+  },
+  reset_site_permissions: ({ url }) => {
+    let origin; try { origin = new URL(String(url)).origin; } catch { return; }
+    for (const k of Object.keys(config.sitePermissions)) if (k.startsWith(`${origin} `)) delete config.sitePermissions[k];
+    saveConfig();
+  },
   zoom: ({ id, factor }) => { wcOf(id)?.setZoomFactor(Math.min(5, Math.max(0.25, factor))); },
   find: ({ id, text, backwards }) => {
     const wc = wcOf(id);
@@ -1235,7 +1527,7 @@ const commands = {
   drag_start: startDrag,
   drag_end: () => clearInterval(dragTimer),
   sidebar_busy: ({ busy }) => { sidebarBusy = !!busy; },
-  get_settings: () => ({ adblock: config.adblock, adblockAllow: config.adblockAllow, collapsed, adblockReady: !!blocker }),
+  get_settings: () => ({ adblock: config.adblock, adblockAllow: config.adblockAllow, sponsorBlock: config.sponsorBlock, collapsed, adblockReady: !!blocker }),
   set_adblock_site: ({ host, allowed }) => {
     const h = String(host).replace(/^www\./, "").toLowerCase();
     config.adblockAllow = config.adblockAllow.filter(d => d !== h);
@@ -1263,7 +1555,7 @@ const commands = {
 };
 
 const fromOurPages = e =>
-  [ui, palette, region, shotView].some(v => v && e.sender === v.webContents);
+  [ui, palette, region, shotView, peekBackdrop, divider].some(v => v && e.sender === v.webContents);
 
 ipcMain.handle("invoke", (e, cmd, args) => {
   if (!fromOurPages(e)) throw new Error("forbidden");
@@ -1314,6 +1606,22 @@ function buildMenu() {
       item("zoom-in", "Zoom In", "CmdOrCtrl+="),
       item("zoom-out", "Zoom Out", "CmdOrCtrl+-"),
       item("zoom-reset", "Actual Size", "CmdOrCtrl+0"),
+    ] },
+    { label: "Tabs", submenu: [
+      item("recent-tab", "Switch to Recent Tab", "Ctrl+Tab"),
+      { type: "separator" },
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map(n => item(`tab-${n}`, `Tab ${n}`, `CmdOrCtrl+${n}`)),
+      item("tab-last", "Last Tab", "CmdOrCtrl+9"),
+      { type: "separator" },
+      item("split-recent", "Split View with Recent Tab"),
+      item("exit-split", "Exit Split View"),
+      item("pip", "Picture in Picture", "CmdOrCtrl+Alt+P"),
+    ] },
+    { label: "Spaces", submenu: [
+      item("next-space", "Next Space", mac ? "Cmd+Alt+Right" : "Ctrl+Alt+Right"),
+      item("prev-space", "Previous Space", mac ? "Cmd+Alt+Left" : "Ctrl+Alt+Left"),
+      { type: "separator" },
+      ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => item(`space-${n}`, `Space ${n}`, mac ? `Ctrl+${n}` : `Alt+${n}`)),
     ] },
     { label: "Library", submenu: [
       item("bookmarks", "Bookmarks", "CmdOrCtrl+Shift+B"),

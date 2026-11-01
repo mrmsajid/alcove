@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Split divider</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: transparent; cursor: col-resize; user-select: none; overflow: hidden; }
+    #bar {
+      position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; transform: translateX(-50%);
+      border-radius: 3px; background: rgba(128, 128, 140, .35); transition: background .15s ease;
+    }
+    body:hover #bar, body.dragging #bar { background: rgba(124, 140, 255, .9); }
+  </style>
+</head>
+<body>
+  <div id="bar"></div>
+  <script>
+    // While dragging, the app stretches this view across both panes so it keeps getting mouse events.
+    const { invoke } = window.__TAURI__.core;
+    const bar = document.getElementById("bar");
+    let dragging = false;
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("dragging");
+      bar.style.left = "50%";
+      invoke("split_drag", { active: false });
+    };
+    document.addEventListener("mousedown", () => {
+      dragging = true;
+      document.body.classList.add("dragging");
+      invoke("split_drag", { active: true });
+    });
+    document.addEventListener("mousemove", e => {
+      if (!dragging) return;
+      bar.style.left = e.clientX + "px";
+      invoke("split_ratio", { ratio: e.clientX / innerWidth });
+    });
+    document.addEventListener("mouseup", end);
+    window.addEventListener("blur", end);
+  </script>
+</body>
+</html>
