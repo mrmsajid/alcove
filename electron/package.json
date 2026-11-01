@@ -1,0 +1,43 @@
+{
+  "name": "alcove",
+  "productName": "Alcove",
+  "version": "0.1.0",
+  "description": "Alcove: a sidebar-first browser (Electron / Chromium build)",
+  "author": "X UP Brands",
+  "main": "main.js",
+  "scripts": {
+    "sync-ui": "node scripts/sync-ui.js",
+    "start": "npm run sync-ui && electron .",
+    "dist": "npm run sync-ui && electron-builder"
+  },
+  "build": {
+    "appId": "com.xupbrands.alcove",
+    "productName": "Alcove",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "ui/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "identity": null,
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0"
+  }
+}
