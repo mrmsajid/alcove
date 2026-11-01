@@ -228,7 +228,14 @@ const YT_HIDE_CSS = `
   ytd-ad-slot-renderer, ytd-in-feed-ad-layout-renderer, ytd-promoted-sparkles-web-renderer,
   ytd-display-ad-renderer, ytd-companion-slot-renderer, ytd-action-companion-ad-renderer,
   ytd-banner-promo-renderer, ytd-statement-banner-renderer, ytd-merch-shelf-renderer,
-  #player-ads, #masthead-ad, .ytp-ad-overlay-container, .ytp-featured-product { display: none !important; }
+  #player-ads, #masthead-ad, .ytp-ad-overlay-container, .ytp-featured-product,
+  ytd-player-legacy-desktop-watch-ads-renderer, ytd-promoted-video-renderer, ytd-compact-promoted-video-renderer,
+  ytd-search-pyv-renderer, ytd-ads-engagement-panel-content-renderer,
+  ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"],
+  ytd-engagement-panel-section-list-renderer:has(ytd-ads-engagement-panel-content-renderer, ad-badge-view-model),
+  ytd-rich-item-renderer:has(ytd-ad-slot-renderer, ad-badge-view-model),
+  ytd-item-section-renderer:has(> #contents > ytd-ad-slot-renderer),
+  yt-lockup-view-model:has(ad-badge-view-model), #shopping-timely-shelf, yt-overlay-product-sticker { display: none !important; }
   /* While an ad is being skipped, show plain black instead of the ad. */
   #movie_player.ad-showing video, #movie_player.ad-interrupting video { opacity: 0 !important; }
   #movie_player.ad-showing::after, #movie_player.ad-interrupting::after {
@@ -273,6 +280,14 @@ const YT_SKIP_SCRIPT = `(() => {
   tick();
 })()`;
 
+// The web session's early page script asks whether to run YouTube mode on this host.
+ipcMain.on("alcove-yt-mode", (e, host) => {
+  const h = String(host).replace(/^www\./, "");
+  const off = !config.adblock || config.adblockAllow.some(d => h === d || h.endsWith(`.${d}`));
+  e.returnValue = off ? null : { css: YT_HIDE_CSS, script: YT_SKIP_SCRIPT };
+});
+
+// Fallback for pages where the early script didn't run; both parts are safe to apply twice.
 function applyYouTubeMode(wc) {
   if (!config.adblock || userAllowed(wc)) return;
   wc.insertCSS(YT_HIDE_CSS).catch(() => {});
@@ -327,6 +342,9 @@ function ensureSession(profileId) {
   // Camera, mic, location, notifications etc. stay denied until the app has a permission prompt.
   ses.setPermissionRequestHandler((_wc, permission, cb) =>
     cb(["fullscreen", "clipboard-sanitized-write"].includes(permission)));
+  try {
+    ses.registerPreloadScript({ type: "frame", filePath: path.join(__dirname, "yt-preload.js") });
+  } catch (e) { console.error("youtube preload:", e.message); }
   ses.on("will-download", (_e, item) => {
     const dest = uniquePath(path.join(app.getPath("downloads"), item.getFilename()));
     item.setSavePath(dest);
