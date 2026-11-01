@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Select area</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #000; cursor: crosshair; user-select: none; font: 12px -apple-system, "Segoe UI", system-ui, sans-serif; }
+    #shot { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+    #dim { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); }
+    #box { position: fixed; display: none; border: 1.5px solid #7c8cff; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .45); }
+    #size { position: fixed; display: none; padding: 2px 7px; border-radius: 6px; background: #17171c; color: #ececf1; }
+    #hint { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; background: #17171c; color: #ececf1; animation: in .2s ease; }
+    @keyframes in { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+  </style>
+</head>
+<body>
+  <img id="shot" alt="">
+  <div id="dim"></div>
+  <div id="box"></div>
+  <div id="size"></div>
+  <div id="hint">Drag to select an area · Esc to cancel</div>
+  <script>
+    const { invoke } = window.__TAURI__.core;
+    const { listen } = window.__TAURI__.event;
+    const $ = id => document.getElementById(id);
+    let start = null;
+    let rect = null;
+
+    listen("region-image", ({ payload }) => { $("shot").src = payload.dataUrl; });
+
+    const norm = (a, b) => ({
+      x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y),
+    });
+
+    document.addEventListener("mousedown", e => {
+      if (e.button !== 0) return;
+      start = { x: e.clientX, y: e.clientY };
+      $("dim").style.display = "none";
+      $("hint").style.display = "none";
+    });
+    document.addEventListener("mousemove", e => {
+      if (!start) return;
+      rect = norm(start, { x: e.clientX, y: e.clientY });
+      Object.assign($("box").style, {
+        display: "block", left: rect.x + "px", top: rect.y + "px", width: rect.width + "px", height: rect.height + "px",
+      });
+      $("size").textContent = `${Math.round(rect.width)} × ${Math.round(rect.height)}`;
+      Object.assign($("size").style, {
+        display: "block", left: rect.x + "px", top: Math.max(rect.y - 26, 4) + "px",
+      });
+    });
+    document.addEventListener("mouseup", () => {
+      if (!start) return;
+      start = null;
+      if (rect && rect.width > 4 && rect.height > 4) invoke("region_done", { rect });
+      else invoke("region_cancel");
+    });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") invoke("region_cancel"); });
+  </script>
+</body>
+</html>

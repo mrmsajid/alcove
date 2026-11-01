@@ -133,6 +133,7 @@ body.panel-open #tabs, body.panel-open #pinned, body.panel-open #new-tab { displ
 .ctx .item .x { color: var(--muted); padding: 0 4px; }
 .ctx .menu-input { padding: 6px 10px; }
 .toast {
+  display: flex; align-items: center; gap: 8px;
   position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%); background: var(--surface);
   border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; z-index: 11; white-space: nowrap;
 }
@@ -183,3 +184,6 @@ body { transition: border-color .2s ease; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+.toast button { padding: 2px 8px; border-radius: 6px; color: var(--accent); font-weight: 600; }
+.ext-row .badge { color: var(--muted); font-size: 11px; }

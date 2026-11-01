@@ -44,9 +44,16 @@ function normalize(input) {
 }
 
 let toastTimer;
-function toast(msg, ms = 1600) {
+function toast(msg, ms = 1600, actions = []) {
   const el = $("toast");
-  el.textContent = msg;
+  const text = document.createElement("span");
+  text.textContent = msg;
+  el.replaceChildren(text, ...actions.map(a => {
+    const b = document.createElement("button");
+    b.textContent = a.label;
+    b.addEventListener("click", () => { el.hidden = true; a.fn(); });
+    return b;
+  }));
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, ms);
@@ -185,16 +192,35 @@ function toggleBookmark() {
 
 let lastShot = null;
 
+function afterShot(r) {
+  lastShot = r.path;
+  toast(`Screenshot ${r.copied ? "saved and copied" : "saved"}`, 7000, [
+    { label: "Show", fn: () => call("reveal", { path: r.path }) },
+    { label: "Save as…", fn: async () => {
+      const saved = await call("save_screenshot_as", { path: r.path });
+      if (saved) toast("Saved a copy", 2500, [{ label: "Show", fn: () => call("reveal", { path: saved }) }]);
+    } },
+  ]);
+}
+
 async function shoot(mode) {
   const t = activeTab();
   if (!t || !opened.has(t.id)) return toast("Nothing to capture");
   try {
-    const r = await invoke("screenshot", { id: t.id, mode });
-    lastShot = r.path;
-    toast(`Screenshot ${r.copied ? "saved and copied" : "saved"} · click to show`, 4000);
+    if (mode === "region") await invoke("screenshot_region", { id: t.id }); // result arrives as "screenshot-done"
+    else afterShot(await invoke("screenshot", { id: t.id, mode }));
   } catch {
     toast("Screenshot failed");
   }
+}
+
+function screenshotMenu() {
+  const rect = $("screenshot").getBoundingClientRect();
+  showMenu(rect.left - 90, rect.top - 3 * 32 - 14, [
+    { label: "Selected area", fn: () => shoot("region") },
+    { label: "Visible area", fn: () => shoot("visible") },
+    { label: "Full page", fn: () => shoot("full") },
+  ]);
 }
 
 // ---- find / zoom ----
@@ -389,9 +415,12 @@ function renderPanel() {
   document.body.classList.toggle("panel-open", !!panel);
   $("panel").hidden = !panel;
   if (!panel) return;
-  $("panel-title").textContent = { bookmarks: "Bookmarks", history: "History", downloads: "Downloads" }[panel];
+  $("panel-title").textContent = { bookmarks: "Bookmarks", history: "History", downloads: "Downloads", extensions: "Extensions" }[panel];
   $("panel-search").hidden = panel === "downloads";
+  $("panel-search").placeholder = panel === "extensions" ? "Chrome Web Store link or ID, then Enter" : "Search";
   $("panel-clear").hidden = panel === "bookmarks";
+  $("panel-clear").textContent = panel === "extensions" ? "Load unpacked…" : "Clear";
+  if (panel === "extensions") return renderExtensions();
   const q = $("panel-search").value.trim().toLowerCase();
   const match = x => !q || (x.title || "").toLowerCase().includes(q) || x.url.toLowerCase().includes(q);
   let rows = [];
@@ -416,6 +445,49 @@ function renderPanel() {
   }
   $("panel-body").replaceChildren(...(rows.length ? rows : [Object.assign(document.createElement("div"),
     { className: "empty", textContent: "Nothing here yet" })]));
+}
+
+// ---- extensions ----
+
+async function renderExtensions() {
+  const list = await call("list_extensions");
+  if (panel !== "extensions") return;
+  if (!list) {
+    $("panel-body").replaceChildren(Object.assign(document.createElement("div"),
+      { className: "empty", textContent: "Extensions are only available in the Electron build." }));
+    return;
+  }
+  const rows = list.map(x => row(x.name, `v${x.version}${x.description ? " · " + x.description : ""}`,
+    () => { if (x.popup) call("extension_popup", { id: x.id }); },
+    [{ label: "×", title: "Remove", fn: async () => {
+      if (!confirm(`Remove "${x.name}"?`)) return;
+      await call("remove_extension", { id: x.id });
+      renderExtensions();
+    } }]));
+  $("panel-body").replaceChildren(...(rows.length ? rows : [Object.assign(document.createElement("div"),
+    { className: "empty", textContent: "No extensions yet. Paste a Chrome Web Store link above, or load an unpacked folder." })]));
+}
+
+async function installExtension(input) {
+  toast("Installing extension…", 8000);
+  try {
+    const x = await invoke("install_extension", { input });
+    $("panel-search").value = "";
+    toast(`Installed ${x.name}. Reload open pages to apply it.`, 4000);
+  } catch (e) {
+    toast(`Install failed: ${String(e.message || e).replace(/^Error invoking remote method 'invoke': Error: /, "")}`, 5000);
+  }
+  renderExtensions();
+}
+
+async function loadUnpacked() {
+  try {
+    const x = await invoke("install_unpacked_extension");
+    if (x) toast(`Loaded ${x.name}. Reload open pages to apply it.`, 4000);
+  } catch (e) {
+    toast(`Could not load: ${String(e.message || e).replace(/^Error invoking remote method 'invoke': Error: /, "")}`, 5000);
+  }
+  renderExtensions();
 }
 
 // ---- context menu ----
@@ -498,6 +570,7 @@ const actions = {
   "focus-address": focusAddr,
   "bookmark": toggleBookmark,
   "find": openFind,
+  "screenshot-region": () => shoot("region"),
   "screenshot": () => shoot("visible"),
   "screenshot-full": () => shoot("full"),
   "reload": () => navAction("reload"),
@@ -509,6 +582,7 @@ const actions = {
   "bookmarks": () => openPanel("bookmarks"),
   "history": () => openPanel("history"),
   "downloads": () => openPanel("downloads"),
+  "extensions": () => openPanel("extensions"),
   "new-space": newSpace,
   "pin-tab": () => { const t = activeTab(); if (t) togglePin(t.id); },
 };
@@ -580,8 +654,8 @@ $("new-tab").addEventListener("click", () => newTab());
 $("new-space").addEventListener("click", newSpace);
 for (const a of ["back", "forward", "reload"]) $(a).addEventListener("click", () => navAction(a));
 $("star").addEventListener("click", toggleBookmark);
-$("screenshot").addEventListener("click", e => shoot(e.shiftKey ? "full" : "visible"));
-$("toast").addEventListener("click", () => { if (lastShot) call("reveal", { path: lastShot }); });
+$("screenshot").addEventListener("click", e => { e.stopPropagation(); screenshotMenu(); });
+listen("screenshot-done", ({ payload }) => afterShot(payload));
 
 // Window controls and drag handle (the window has no native title bar).
 for (const b of document.querySelectorAll(".dot")) {
@@ -609,9 +683,14 @@ for (const id of ["addr", "find-input", "panel-search"]) {
 $("open-bookmarks").addEventListener("click", () => openPanel("bookmarks"));
 $("open-history").addEventListener("click", () => openPanel("history"));
 $("open-downloads").addEventListener("click", () => openPanel("downloads"));
+$("open-extensions").addEventListener("click", () => openPanel("extensions"));
 $("panel-close").addEventListener("click", () => { panel = null; renderPanel(); });
-$("panel-search").addEventListener("input", renderPanel);
+$("panel-search").addEventListener("input", () => { if (panel !== "extensions") renderPanel(); });
+$("panel-search").addEventListener("keydown", e => {
+  if (e.key === "Enter" && panel === "extensions" && $("panel-search").value.trim()) installExtension($("panel-search").value);
+});
 $("panel-clear").addEventListener("click", () => {
+  if (panel === "extensions") return loadUnpacked();
   write(panel === "history" ? HIST_KEY : DL_KEY, []);
   renderPanel();
 });

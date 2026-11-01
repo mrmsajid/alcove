@@ -41,6 +41,7 @@
     "electron-builder": "^26.18.0"
   },
   "dependencies": {
-    "@ghostery/adblocker-electron": "^2.20.3"
+    "@ghostery/adblocker-electron": "^2.20.3",
+    "adm-zip": "^0.6.1"
   }
 }

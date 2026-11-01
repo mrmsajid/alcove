@@ -1,6 +1,7 @@
 const {
-  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem,
+  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net,
 } = require("electron");
+const AdmZip = require("adm-zip");
 const path = require("path");
 const fs = require("fs");
 
@@ -112,6 +113,10 @@ function toggleSidebar() {
 function watchCursor() {
   const mac = process.platform === "darwin";
   setInterval(() => {
+    if (extPopup) {
+      if (extPopup.webContents.isFocused()) extPopupFocused = true;
+      else if (extPopupFocused) closeExtPopup();
+    }
     if (!win || win.isDestroyed() || !win.isFocused()) return;
     const p = screen.getCursorScreenPoint();
     const b = win.getContentBounds();
@@ -188,8 +193,8 @@ function applyBlocking() {
   } catch (e) { console.error("ad blocker:", e.message); }
 }
 
-function ensureSession(partition) {
-  const ses = session.fromPartition(partition);
+function ensureSession(profileId) {
+  const ses = session.fromPartition(webPartition(profileId));
   if (knownSessions.has(ses)) return ses;
   knownSessions.add(ses);
   // Some sites refuse to work when the UA names Electron.
@@ -205,6 +210,7 @@ function ensureSession(partition) {
     item.once("done", (_ev, state) =>
       send("download", { state: state === "completed" ? "done" : "failed", url, path: dest }));
   });
+  loadProfileExtensions(profileId, ses);
   return ses;
 }
 
@@ -312,11 +318,16 @@ async function screenshot(id, mode) {
   } else {
     png = (await wc.capturePage()).toPNG();
   }
+  return saveShot(png);
+}
+
+const shotsDir = () => path.join(app.getPath("pictures"), "Alcove Screenshots");
+
+async function saveShot(png) {
   if (!png.length) throw new Error("empty capture");
-  const dir = path.join(app.getPath("pictures"), "Alcove Screenshots");
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(shotsDir(), { recursive: true });
   const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
-  const dest = uniquePath(path.join(dir, `Alcove ${stamp}.png`));
+  const dest = uniquePath(path.join(shotsDir(), `Alcove ${stamp}.png`));
   fs.writeFileSync(dest, png);
   let copied = true;
   try {
@@ -326,6 +337,200 @@ async function screenshot(id, mode) {
     console.error("screenshot clipboard:", e.message);
   }
   return { path: dest, copied };
+}
+
+// "Save as…" for a screenshot already in the screenshots folder.
+async function saveShotAs(file) {
+  if (path.dirname(path.resolve(file)) !== shotsDir()) throw new Error("not a screenshot");
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    defaultPath: path.join(app.getPath("downloads"), path.basename(file)),
+    filters: [{ name: "PNG image", extensions: ["png"] }],
+  });
+  if (canceled || !filePath) return null;
+  fs.copyFileSync(file, filePath);
+  return filePath;
+}
+
+// Region capture: freeze the page, let the user drag a box on an overlay, then crop the frozen frame.
+let region = null;
+let regionImage = null;
+let regionWidth = 1;
+
+function closeRegion() {
+  if (!region) return;
+  win.contentView.removeChildView(region);
+  region.webContents.close();
+  region = null;
+  regionImage = null;
+}
+
+async function startRegion(id) {
+  const wc = wcOf(id);
+  const view = tabs.get(id);
+  if (!wc || !view) throw new Error("tab not open");
+  const img = await wc.capturePage();
+  if (img.isEmpty()) throw new Error("empty capture");
+  closeRegion();
+  const b = view.getBounds();
+  regionImage = img;
+  regionWidth = b.width;
+  region = new WebContentsView({
+    webPreferences: {
+      preload: PRELOAD, contextIsolation: true, sandbox: true,
+      partition: uiPartition(config.activeProfile),
+    },
+  });
+  region.setBounds(b);
+  win.contentView.addChildView(region);
+  await region.webContents.loadFile(uiFile("region.html"));
+  region.webContents.send("event", "region-image", { dataUrl: img.toDataURL() });
+  region.webContents.focus();
+}
+
+async function finishRegion(rect) {
+  if (!regionImage) return;
+  const size = regionImage.getSize();
+  const k = size.width / regionWidth;
+  const x = Math.max(0, Math.round(rect.x * k));
+  const y = Math.max(0, Math.round(rect.y * k));
+  const crop = {
+    x, y,
+    width: Math.max(1, Math.min(Math.round(rect.width * k), size.width - x)),
+    height: Math.max(1, Math.min(Math.round(rect.height * k), size.height - y)),
+  };
+  const png = regionImage.crop(crop).toPNG();
+  closeRegion();
+  send("screenshot-done", await saveShot(png));
+}
+
+// ---- extensions ----
+
+const activeWebSession = () => session.fromPartition(webPartition(config.activeProfile));
+const extRoot = profileId => path.join(app.getPath("userData"), "extensions", profileId);
+
+async function loadProfileExtensions(profileId, ses) {
+  const root = extRoot(profileId);
+  if (!fs.existsSync(root)) return;
+  for (const name of fs.readdirSync(root)) {
+    const dir = path.join(root, name);
+    if (!fs.existsSync(path.join(dir, "manifest.json"))) continue;
+    try { await ses.extensions.loadExtension(dir); } catch (e) { console.error("extension", name, e.message); }
+  }
+}
+
+// A .crx is a zip with a header in front; skip the header to get the zip.
+function crxToZip(buf) {
+  if (buf.subarray(0, 4).toString() !== "Cr24") return buf;
+  const version = buf.readUInt32LE(4);
+  if (version === 3) return buf.subarray(12 + buf.readUInt32LE(8));
+  if (version === 2) return buf.subarray(16 + buf.readUInt32LE(8) + buf.readUInt32LE(12));
+  throw new Error("unsupported CRX version");
+}
+
+function summarize(ext) {
+  const m = ext.manifest || {};
+  return {
+    id: ext.id,
+    name: ext.name,
+    version: ext.version,
+    description: m.description && !m.description.startsWith("__MSG_") ? m.description : "",
+    popup: !!(m.action?.default_popup || m.browser_action?.default_popup),
+  };
+}
+
+// Replaces any earlier copy in the same folder, then loads the extension into the active profile.
+async function installFromDir(srcDir, folderName) {
+  const ses = activeWebSession();
+  const dest = path.join(extRoot(config.activeProfile), folderName);
+  for (const old of ses.extensions.getAllExtensions()) {
+    if (path.resolve(old.path) === path.resolve(dest)) await ses.extensions.removeExtension(old.id);
+  }
+  if (path.resolve(srcDir) !== path.resolve(dest)) {
+    fs.rmSync(dest, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.cpSync(srcDir, dest, { recursive: true });
+  }
+  if (!fs.existsSync(path.join(dest, "manifest.json"))) {
+    fs.rmSync(dest, { recursive: true, force: true });
+    throw new Error("no manifest.json found in that extension");
+  }
+  return summarize(await ses.extensions.loadExtension(dest));
+}
+
+async function installCrx(buf, folderName) {
+  const tmp = fs.mkdtempSync(path.join(app.getPath("temp"), "alcove-ext-"));
+  try {
+    new AdmZip(crxToZip(buf)).extractAllTo(tmp, true);
+    return await installFromDir(tmp, folderName);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// Chrome Web Store link or bare 32-letter extension ID.
+async function installFromStore(input) {
+  const m = String(input).match(/[a-p]{32}/);
+  if (!m) throw new Error("no extension ID found in that text");
+  const id = m[0];
+  const x = encodeURIComponent(`id=${id}&installsource=ondemand&uc`);
+  const url = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=${process.versions.chrome}&acceptformat=crx2,crx3&x=${x}`;
+  const res = await net.fetch(url, { redirect: "follow" });
+  if (!res.ok) throw new Error(`download failed (${res.status})`);
+  return installCrx(Buffer.from(await res.arrayBuffer()), id);
+}
+
+async function installUnpacked() {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: "Choose an unpacked extension folder",
+    properties: ["openDirectory"],
+  });
+  if (canceled || !filePaths[0]) return null;
+  const dir = filePaths[0];
+  return installFromDir(dir, `local-${path.basename(dir).replace(/[^\w.-]+/g, "_")}`);
+}
+
+async function removeExtension(id) {
+  const ses = activeWebSession();
+  const ext = ses.extensions.getExtension(id);
+  if (!ext) return;
+  const dir = path.resolve(ext.path);
+  await ses.extensions.removeExtension(id);
+  if (dir.startsWith(path.resolve(extRoot(config.activeProfile)) + path.sep)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Extension popups open in a small view; the cursor loop closes it once it loses focus.
+let extPopup = null;
+let extPopupFocused = false;
+
+function closeExtPopup() {
+  if (!extPopup) return;
+  win.contentView.removeChildView(extPopup);
+  extPopup.webContents.close();
+  extPopup = null;
+}
+
+function openExtPopup(id) {
+  const ext = activeWebSession().extensions.getExtension(id);
+  const m = ext?.manifest || {};
+  const page = m.action?.default_popup || m.browser_action?.default_popup;
+  if (!page) throw new Error("this extension has no popup");
+  closeExtPopup();
+  const { width, height } = win.getContentBounds();
+  const left = Math.round(contentLeft);
+  extPopup = new WebContentsView({
+    webPreferences: { partition: webPartition(config.activeProfile), sandbox: true, contextIsolation: true },
+  });
+  extPopup.setBounds({
+    x: left + 12, y: 12,
+    width: Math.max(Math.min(400, width - left - 24), 200),
+    height: Math.max(Math.min(560, height - 24), 200),
+  });
+  extPopupFocused = false;
+  win.contentView.addChildView(extPopup);
+  extPopup.webContents.loadURL(`chrome-extension://${id}/${page}`).catch(() => {});
+  extPopup.webContents.focus();
 }
 
 // ---- command palette ----
@@ -384,11 +589,13 @@ function activeProfile() {
 function switchProfile(id) {
   if (id === config.activeProfile || !config.profiles.some(p => p.id === id)) return;
   hidePalette();
+  closeRegion();
+  closeExtPopup();
   for (const tabId of [...tabs.keys()]) closeTab(tabId);
   const old = ui;
   config.activeProfile = id;
   saveConfig();
-  ensureSession(webPartition(id));
+  ensureSession(id);
   applyBlocking();
   createUi();
   win.contentView.removeChildView(old);
@@ -450,6 +657,16 @@ const commands = {
   hide_palette: () => setImmediate(hidePalette),
   reveal: ({ path: p }) => shell.showItemInFolder(p),
   screenshot: ({ id, mode }) => screenshot(id, mode),
+  screenshot_region: ({ id }) => startRegion(id),
+  region_done: ({ rect }) => finishRegion(rect),
+  region_cancel: () => closeRegion(),
+  save_screenshot_as: ({ path: p }) => saveShotAs(p),
+
+  list_extensions: () => activeWebSession().extensions.getAllExtensions().map(summarize),
+  install_extension: ({ input }) => installFromStore(input),
+  install_unpacked_extension: () => installUnpacked(),
+  remove_extension: ({ id }) => removeExtension(id),
+  extension_popup: ({ id }) => openExtPopup(id),
 
   toggle_sidebar: toggleSidebar,
   window_action: ({ action }) => windowAction(action),
@@ -468,7 +685,8 @@ const commands = {
   delete_profile: ({ id }) => deleteProfile(id),
 };
 
-const fromOurPages = e => e.sender === ui?.webContents || e.sender === palette?.webContents;
+const fromOurPages = e =>
+  [ui, palette, region].some(v => v && e.sender === v.webContents);
 
 ipcMain.handle("invoke", (e, cmd, args) => {
   if (!fromOurPages(e)) throw new Error("forbidden");
@@ -497,7 +715,8 @@ function buildMenu() {
       item("palette", "Command Palette", "CmdOrCtrl+K"),
       item("focus-address", "Open Location", "CmdOrCtrl+L"),
       item("bookmark", "Bookmark This Page", "CmdOrCtrl+D"),
-      item("screenshot", "Take Screenshot", "CmdOrCtrl+Shift+S"),
+      item("screenshot-region", "Screenshot Selected Area", "CmdOrCtrl+Shift+4"),
+      item("screenshot", "Screenshot Visible Area", "CmdOrCtrl+Shift+S"),
       item("screenshot-full", "Screenshot Full Page", "CmdOrCtrl+Alt+Shift+S"),
       ...(mac ? [] : [{ type: "separator" }, { role: "quit" }]),
     ] },
@@ -530,7 +749,7 @@ function buildMenu() {
 app.whenReady().then(() => {
   loadConfig();
   collapsed = !!config.collapsed;
-  ensureSession(webPartition(config.activeProfile));
+  ensureSession(config.activeProfile);
   blockerReady = initBlocker();
   Menu.setApplicationMenu(buildMenu());
 
