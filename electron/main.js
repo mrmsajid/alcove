@@ -213,29 +213,48 @@ const YT_HIDE_CSS = `
   ytd-display-ad-renderer, ytd-companion-slot-renderer, ytd-action-companion-ad-renderer,
   ytd-banner-promo-renderer, ytd-statement-banner-renderer, ytd-merch-shelf-renderer,
   #player-ads, #masthead-ad, .ytp-ad-overlay-container, .ytp-featured-product { display: none !important; }
+  /* While an ad is being skipped, show plain black instead of the ad. */
+  #movie_player.ad-showing video, #movie_player.ad-interrupting video { opacity: 0 !important; }
+  #movie_player.ad-showing::after, #movie_player.ad-interrupting::after {
+    content: "Skipping ad…"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #000; color: rgba(255, 255, 255, .6); font: 500 14px -apple-system, "Segoe UI", sans-serif;
+    z-index: 2147483647; pointer-events: none;
+  }
 `;
 
-// Mutes the ad, jumps to its end and presses Skip, then restores the user's volume.
+// Mutes the ad, jumps to its end and presses Skip, then restores the user's volume. It reacts the
+// moment the player switches into its ad state (observer) and again once the ad's length is known.
 const YT_SKIP_SCRIPT = `(() => {
   if (window.__alcoveAdSkip) return;
   window.__alcoveAdSkip = true;
   let wasMuted = null;
-  setInterval(() => {
+  let watched = null;
+  const tick = () => {
     const p = document.getElementById("movie_player");
+    if (p && p !== watched) {
+      watched = p;
+      new MutationObserver(tick).observe(p, { attributes: true, attributeFilter: ["class"] });
+    }
     const v = p && p.querySelector("video");
     if (!v) return;
+    if (!v.__alcoveHooked) {
+      v.__alcoveHooked = true;
+      for (const ev of ["loadedmetadata", "durationchange", "playing"]) v.addEventListener(ev, tick);
+    }
     if (p.classList.contains("ad-showing") || p.classList.contains("ad-interrupting")) {
       if (wasMuted === null) wasMuted = v.muted;
       v.muted = true;
-      if (isFinite(v.duration) && v.duration > 0.5 && v.currentTime < v.duration - 0.3) v.currentTime = v.duration - 0.1;
       try { v.playbackRate = 16; } catch {}
+      if (isFinite(v.duration) && v.duration > 0.5 && v.currentTime < v.duration - 0.3) v.currentTime = v.duration - 0.1;
       document.querySelectorAll(".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern").forEach(b => b.click());
     } else if (wasMuted !== null) {
       v.muted = wasMuted;
       wasMuted = null;
       if (v.playbackRate > 2) v.playbackRate = 1;
     }
-  }, 200);
+  };
+  setInterval(tick, 100);
+  tick();
 })()`;
 
 function applyYouTubeMode(wc) {
