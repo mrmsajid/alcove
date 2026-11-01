@@ -3,7 +3,17 @@ const { listen } = window.__TAURI__.event;
 
 const $ = id => document.getElementById(id);
 const COLORS = ["#7c8cff", "#ff7c9c", "#5fd6a0", "#ffb86b", "#c27cff"];
-const HOME = "https://duckduckgo.com";
+// Settings (search engine, new tab page, accent, text size, zoom…), kept in sync with the Settings page.
+let appSettings = {};
+const newTabUrl = () => appSettings.newTab === "blank" ? "about:blank"
+  : appSettings.newTab === "custom" && appSettings.newTabUrl ? appSettings.newTabUrl
+  : engineHome(appSettings);
+function applyAppSettings(s) {
+  appSettings = s || {};
+  document.documentElement.style.setProperty("--accent", appSettings.accent || "#7c8cff");
+  const size = { small: "12.5px", large: "15px" }[appSettings.textSize] || "13.5px";
+  document.documentElement.style.fontSize = document.body.style.fontSize = size;
+}
 const STATE_KEY = "alcove-state-v1";
 const BM_KEY = "alcove-bookmarks";
 const HIST_KEY = "alcove-history";
@@ -50,7 +60,7 @@ function normalize(input) {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return v;
   if (!/\s/.test(v) && /^[^\s]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(v)) return "https://" + v;
   if (/^localhost(:\d+)?(\/.*)?$/i.test(v)) return "http://" + v;
-  return "https://duckduckgo.com/?q=" + encodeURIComponent(v);
+  return searchUrl(appSettings, v);
 }
 
 let toastTimer;
@@ -71,7 +81,7 @@ function toast(msg, ms = 1600, actions = []) {
 
 // ---- tabs ----
 
-async function newTab(url = HOME, from = null) {
+async function newTab(url = newTabUrl(), from = null) {
   const tab = childTab(url, from) || { id: uid(), url, title: "New Tab", pinned: false };
   if (!space().tabs.includes(tab)) space().tabs.push(tab);
   await activate(tab.id);
@@ -148,6 +158,7 @@ async function exitSplit() {
 }
 
 async function activate(id) {
+  call("close_settings"); // choosing a tab shows that tab, not Settings
   const s = space();
   if (s.split && !inSplit(id)) s.split = null; // picking a tab outside the split leaves split view
   await call("set_split", { split: s.split || null });
@@ -343,7 +354,7 @@ async function newGroupWithTab() {
 
 async function newTabInGroup(gid) {
   const s = space();
-  const tab = { id: uid(), url: HOME, title: "New Tab", pinned: false, groupId: gid };
+  const tab = { id: uid(), url: newTabUrl(), title: "New Tab", pinned: false, groupId: gid };
   let last = -1;
   s.tabs.forEach((x, k) => { if (!x.pinned && x.groupId === gid) last = k; });
   s.tabs.splice(last >= 0 ? last + 1 : s.tabs.length, 0, tab);
@@ -453,6 +464,7 @@ function groupEl(g, members) {
 }
 
 async function openUrl(url, inNewTab = false) {
+  call("close_settings");
   panel = null;
   renderPanel();
   const t = activeTab();
@@ -607,7 +619,8 @@ function doFind(backwards) {
 async function setZoom(delta) {
   const t = activeTab();
   if (!t || !opened.has(t.id)) return;
-  t.zoom = delta === 0 ? 1 : Math.min(3, Math.max(0.5, Math.round(((t.zoom || 1) + delta) * 10) / 10));
+  const base = appSettings.defaultZoom || 1; // Settings › Appearance › Page zoom
+  t.zoom = delta === 0 ? base : Math.min(3, Math.max(0.5, Math.round(((t.zoom || base) + delta) * 10) / 10));
   await invoke("zoom", { id: t.id, factor: t.zoom });
   write(STATE_KEY, state);
   toast(`Zoom ${Math.round(t.zoom * 100)}%`);
@@ -638,6 +651,9 @@ function displayTitle(t) {
     const engine = /(^|\.)google\./.test(u.hostname) && u.pathname === "/search" ? "Google"
       : /(^|\.)duckduckgo\.com$/.test(u.hostname) ? "DuckDuckGo"
       : /(^|\.)bing\.com$/.test(u.hostname) && u.pathname === "/search" ? "Bing"
+      : /(^|\.)search\.brave\.com$/.test(u.hostname) ? "Brave"
+      : /(^|\.)ecosia\.org$/.test(u.hostname) && u.pathname === "/search" ? "Ecosia"
+      : /(^|\.)perplexity\.ai$/.test(u.hostname) ? "Perplexity"
       : /(^|\.)youtube\.com$/.test(u.hostname) && u.pathname === "/results" ? "YouTube" : null;
     const query = q || (engine === "YouTube" && u.searchParams.get("search_query"));
     if (engine && query) return { main: query, sub: engine };
@@ -1187,6 +1203,7 @@ function profileMenu() {
   }));
   items.push({ label: "New profile…", fn: () => setTimeout(newProfile, 0) });
   items.push({ label: "Import from Chrome…", fn: () => openPanel("import") });
+  items.push({ label: "Settings…", fn: () => call("open_settings") });
   showMenu(rect.left, rect.top - items.length * 32 - 14, items);
 }
 
@@ -1263,6 +1280,7 @@ const actions = {
   },
   "toggle-sponsorblock": () => setSponsorBlock(!sponsorBlock),
   "tidy-tabs": tidyTabs,
+  "settings": () => call("open_settings"),
   "close-duplicates": closeDuplicates,
   "close-others": closeOthers,
   "close-below": closeBelow,
@@ -1384,6 +1402,7 @@ $("open-library").addEventListener("click", e => {
     { label: "Extensions", fn: () => openPanel("extensions") },
     { label: "Screenshot…", fn: () => setTimeout(screenshotMenu, 0) },
     { label: "Import from browser…", fn: () => openPanel("import") },
+    { label: "Settings…", fn: () => call("open_settings") },
   ]);
 });
 $("open-palette").addEventListener("click", () => call("show_palette"));
@@ -1509,6 +1528,16 @@ call("get_settings").then(s => {
 });
 loadProfiles();
 refreshExtensions();
+listen("settings-changed", ({ payload }) => { applyAppSettings(payload); render(); renderPanel(); });
+// Startup preference (once per app launch): a new tab or a chosen page on top of the restored tabs.
+call("get_app_settings").then(async s => {
+  if (!s) return;
+  applyAppSettings(s);
+  render();
+  const start = await call("take_startup");
+  if (start && start.mode === "newtab") newTab();
+  else if (start && start.mode === "custom" && start.url) newTab(start.url);
+});
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderChrome); // follow system light/dark
 // A profile created by "Import … as new profile" receives its bookmarks and history here.
 call("take_pending_import").then(d => {

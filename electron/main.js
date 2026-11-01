@@ -5,6 +5,7 @@ const AdmZip = require("adm-zip");
 const { spawn, execFileSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const { searchUrl } = require(path.join(__dirname, "ui", "engines.js"));
 
 const SIDEBAR_W = 280;
 const PRELOAD = path.join(__dirname, "preload.js");
@@ -34,11 +35,42 @@ let config = {
   forceDark: [], // hostnames shown with a forced dark theme
   activeProfile: "default",
   profiles: [{ id: "default", name: "Default", color: COLORS[0] }],
+  settings: {},
 };
+
+// User-adjustable settings (Settings page). Unknown or missing values fall back to these.
+const DEFAULT_SETTINGS = {
+  searchEngine: "duckduckgo", customSearch: "",
+  startup: "restore", startupUrl: "",       // restore | newtab | custom
+  newTab: "engine", newTabUrl: "",          // engine | blank | custom
+  downloadDir: "", askDownload: false,
+  theme: "system", accent: "#7c8cff", textSize: "default", defaultZoom: 1, compact: false,
+  dnt: true, httpsOnly: false, spellcheck: true,
+};
+const SETTING_RULES = {
+  searchEngine: v => typeof v === "string" && v.length < 30,
+  customSearch: v => typeof v === "string" && (v === "" || (/^https?:\/\//.test(v) && v.includes("%s"))),
+  startup: v => ["restore", "newtab", "custom"].includes(v),
+  startupUrl: v => typeof v === "string" && v.length < 2000,
+  newTab: v => ["engine", "blank", "custom"].includes(v),
+  newTabUrl: v => typeof v === "string" && v.length < 2000,
+  downloadDir: v => v === "",               // set a folder through choose_download_dir
+  askDownload: v => typeof v === "boolean",
+  theme: v => ["system", "light", "dark"].includes(v),
+  accent: v => /^#[0-9a-f]{6}$/i.test(v),
+  textSize: v => ["small", "default", "large"].includes(v),
+  defaultZoom: v => typeof v === "number" && v >= 0.5 && v <= 2,
+  compact: v => typeof v === "boolean",
+  dnt: v => typeof v === "boolean",
+  httpsOnly: v => typeof v === "boolean",
+  spellcheck: v => typeof v === "boolean",
+};
+const S = () => config.settings;
 const configPath = () => path.join(app.getPath("userData"), "config.json");
 
 function loadConfig() {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(configPath(), "utf8")) }; } catch {}
+  config.settings = { ...DEFAULT_SETTINGS, ...(config.settings || {}) };
   if (!config.profiles.some(p => p.id === config.activeProfile)) config.activeProfile = "default";
 }
 function saveConfig() {
@@ -80,18 +112,21 @@ const send = (name, payload) => {
 
 // Web pages sit in a rounded card with a small gap on every side. With the sidebar hidden, the card
 // leaves a slim strip at the top for the window buttons, which doubles as a drag handle.
-const GAP = 8;
-const HIDE_X = -(SIDEBAR_W + GAP + 4); // sidebar x when hidden (fully off screen)
+const MARGIN = 8;
+const gap = () => (S().compact ? 0 : MARGIN); // Settings › Appearance › Compact layout removes it
+const HIDE_X = -(SIDEBAR_W + MARGIN + 4); // sidebar x when hidden (fully off screen)
 let uiRadius = -1;
 const STRIP_H = 34;
 const CARD_RADIUS = 10;
+const cardRadius = () => (S().compact ? 0 : CARD_RADIUS);
 
 function contentRect() {
   const { width, height } = win.getContentBounds();
   const hidden = 1 - Math.min(1, Math.max(0, contentLeft / SIDEBAR_W)); // 0 = sidebar shown, 1 = hidden (animates)
-  const x = Math.round(contentLeft + GAP * hidden);
-  const y = Math.round(GAP + (STRIP_H - GAP) * hidden);
-  return { x, y, w: Math.max(width - x - GAP, 1), h: Math.max(height - y - GAP, 1), hidden, width };
+  const g = gap();
+  const x = Math.round(contentLeft + g * hidden);
+  const y = Math.round(g + (STRIP_H - g) * hidden);
+  return { x, y, w: Math.max(width - x - g, 1), h: Math.max(height - y - g, 1), hidden, width };
 }
 
 function layout() {
@@ -99,7 +134,7 @@ function layout() {
   // Docked: flush with the window. Sliding out over the page (sidebar collapsed): a floating rounded panel.
   const floating = collapsed;
   ui.setBounds(floating
-    ? { x: Math.round(sidebarX) + GAP, y: GAP, width: SIDEBAR_W, height: height - 2 * GAP }
+    ? { x: Math.round(sidebarX) + MARGIN, y: MARGIN, width: SIDEBAR_W, height: height - 2 * MARGIN }
     : { x: Math.round(sidebarX), y: 0, width: SIDEBAR_W, height });
   const radius = floating ? 14 : 0;
   if (radius !== uiRadius && typeof ui.setBorderRadius === "function") { ui.setBorderRadius(radius); uiRadius = radius; }
@@ -119,6 +154,7 @@ function layout() {
     strip.setBounds({ x: 0, y: 0, width: c.width, height: STRIP_H });
   }
   placePeek();
+  placeSettings();
   placeShotPopup();
 }
 
@@ -359,9 +395,20 @@ function installBlockerHooks(ses) {
     adStats.observerChecks++;
     return process.env.ALCOVE_DOM_OBSERVER === "1"; // env switch is for measuring only
   });
+}
+
+// The single request filter for a web session: upgrades page loads to HTTPS when asked to, then lets the
+// ad blocker decide (unless the site is exempt). Re-installed after the blocker is switched on or off,
+// because the blocker replaces the session's handler.
+const LOCAL_HTTP = /^http:\/\/(localhost|127\.|\[::1\]|10\.|192\.168\.|[^/]*\.local\b|[^/]*\.test\b)/i;
+function installRequestFilter(ses) {
   ses.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) => {
-    if ((details.webContents && siteAllowed(details.webContents)) || startedByYouTube(details)) callback({});
-    else blocker.onBeforeRequest(details, callback);
+    if (S().httpsOnly && details.resourceType === "mainFrame" && /^http:\/\//i.test(details.url) && !LOCAL_HTTP.test(details.url)) {
+      return callback({ redirectURL: details.url.replace(/^http:/i, "https:") });
+    }
+    const filtering = blocker && blocker.isBlockingEnabled(ses);
+    if (!filtering || (details.webContents && siteAllowed(details.webContents)) || startedByYouTube(details)) return callback({});
+    blocker.onBeforeRequest(details, callback);
   });
 }
 
@@ -381,6 +428,7 @@ function applyBlocking() {
       installBlockerHooks(active);
     }
   } catch (e) { console.error("ad blocker:", e.message); }
+  for (const ses of knownSessions) installRequestFilter(ses);
 }
 
 // ---- site permissions: ask once per site, remember the answer ----
@@ -430,6 +478,9 @@ async function askPermission(wc, permission, details) {
   return ok;
 }
 
+// Settings › Downloads › Location (falls back to the system Downloads folder if it's gone).
+const downloadsFolder = () => (S().downloadDir && fs.existsSync(S().downloadDir) ? S().downloadDir : app.getPath("downloads"));
+
 function ensureSession(profileId) {
   const ses = session.fromPartition(webPartition(profileId));
   if (knownSessions.has(ses)) return ses;
@@ -451,13 +502,28 @@ function ensureSession(profileId) {
     ses.registerPreloadScript({ type: "frame", filePath: path.join(__dirname, "yt-preload.js") });
   } catch (e) { console.error("youtube preload:", e.message); }
   ses.on("will-download", (_e, item) => {
-    const dest = uniquePath(path.join(app.getPath("downloads"), item.getFilename()));
-    item.setSavePath(dest);
     const url = item.getURL();
+    if (S().askDownload) {
+      // Leaving the save path unset makes Electron show the save dialog.
+      item.setSaveDialogOptions({ defaultPath: path.join(downloadsFolder(), item.getFilename()) });
+      send("download", { state: "started", url, path: item.getFilename() });
+      item.once("done", (_ev, state) =>
+        send("download", { state: state === "completed" ? "done" : "failed", url, path: item.getSavePath() || item.getFilename() }));
+      return;
+    }
+    const dest = uniquePath(path.join(downloadsFolder(), item.getFilename()));
+    item.setSavePath(dest);
     send("download", { state: "started", url, path: dest });
     item.once("done", (_ev, state) =>
       send("download", { state: state === "completed" ? "done" : "failed", url, path: dest }));
   });
+  // Settings › Privacy: ask sites not to track (Do Not Track + Global Privacy Control).
+  ses.webRequest.onBeforeSendHeaders((details, callback) => {
+    if (S().dnt) { details.requestHeaders.DNT = "1"; details.requestHeaders["Sec-GPC"] = "1"; }
+    callback({ requestHeaders: details.requestHeaders });
+  });
+  ses.setSpellCheckerEnabled(S().spellcheck);
+  installRequestFilter(ses);
   loadProfileExtensions(profileId, ses);
   return ses;
 }
@@ -513,9 +579,10 @@ function openTab(id, url) {
     webPreferences: {
       partition: webPartition(config.activeProfile),
       sandbox: true, contextIsolation: true, nodeIntegration: false,
+      zoomFactor: S().defaultZoom, // Settings › Appearance › Page zoom
     },
   });
-  if (typeof view.setBorderRadius === "function") view.setBorderRadius(CARD_RADIUS);
+  if (typeof view.setBorderRadius === "function") view.setBorderRadius(cardRadius());
   const wc = view.webContents;
   tabs.set(id, view);
   wcToTab.set(wc.id, id);
@@ -668,6 +735,66 @@ async function applyDark(wc, on) {
   if (on) darkKeys.set(wc, await wc.insertCSS(DARK_CSS).catch(() => null));
 }
 
+// ---- settings page: shown over the page area like a page of its own ----
+
+let settingsView = null;
+let startupTaken = false;
+
+function placeSettings() {
+  if (!settingsView) return;
+  const c = contentRect();
+  settingsView.setBounds({ x: c.x, y: c.y, width: c.w, height: c.h });
+}
+
+function openSettings(section) {
+  if (settingsView) { settingsView.webContents.focus(); return; }
+  settingsView = new WebContentsView({
+    webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, partition: uiPartition(config.activeProfile) },
+  });
+  if (typeof settingsView.setBorderRadius === "function") settingsView.setBorderRadius(cardRadius());
+  win.contentView.addChildView(settingsView);
+  placeSettings();
+  settingsView.webContents.loadFile(uiFile("settings.html"), section ? { hash: String(section) } : undefined);
+  settingsView.webContents.focus();
+  send("settings-open", { open: true });
+}
+
+function closeSettings() {
+  if (!settingsView) return;
+  win.contentView.removeChildView(settingsView);
+  settingsView.webContents.close();
+  settingsView = null;
+  send("settings-open", { open: false });
+}
+
+function applySetting(key) {
+  if (key === "theme") nativeTheme.themeSource = S().theme;
+  if (key === "compact") {
+    for (const v of tabs.values()) if (typeof v.setBorderRadius === "function") v.setBorderRadius(cardRadius());
+    if (settingsView && typeof settingsView.setBorderRadius === "function") settingsView.setBorderRadius(cardRadius());
+    layout();
+  }
+  if (key === "spellcheck") for (const ses of knownSessions) ses.setSpellCheckerEnabled(S().spellcheck);
+}
+
+function settingChanged(key) {
+  saveConfig();
+  if (key) applySetting(key);
+  send("settings-changed", S());
+  if (settingsView) settingsView.webContents.send("event", "settings-changed", S());
+}
+
+// Links opened from other apps once Alcove is the default browser.
+const isWebUrl = u => /^https?:\/\//i.test(String(u));
+const pendingUrls = process.argv.filter(isWebUrl);
+function openFromOs(url) {
+  if (!isWebUrl(url)) return;
+  if (ui && !ui.webContents.isLoading()) send("new-tab-request", { url });
+  else pendingUrls.push(url);
+  if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.focus(); }
+}
+app.on("open-url", (e, url) => { e.preventDefault(); openFromOs(url); });
+
 // ---- picture in picture ----
 
 // Picks the playing (or largest) video on the page; a user gesture is required, which executeJavaScript can grant.
@@ -720,7 +847,7 @@ function pageMenu(tabId, wc, p) {
     const short = text.length > 28 ? `${text.slice(0, 28)}…` : text;
     items.push(
       { role: "copy" },
-      { label: `Search for “${short}”`, click: () => send("new-tab-request", { url: `https://duckduckgo.com/?q=${encodeURIComponent(text)}` }) },
+      { label: `Search for “${short}”`, click: () => send("new-tab-request", { url: searchUrl(S(), text), from: tabId }) },
     );
     sep();
   }
@@ -830,7 +957,7 @@ async function saveShotAs() {
   if (!pendingPng) return null;
   const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
-    defaultPath: path.join(app.getPath("downloads"), `Alcove ${stamp}.png`),
+    defaultPath: path.join(downloadsFolder(), `Alcove ${stamp}.png`),
     filters: [{ name: "PNG image", extensions: ["png"] }],
   });
   if (canceled || !filePath) return null; // popup stays open so the user can retry or copy instead
@@ -898,7 +1025,7 @@ async function finishRegion(rect) {
 const YT_HOST = /^(?:www\.|m\.|music\.)?youtube\.com$|^youtu\.be$/;
 const binDir = () => path.join(app.getPath("userData"), "bin");
 const exeName = n => (process.platform === "win32" ? `${n}.exe` : n);
-const downloadDir = () => process.env.ALCOVE_DOWNLOAD_DIR || app.getPath("downloads"); // env override is for tests
+const downloadDir = () => process.env.ALCOVE_DOWNLOAD_DIR || downloadsFolder(); // env override is for tests
 
 function findBinary(name, envVar) {
   if (envVar && process.env[envVar] && fs.existsSync(process.env[envVar])) return process.env[envVar];
@@ -1418,6 +1545,8 @@ function createUi() {
   ui.webContents.once("did-finish-load", () => {
     perf("sidebar: did-finish-load");
     introPeek();
+    // Links handed over by the OS before the sidebar was ready.
+    setTimeout(() => { for (const u of pendingUrls.splice(0)) send("new-tab-request", { url: u }); }, 800);
   });
   ui.webContents.once("did-start-loading", () => perf("sidebar: did-start-loading"));
   ui.webContents.once("dom-ready", () => perf("sidebar: dom-ready"));
@@ -1441,6 +1570,7 @@ function switchProfile(id) {
   if (id === config.activeProfile || !config.profiles.some(p => p.id === id)) return;
   hidePalette();
   closePeek();
+  closeSettings();
   setSplit(null);
   closeRegion();
   closeShotPopup();
@@ -1509,6 +1639,63 @@ const commands = {
   peek_open_tab: () => setImmediate(peekToTab),
   pip: ({ id }) => pictureInPicture(wcOf(id)),
   copy_text: ({ text }) => clipboard.writeText(String(text)),
+
+  // Settings
+  get_app_settings: () => S(),
+  // The "on startup" preference applies once per launch (the sidebar reloads when switching profiles).
+  take_startup: () => { if (startupTaken) return null; startupTaken = true; return { mode: S().startup, url: S().startupUrl }; },
+  set_app_setting: ({ key, value }) => {
+    if (!SETTING_RULES[key] || !SETTING_RULES[key](value)) throw new Error(`invalid setting: ${key}`);
+    S()[key] = value;
+    settingChanged(key);
+    return S();
+  },
+  choose_download_dir: async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: "Choose where downloads are saved", defaultPath: downloadsFolder(), properties: ["openDirectory", "createDirectory"],
+    });
+    if (canceled || !filePaths[0]) return null;
+    S().downloadDir = filePaths[0];
+    settingChanged("downloadDir");
+    return filePaths[0];
+  },
+  reset_settings: () => {
+    config.settings = { ...DEFAULT_SETTINGS };
+    for (const k of Object.keys(DEFAULT_SETTINGS)) applySetting(k);
+    settingChanged();
+    return S();
+  },
+  get_app_info: () => ({
+    version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome,
+    platform: process.platform, packaged: app.isPackaged, isDefault: app.isDefaultProtocolClient("https"),
+    downloadDir: downloadsFolder(), adblock: config.adblock, sponsorBlock: config.sponsorBlock,
+  }),
+  set_default_browser: () => {
+    if (!app.isPackaged) return { ok: false, reason: "Only the installed app can become the default browser." };
+    const ok = app.setAsDefaultProtocolClient("http") && app.setAsDefaultProtocolClient("https");
+    return { ok, isDefault: app.isDefaultProtocolClient("https") };
+  },
+  clear_data: async ({ cookies, cache }) => {
+    const ses = activeWebSession();
+    if (cookies) await ses.clearStorageData();
+    if (cache) await ses.clearCache();
+    return true;
+  },
+  get_site_settings: () => ({
+    permissions: Object.entries(config.sitePermissions).map(([key, allowed]) => ({
+      key, origin: key.split(" ")[0], permission: key.split(" ").slice(1).join(" "), allowed,
+    })),
+    adblockAllow: config.adblockAllow,
+    forceDark: config.forceDark,
+  }),
+  remove_site_permission: ({ key }) => { delete config.sitePermissions[String(key)]; saveConfig(); },
+  remove_force_dark: ({ host }) => {
+    config.forceDark = config.forceDark.filter(h => h !== host);
+    saveConfig();
+    for (const v of tabs.values()) if (hostKey(v.webContents.getURL()) === host) applyDark(v.webContents, false);
+  },
+  open_settings: ({ section } = {}) => openSettings(section),
+  close_settings: () => setImmediate(closeSettings),
   mute_tab: ({ id }) => {
     const wc = wcOf(id);
     if (!wc) return null;
@@ -1649,7 +1836,7 @@ const commands = {
 };
 
 const fromOurPages = e =>
-  [ui, palette, region, shotView, peekBackdrop, divider, strip].some(v => v && e.sender === v.webContents);
+  [ui, palette, region, shotView, peekBackdrop, divider, strip, settingsView].some(v => v && e.sender === v.webContents);
 
 ipcMain.handle("invoke", (e, cmd, args) => {
   if (!fromOurPages(e)) throw new Error("forbidden");
@@ -1669,7 +1856,17 @@ function buildMenu() {
   const item = (id, label, accelerator) => ({ label, accelerator, click: () => send("shortcut", id) });
   const mac = process.platform === "darwin";
   return Menu.buildFromTemplate([
-    ...(mac ? [{ role: "appMenu" }] : []),
+    ...(mac ? [{ label: app.name, submenu: [
+      { role: "about" },
+      { type: "separator" },
+      { label: "Settings…", accelerator: "Cmd+,", click: () => openSettings() },
+      { type: "separator" },
+      { role: "services" },
+      { type: "separator" },
+      { role: "hide" }, { role: "hideOthers" }, { role: "unhide" },
+      { type: "separator" },
+      { role: "quit" },
+    ] }] : []),
     { label: "File", submenu: [
       item("new-tab", "New Tab", "CmdOrCtrl+T"),
       item("reopen-tab", "Reopen Closed Tab", "CmdOrCtrl+Shift+T"),
@@ -1678,6 +1875,7 @@ function buildMenu() {
       item("palette", "Command Palette", "CmdOrCtrl+K"),
       item("focus-address", "Open Location", "CmdOrCtrl+L"),
       item("bookmark", "Bookmark This Page", "CmdOrCtrl+D"),
+      ...(mac ? [] : [{ label: "Settings…", accelerator: "Ctrl+,", click: () => openSettings() }]),
       item("download-video", "Download YouTube Video", "CmdOrCtrl+Shift+D"),
       item("screenshot-region", "Screenshot Selected Area", "CmdOrCtrl+Shift+4"),
       item("screenshot", "Screenshot Visible Area", "CmdOrCtrl+Shift+S"),
@@ -1728,7 +1926,8 @@ function buildMenu() {
   ]);
 }
 
-app.on("second-instance", () => {
+app.on("second-instance", (_e, argv) => {
+  for (const u of (argv || []).filter(isWebUrl)) openFromOs(u);
   if (!win || win.isDestroyed()) return;
   if (win.isMinimized()) win.restore();
   win.show();
@@ -1748,6 +1947,7 @@ app.whenReady().then(() => {
     setTimeout(() => clearInterval(lag), 8000);
   }
   loadConfig();
+  nativeTheme.themeSource = S().theme;
   collapsed = !!config.collapsed;
   ensureSession(config.activeProfile);
   blockerReady = initBlocker();

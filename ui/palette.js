@@ -56,6 +56,7 @@ const COMMANDS = [
   ["extensions", "Show Extensions"],
   ["browse-extensions", "Browse Chrome Web Store Extensions"],
   ["import", "Import from Browser (Chrome, Edge, Brave, Arc)"],
+  ["settings", "Settings", "Mod+,", "preferences options search engine downloads theme"],
 ];
 
 // Site shortcuts: "yt lofi", "amz yoga mat", "w Lahore"…
@@ -74,12 +75,15 @@ const BANGS = {
 };
 const ASIN = /^B0[A-Z0-9]{8}$/i;
 
+let appSettings = {}; // for the search engine (Settings › Search engine)
+invoke("get_app_settings").then(s => { appSettings = s || {}; render(); }).catch(() => {});
+
 function normalize(input) {
   const v = input.trim();
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return v;
   if (!/\s/.test(v) && /^[^\s]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(v)) return "https://" + v;
   if (/^localhost(:\d+)?(\/.*)?$/i.test(v)) return "http://" + v;
-  return "https://duckduckgo.com/?q=" + enc(v);
+  return searchUrl(appSettings, v);
 }
 
 // ---- data ----
@@ -320,7 +324,7 @@ function compute() {
   rest.sort((a, b) => b.score - a.score);
   // "Open / search the web" comes first for addresses and plain searches, but after a strong match
   // (a tab, space, split target or a command whose words you typed).
-  const isAddress = go && !normalize(raw).startsWith("https://duckduckgo.com/?q=");
+  const isAddress = go && normalize(raw) !== searchUrl(appSettings, raw.trim());
   const strong = rest.length && rest[0].score >= 230 && !isAddress;
   // Keep the list readable: at most a few of each kind.
   const cap = { History: 6, Bookmark: 5, Tab: 8, Closed: q ? 4 : 3, "In page": 5, Command: q ? 8 : 40, Split: 8 };
