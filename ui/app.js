@@ -1347,6 +1347,9 @@ listen("tab-focused", ({ payload }) => {
 });
 listen("split-ratio", ({ payload }) => { if (space().split) space().split.ratio = payload.ratio; });
 
+// Windows: the drawn window buttons fade in while the pointer is near them, like macOS (see main.js).
+listen("window-buttons", ({ payload }) => document.body.classList.toggle("winctl-shown", !!payload.visible));
+
 listen("sidebar-state", ({ payload: p }) => {
   document.body.classList.toggle("overlay", p.collapsed && p.peek);
   $("toggle-sidebar").title = p.collapsed ? "Show sidebar" : "Hide sidebar";

@@ -126,13 +126,13 @@ const send = (name, payload) => {
 
 // ---- layout / sliding sidebar ----
 
-// Web pages sit in a rounded card with a small gap on every side. With the sidebar hidden, the card
-// leaves a slim strip at the top for the window buttons, which doubles as a drag handle.
+// Web pages sit in a rounded card with a small gap on every side. With the sidebar hidden the card
+// takes the whole window and the sidebar slides out over it, so the page never resizes. The window
+// buttons stay hidden until the pointer nears them (see windowButtons), so they take no room either.
 const MARGIN = 8;
 const gap = () => (S().compact ? 0 : MARGIN); // Settings › Appearance › Compact layout removes it
 const HIDE_X = -(SIDEBAR_W + MARGIN + 4); // sidebar x when hidden (fully off screen)
 let uiRadius = -1;
-const STRIP_H = 34;
 const CARD_RADIUS = 10;
 const cardRadius = () => (S().compact ? 0 : CARD_RADIUS);
 
@@ -141,8 +141,7 @@ function contentRect() {
   const hidden = 1 - Math.min(1, Math.max(0, contentLeft / SIDEBAR_W)); // 0 = sidebar shown, 1 = hidden (animates)
   const g = gap();
   const x = Math.round(contentLeft + g * hidden);
-  const y = Math.round(g + (STRIP_H - g) * hidden);
-  return { x, y, w: Math.max(width - x - g, 1), h: Math.max(height - y - g, 1), hidden, width };
+  return { x, y: g, w: Math.max(width - x - g, 1), h: Math.max(height - 2 * g, 1), hidden, width };
 }
 
 function layout() {
@@ -166,17 +165,22 @@ function layout() {
     divider.setBounds(dividerDragging ? { x: c.x, y: c.y, width: c.w, height: c.h } : { x: c.x + lw, y: c.y, width: DIVIDER_W, height: c.h });
   }
   if (strip) {
-    strip.setVisible(c.hidden > 0.5);
-    strip.setBounds({ x: 0, y: 0, width: c.width, height: STRIP_H });
+    const left = Math.round(contentLeft);
+    strip.setBounds(cornerControls
+      ? { x: 0, y: 0, width: 110, height: 36 }
+      : { x: left, y: 0, width: Math.max(c.width - left, 1), height: Math.max(gap(), 1) });
+    strip.setVisible(cornerControls || gap() > 0);
   }
   placePeek();
   placeSettings();
   placeShotPopup();
 }
 
-// Top strip shown while the sidebar is hidden: drag to move the window, double-click to zoom,
-// and on Windows it carries the window buttons (macOS draws its own there).
+// The margin above the page doubles as a title bar: drag to move the window, double-click to zoom.
+// On Windows, with the sidebar hidden, it grows into the top-left corner while the pointer is there to
+// show the window buttons (macOS draws its own).
 let strip = null;
+let cornerControls = false;
 function createStrip() {
   strip = new WebContentsView({
     webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
@@ -252,11 +256,38 @@ function watchCursor() {
     const b = win.getContentBounds();
     const inside = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
     const rel = p.x - b.x;
+    windowButtons(p, b); // before the focus check: a background window's buttons work too
     if (!win.isFocused()) return;
     if (!collapsed) return;
     if (!peeking && inside && rel <= 3) peek(true);
     else if (peeking && !sidebarBusy && Date.now() > peekHoldUntil && (!inside || rel > SIDEBAR_W + 12)) peek(false);
   }, 50);
+}
+
+// Window buttons are hidden until the pointer is near them: along the top of the sidebar while it's
+// showing, or in the window's top-left corner while it's hidden. They linger briefly after the pointer
+// leaves so they don't flicker, and stay on in full screen.
+let buttonsShown = null; // last visibility given to macOS; null = unknown, set it again
+let buttonsSeenAt = 0;
+function windowButtons(p, b) {
+  const x = p.x - b.x, y = p.y - b.y;
+  const sidebarShown = !collapsed || peeking;
+  const near = x >= 0 && y >= 0 && x < (sidebarShown ? SIDEBAR_W + MARGIN : 96) && y < (buttonsSeenAt ? 52 : 40);
+  const now = Date.now();
+  if (near) buttonsSeenAt = now;
+  else if (now - buttonsSeenAt > 400) buttonsSeenAt = 0;
+  const want = win.isFullScreen() || buttonsSeenAt > 0;
+  if (process.platform === "darwin") {
+    if (want !== buttonsShown) { buttonsShown = want; win.setWindowButtonVisibility(want); }
+    return;
+  }
+  if (want !== buttonsShown) { buttonsShown = want; send("window-buttons", { visible: want }); }
+  const corner = want && !sidebarShown;
+  if (corner !== cornerControls) {
+    cornerControls = corner;
+    if (corner) win.contentView.addChildView(strip); // above the page
+    layout();
+  }
 }
 
 // Frameless window: the sidebar's top strip acts as the title bar.
@@ -1660,6 +1691,14 @@ const commands = {
   },
   open_peek: ({ url }) => openPeek(String(url)),
   // Test hook (ALCOVE_TEST=1 only): the labels the page menu would show for a given right-click.
+  // Test hook: runs the window-button hover logic for a point relative to the window.
+  debug_window_buttons: ({ x, y }) => {
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    const b = win.getContentBounds();
+    windowButtons({ x: b.x + x, y: b.y + y }, b);
+    return { shown: buttonsShown, corner: cornerControls, collapsed, peeking, content: contentRect(),
+      pos: typeof win.getWindowButtonPosition === "function" ? win.getWindowButtonPosition() : null };
+  },
   debug_page_menu: ({ id, params }) => process.env.ALCOVE_TEST === "1" && wcOf(id)
     ? pageMenu(id, wcOf(id), { mediaType: "none", selectionText: "", isEditable: false, linkURL: "", srcURL: "", x: 0, y: 0, ...params }).items.map(i => i.type === "separator" ? "—" : i.label || i.role)
     : null,
@@ -2002,6 +2041,11 @@ app.whenReady().then(() => {
       : { frame: false }),
   });
   perf("window created");
+  if (process.platform === "darwin") {
+    win.setWindowButtonVisibility(false); // shown on hover (windowButtons)
+    buttonsShown = false;
+    win.on("leave-full-screen", () => { buttonsShown = null; }); // macOS may restore them; set again
+  }
   windowIsClear = wantsClear();
   if (process.platform === "win32") applyGlass();
   createUi();

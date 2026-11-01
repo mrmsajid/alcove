@@ -279,6 +279,8 @@ body.overlay { padding-top: 2px; border: 1px solid var(--border); border-radius:
 .top { height: 32px; flex: none; }
 body.mac .top { padding-left: 64px; }            /* room for the macOS window buttons */
 body.win .winctl { margin-right: 6px; }
+body.win .top .winctl { opacity: 0; pointer-events: none; transition: opacity .15s ease; } /* shown on hover */
+body.win.winctl-shown .top .winctl { opacity: 1; pointer-events: auto; }
 .top .icon { width: 30px; height: 30px; border-radius: 8px; }
 
 /* address pill: site in bold, path dimmed; full URL while editing */
