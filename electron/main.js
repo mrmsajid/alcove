@@ -515,6 +515,7 @@ function startVideoDownload(url, kind) {
   const format = audio ? (ffmpeg ? "ba/b" : "ba[ext=m4a]/ba") : "bv*+ba/b";
   const args = [
     "--no-playlist", "--newline", "--no-warnings", "--no-simulate", "--print", "after_move:filepath",
+    "--progress", // --print makes yt-dlp quiet, which would also hide the percentage we show
     "-f", format, "-o", path.join(downloadDir(), "%(title).120B [%(id)s].%(ext)s"),
     // Speed: fetch up to 8 fragments at once, and request large files in 10 MB pieces
     // (which also avoids YouTube slowing down one long connection).
