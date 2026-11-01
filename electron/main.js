@@ -10,7 +10,18 @@ const SIDEBAR_W = 280;
 const PRELOAD = path.join(__dirname, "preload.js");
 const COLORS = ["#7c8cff", "#ff7c9c", "#5fd6a0", "#ffb86b", "#c27cff"];
 const uiFile = name => path.join(__dirname, "ui", name);
+
+// Development and test runs keep their own data so they never touch an installed Alcove's
+// tabs, cookies or settings (two processes sharing one profile block each other's storage).
+if (process.env.ALCOVE_USER_DATA) app.setPath("userData", process.env.ALCOVE_USER_DATA);
+else if (!app.isPackaged) app.setPath("userData", path.join(app.getPath("appData"), "Alcove Dev"));
+
+// One Alcove per profile folder: a second launch focuses the existing window instead.
+const gotInstanceLock = app.requestSingleInstanceLock();
+if (!gotInstanceLock) app.quit();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Startup timing marks, printed only when ALCOVE_PERF=1.
+const perf = label => { if (process.env.ALCOVE_PERF === "1") console.log(`[perf] ${Math.round(performance.now())}ms ${label}`); };
 
 // ---- config (profiles + settings) ----
 
@@ -181,11 +192,56 @@ const COSMETIC_CHANNELS = [
 
 const adStats = { cosmeticCalls: 0, observerChecks: 0 };
 
-function siteAllowed(wc) {
+const YT_PAGE = /^https:\/\/(?:www\.|m\.|music\.)?youtube\.com\//;
+
+// The user switched the blocker off for this site.
+function userAllowed(wc) {
   try {
     const host = new URL(wc.getURL()).hostname.replace(/^www\./, "");
     return config.adblockAllow.some(d => host === d || host.endsWith(`.${d}`));
   } catch { return false; }
+}
+
+// YouTube answers stripped ad data by holding the player in a black "ad" state for the full ad
+// length, so on YouTube we don't strip; instead the page skips ads as they start (see below).
+function siteAllowed(wc) {
+  try { return userAllowed(wc) || YT_PAGE.test(wc.getURL()); } catch { return false; }
+}
+
+const YT_HIDE_CSS = `
+  ytd-ad-slot-renderer, ytd-in-feed-ad-layout-renderer, ytd-promoted-sparkles-web-renderer,
+  ytd-display-ad-renderer, ytd-companion-slot-renderer, ytd-action-companion-ad-renderer,
+  ytd-banner-promo-renderer, ytd-statement-banner-renderer, ytd-merch-shelf-renderer,
+  #player-ads, #masthead-ad, .ytp-ad-overlay-container, .ytp-featured-product { display: none !important; }
+`;
+
+// Mutes the ad, jumps to its end and presses Skip, then restores the user's volume.
+const YT_SKIP_SCRIPT = `(() => {
+  if (window.__alcoveAdSkip) return;
+  window.__alcoveAdSkip = true;
+  let wasMuted = null;
+  setInterval(() => {
+    const p = document.getElementById("movie_player");
+    const v = p && p.querySelector("video");
+    if (!v) return;
+    if (p.classList.contains("ad-showing") || p.classList.contains("ad-interrupting")) {
+      if (wasMuted === null) wasMuted = v.muted;
+      v.muted = true;
+      if (isFinite(v.duration) && v.duration > 0.5 && v.currentTime < v.duration - 0.3) v.currentTime = v.duration - 0.1;
+      try { v.playbackRate = 16; } catch {}
+      document.querySelectorAll(".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern").forEach(b => b.click());
+    } else if (wasMuted !== null) {
+      v.muted = wasMuted;
+      wasMuted = null;
+      if (v.playbackRate > 2) v.playbackRate = 1;
+    }
+  }, 200);
+})()`;
+
+function applyYouTubeMode(wc) {
+  if (!config.adblock || userAllowed(wc)) return;
+  wc.insertCSS(YT_HIDE_CSS).catch(() => {});
+  wc.executeJavaScript(YT_SKIP_SCRIPT).catch(() => {});
 }
 
 // Replaces the blocker's own handlers so we can (1) skip sites the user turned the blocker off for and
@@ -266,6 +322,7 @@ function onBlocked(request) {
 const ENGINE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 async function initBlocker() {
+  perf("blocker: start");
   try {
     // Rules go stale quickly (YouTube changes its ads often), so rebuild the cached engine daily.
     const cache = path.join(app.getPath("userData"), "adblock-engine.bin");
@@ -278,8 +335,10 @@ async function initBlocker() {
       read: fs.promises.readFile,
       write: fs.promises.writeFile,
     });
+    perf("blocker: engine loaded");
     blocker.on("request-blocked", onBlocked);
     applyBlocking();
+    perf("blocker: ready");
   } catch (e) {
     console.error("ad blocker unavailable:", e.message);
   }
@@ -306,7 +365,11 @@ function openTab(id, url) {
       send("tab-blocked", { id, count: 0 });
     }
   });
-  wc.on("dom-ready", () => { if (STORE_URL.test(wc.getURL())) injectStoreFixes(wc); });
+  wc.on("dom-ready", () => {
+    const u = wc.getURL();
+    if (STORE_URL.test(u)) injectStoreFixes(wc);
+    if (YT_PAGE.test(u)) applyYouTubeMode(wc);
+  });
   wc.on("console-message", (e, _level, legacyMessage) => {
     const message = typeof e.message === "string" ? e.message : legacyMessage;
     if (message === STORE_MARK && STORE_URL.test(wc.getURL())) send("store-install", { id, url: wc.getURL() });
@@ -320,7 +383,10 @@ function openTab(id, url) {
   });
   showOnly(id);
   // Give the ad blocker a moment to load its rules so the first page is filtered too.
+  perf(`tab ${id}: created`);
+  wc.once("did-finish-load", () => perf(`tab ${id}: did-finish-load`));
   Promise.race([blockerReady, sleep(3000)]).then(() => {
+    perf(`tab ${id}: loadURL`);
     if (!wc.isDestroyed()) wc.loadURL(url).catch(() => {}); // aborted loads (redirects) reject
   });
 }
@@ -673,10 +739,12 @@ const extRoot = profileId => path.join(app.getPath("userData"), "extensions", pr
 async function loadProfileExtensions(profileId, ses) {
   const root = extRoot(profileId);
   if (!fs.existsSync(root)) return;
+  perf("extensions: start");
   for (const name of fs.readdirSync(root)) {
     const dir = path.join(root, name);
     if (!fs.existsSync(path.join(dir, "manifest.json"))) continue;
     try { await ses.extensions.loadExtension(dir); } catch (e) { console.error("extension", name, e.message); }
+    perf(`extensions: loaded ${name}`);
   }
 }
 
@@ -838,6 +906,13 @@ function createUi() {
   ui.webContents.on("will-navigate", e => e.preventDefault());
   ui.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.contentView.addChildView(ui);
+  ui.webContents.once("did-finish-load", () => perf("sidebar: did-finish-load"));
+  ui.webContents.once("did-start-loading", () => perf("sidebar: did-start-loading"));
+  ui.webContents.once("dom-ready", () => perf("sidebar: dom-ready"));
+  ui.webContents.on("console-message", (e, _l, legacy) => {
+    const m = typeof e.message === "string" ? e.message : legacy;
+    if (m && m.startsWith("[perf]")) perf(`sidebar says: ${m.slice(7)}`);
+  });
   ui.webContents.loadFile(uiFile("index.html"));
   sidebarX = collapsed ? -SIDEBAR_W : 0;
   contentLeft = collapsed ? 0 : SIDEBAR_W;
@@ -1029,7 +1104,25 @@ function buildMenu() {
   ]);
 }
 
+app.on("second-instance", () => {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+});
+
 app.whenReady().then(() => {
+  if (!gotInstanceLock) return;
+  perf("app ready");
+  if (process.env.ALCOVE_PERF === "1") { // report main-thread stalls longer than 200ms during startup
+    let last = performance.now();
+    const lag = setInterval(() => {
+      const now = performance.now();
+      if (now - last > 300) perf(`main thread stalled ~${Math.round(now - last - 100)}ms`);
+      last = now;
+    }, 100);
+    setTimeout(() => clearInterval(lag), 8000);
+  }
   loadConfig();
   collapsed = !!config.collapsed;
   ensureSession(config.activeProfile);
@@ -1048,6 +1141,7 @@ app.whenReady().then(() => {
       : { frame: false }),
   });
   if (process.platform === "darwin") win.setWindowButtonVisibility(false);
+  perf("window created");
   createUi();
   win.on("resize", layout);
   watchCursor();
