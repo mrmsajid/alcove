@@ -147,20 +147,25 @@ function watchCursor() {
       if (extPopup.webContents.isFocused()) extPopupFocused = true;
       else if (extPopupFocused) closeExtPopup();
     }
-    if (!win || win.isDestroyed() || !win.isFocused()) return;
+    if (!win || win.isDestroyed()) return;
     const p = screen.getCursorScreenPoint();
     const b = win.getContentBounds();
     const inside = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
     const rel = p.x - b.x;
     const relY = p.y - b.y;
     if (mac) {
-      // Native traffic lights stay hidden until the pointer nears the top-left corner.
+      // Native traffic lights sit in the sidebar's top strip: shown whenever the sidebar is on screen,
+      // and while the sidebar is hidden, when the pointer nears the top-left corner. Checked even when
+      // the window isn't focused, so they never get stuck hidden.
       const near = inside && rel < 120 && relY < 44;
-      if (near !== lightsShown) {
-        lightsShown = near;
-        win.setWindowButtonVisibility(near);
+      const want = !collapsed || peeking || near;
+      if (want !== lightsShown) {
+        lightsShown = want;
+        win.setWindowButtonVisibility(want);
+        perf(`window buttons ${want ? "shown" : "hidden"}`);
       }
     }
+    if (!win.isFocused()) return;
     if (!collapsed) return;
     if (!peeking && inside && rel <= 3) peek(true);
     else if (peeking && !sidebarBusy && Date.now() > peekHoldUntil && (!inside || rel > SIDEBAR_W + 12)) peek(false);
@@ -210,6 +215,13 @@ const adStats = { cosmeticCalls: 0, observerChecks: 0 };
 
 const YT_PAGE = /^https:\/\/(?:www\.|m\.|music\.)?youtube\.com\//;
 
+// Requests from YouTube's service worker aren't tied to a tab, so they're matched by who started them.
+// Blocking one of YouTube's ad requests leaves the player waiting on an ad that never arrives.
+function startedByYouTube(details) {
+  if (YT_PAGE.test(details.referrer || "")) return true;
+  try { return !!details.frame && YT_PAGE.test(details.frame.url || ""); } catch { return false; }
+}
+
 // The user switched the blocker off for this site.
 function userAllowed(wc) {
   try {
@@ -236,62 +248,39 @@ const YT_HIDE_CSS = `
   ytd-rich-item-renderer:has(ytd-ad-slot-renderer, ad-badge-view-model),
   ytd-item-section-renderer:has(> #contents > ytd-ad-slot-renderer),
   yt-lockup-view-model:has(ad-badge-view-model), #shopping-timely-shelf, yt-overlay-product-sticker { display: none !important; }
-  /* While an ad is being skipped, show plain black instead of the ad. */
-  #movie_player.ad-showing video, #movie_player.ad-interrupting video { opacity: 0 !important; }
-  #movie_player.ad-showing::after, #movie_player.ad-interrupting::after {
-    content: "Skipping ad…"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: #000; color: rgba(255, 255, 255, .6); font: 500 14px -apple-system, "Segoe UI", sans-serif;
-    z-index: 2147483647; pointer-events: none;
+  /* While an ad is being skipped, show the video's own thumbnail (set by the page script) so it
+     looks like the video is just loading. */
+  #movie_player.ad-showing:not([data-alcove-stuck]) video, #movie_player.ad-interrupting:not([data-alcove-stuck]) video { opacity: 0 !important; }
+  #movie_player.ad-showing:not([data-alcove-stuck])::after, #movie_player.ad-interrupting:not([data-alcove-stuck])::after {
+    content: ""; position: absolute; inset: 0; z-index: 2147483647; pointer-events: none;
+    background: #000; background-image: var(--alcove-thumb, none); background-size: cover; background-position: center;
   }
 `;
 
-// Mutes the ad, jumps to its end and presses Skip, then restores the user's volume. It reacts the
-// moment the player switches into its ad state (observer) and again once the ad's length is known.
-const YT_SKIP_SCRIPT = `(() => {
-  if (window.__alcoveAdSkip) return;
-  window.__alcoveAdSkip = true;
-  let wasMuted = null;
-  let watched = null;
-  const tick = () => {
-    const p = document.getElementById("movie_player");
-    if (p && p !== watched) {
-      watched = p;
-      new MutationObserver(tick).observe(p, { attributes: true, attributeFilter: ["class"] });
-    }
-    const v = p && p.querySelector("video");
-    if (!v) return;
-    if (!v.__alcoveHooked) {
-      v.__alcoveHooked = true;
-      for (const ev of ["loadedmetadata", "durationchange", "playing"]) v.addEventListener(ev, tick);
-    }
-    if (p.classList.contains("ad-showing") || p.classList.contains("ad-interrupting")) {
-      if (wasMuted === null) wasMuted = v.muted;
-      v.muted = true;
-      try { v.playbackRate = 16; } catch {}
-      if (isFinite(v.duration) && v.duration > 0.5 && v.currentTime < v.duration - 0.3) v.currentTime = v.duration - 0.1;
-      document.querySelectorAll(".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern").forEach(b => b.click());
-    } else if (wasMuted !== null) {
-      v.muted = wasMuted;
-      wasMuted = null;
-      if (v.playbackRate > 2) v.playbackRate = 1;
-    }
-  };
-  setInterval(tick, 100);
-  tick();
-})()`;
+// The ad removal and the backup skipper run inside the page; see yt-preload.js.
+
+// When a YouTube ad state lasts too long, the page reports what the player was doing. Kept small and
+// local (Alcove's data folder) so a stuck case can be diagnosed afterwards.
+ipcMain.on("alcove-yt-diag", (_e, info) => {
+  const entry = { at: new Date().toISOString(), ...info, recentBlocks: recentBlocks.filter(b => Date.now() - b.t < 30000) };
+  const file = path.join(app.getPath("userData"), "yt-diagnostics.log");
+  try {
+    if (fs.existsSync(file) && fs.statSync(file).size > 200000) fs.rmSync(file);
+    fs.appendFileSync(file, JSON.stringify(entry) + "\n");
+  } catch {}
+});
 
 // The web session's early page script asks whether to run YouTube mode on this host.
 ipcMain.on("alcove-yt-mode", (e, host) => {
   const h = String(host).replace(/^www\./, "");
   const off = !config.adblock || config.adblockAllow.some(d => h === d || h.endsWith(`.${d}`));
-  e.returnValue = off ? null : { css: YT_HIDE_CSS, script: YT_SKIP_SCRIPT };
+  e.returnValue = off ? null : { css: YT_HIDE_CSS };
 });
 
-// Fallback for pages where the early script didn't run; both parts are safe to apply twice.
+// Fallback styling for pages where the early script didn't run (safe to apply twice).
 function applyYouTubeMode(wc) {
   if (!config.adblock || userAllowed(wc)) return;
   wc.insertCSS(YT_HIDE_CSS).catch(() => {});
-  wc.executeJavaScript(YT_SKIP_SCRIPT).catch(() => {});
 }
 
 // Replaces the blocker's own handlers so we can (1) skip sites the user turned the blocker off for and
@@ -310,7 +299,7 @@ function installBlockerHooks(ses) {
     return process.env.ALCOVE_DOM_OBSERVER === "1"; // env switch is for measuring only
   });
   ses.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) => {
-    if (details.webContents && siteAllowed(details.webContents)) callback({});
+    if ((details.webContents && siteAllowed(details.webContents)) || startedByYouTube(details)) callback({});
     else blocker.onBeforeRequest(details, callback);
   });
 }
@@ -359,7 +348,11 @@ function ensureSession(profileId) {
 
 const dirtyBlocked = new Set();
 let flushTimer = null;
+const recentBlocks = []; // last few blocked requests, for the YouTube diagnostic log
+
 function onBlocked(request) {
+  recentBlocks.push({ t: Date.now(), url: String(request.url).slice(0, 160), from: String(request.sourceUrl || "").slice(0, 80), type: request.type });
+  if (recentBlocks.length > 40) recentBlocks.shift();
   const id = wcToTab.get(request.tabId);
   if (!id) return;
   blocked.set(id, (blocked.get(id) || 0) + 1);
@@ -1196,7 +1189,10 @@ app.whenReady().then(() => {
       ? { titleBarStyle: "hidden", trafficLightPosition: { x: 16, y: 11 } }
       : { frame: false }),
   });
-  if (process.platform === "darwin") win.setWindowButtonVisibility(false);
+  if (process.platform === "darwin") {
+    lightsShown = !collapsed; // buttons start visible when the sidebar is
+    win.setWindowButtonVisibility(lightsShown);
+  }
   perf("window created");
   createUi();
   win.on("resize", layout);
