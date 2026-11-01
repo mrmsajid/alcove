@@ -67,6 +67,7 @@ let sidebarX = 0;       // x of the sidebar view; negative while hidden
 let contentLeft = SIDEBAR_W; // x where web content starts; animates with the sidebar
 let animTimer = null;
 let lightsShown = false;
+let peekHoldUntil = 0; // keeps the startup peek on screen briefly
 let dragTimer = null;
 
 const send = (name, payload) => {
@@ -113,6 +114,21 @@ function peek(on) {
   sidebarState();
 }
 
+// With the sidebar collapsed, a blank page would leave no visible controls at all, so on launch the
+// sidebar slides in for a moment to show where it lives.
+function introPeek() {
+  if (!collapsed) return;
+  peekHoldUntil = Date.now() + 1600;
+  peek(true);
+  setTimeout(() => {
+    if (!collapsed || !peeking || sidebarBusy || !win || win.isDestroyed()) return;
+    const p = screen.getCursorScreenPoint();
+    const b = win.getContentBounds();
+    const over = p.x >= b.x && p.x < b.x + SIDEBAR_W + 12 && p.y >= b.y && p.y < b.y + b.height;
+    if (!over) peek(false);
+  }, 1700);
+}
+
 function toggleSidebar() {
   collapsed = !collapsed;
   config.collapsed = collapsed;
@@ -147,7 +163,7 @@ function watchCursor() {
     }
     if (!collapsed) return;
     if (!peeking && inside && rel <= 3) peek(true);
-    else if (peeking && !sidebarBusy && (!inside || rel > SIDEBAR_W + 12)) peek(false);
+    else if (peeking && !sidebarBusy && Date.now() > peekHoldUntil && (!inside || rel > SIDEBAR_W + 12)) peek(false);
   }, 50);
 }
 
@@ -925,7 +941,10 @@ function createUi() {
   ui.webContents.on("will-navigate", e => e.preventDefault());
   ui.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.contentView.addChildView(ui);
-  ui.webContents.once("did-finish-load", () => perf("sidebar: did-finish-load"));
+  ui.webContents.once("did-finish-load", () => {
+    perf("sidebar: did-finish-load");
+    introPeek();
+  });
   ui.webContents.once("did-start-loading", () => perf("sidebar: did-start-loading"));
   ui.webContents.once("dom-ready", () => perf("sidebar: dom-ready"));
   ui.webContents.on("console-message", (e, _l, legacy) => {
