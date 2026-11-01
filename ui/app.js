@@ -27,6 +27,9 @@ document.body.classList.add(/Mac/.test(navigator.userAgent) ? "mac" : "win");
 // Newer commands may be missing on other shells (e.g. the Tauri build), so failures are swallowed.
 const call = (cmd, args) => invoke(cmd, args).catch(() => null);
 let adblock = true;
+let adblockAllow = []; // hostnames where the blocker is off
+const hostOf = url => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
+const siteOff = host => adblockAllow.some(d => host === d || host.endsWith("." + d));
 let profiles = { profiles: [], active: "default" };
 const blocked = new Map(); // tab id -> requests blocked on the current page
 
@@ -427,11 +430,10 @@ function renderChrome() {
     $("store-text").title = name;
   }
   const count = (t && blocked.get(t.id)) || 0;
-  $("shield").classList.toggle("off", !adblock);
-  $("shield-count").textContent = adblock && count ? String(count) : "";
-  $("shield").title = adblock
-    ? `Ad blocker on · ${count} blocked on this page (click to turn off)`
-    : "Ad blocker off (click to turn on)";
+  const off = !adblock || (t && siteOff(hostOf(t.url)));
+  $("shield").classList.toggle("off", !!off);
+  $("shield-count").textContent = !off && count ? String(count) : "";
+  $("shield").title = off ? "Ad blocker off here (click for options)" : `Ad blocker on · ${count} blocked on this page`;
   const p = profiles.profiles.find(x => x.id === profiles.active);
   $("profile").textContent = (p ? p.name : "D")[0].toUpperCase();
   $("profile").style.background = p ? p.color : "var(--accent)";
@@ -769,6 +771,13 @@ for (const ev of ["mouseup", "blur"]) window.addEventListener(ev, () => call("dr
 $("toggle-sidebar").addEventListener("click", () => call("toggle_sidebar"));
 $("profile").addEventListener("click", e => { e.stopPropagation(); profileMenu(); });
 // A menu (not a bare toggle) so the blocker can't be switched off by a stray click.
+async function setSiteAllowed(host, allowed) {
+  adblockAllow = (await call("set_adblock_site", { host, allowed })) || adblockAllow;
+  toast(allowed ? `Ad blocker off on ${host}` : `Ad blocker on for ${host}`);
+  renderChrome();
+  navAction("reload");
+}
+
 async function setAdblock(on) {
   adblock = on;
   await call("set_adblock", { enabled: on });
@@ -782,10 +791,14 @@ $("shield").addEventListener("click", e => {
   const t = activeTab();
   const n = (t && blocked.get(t.id)) || 0;
   const rect = $("shield").getBoundingClientRect();
-  showMenu(Math.max(rect.right - 190, 8), rect.bottom + 6, [
-    { label: adblock ? `Ad blocker is on · ${n} blocked here` : "Ad blocker is off", fn: () => {} },
-    adblock ? { label: "Turn off for all sites", fn: () => setAdblock(false) } : { label: "Turn on", fn: () => setAdblock(true) },
-  ]);
+  const host = t ? hostOf(t.url) : "";
+  const here = host && siteOff(host);
+  const items = [{ label: !adblock ? "Ad blocker is off" : here ? `Ad blocker is off on ${host}` : `Ad blocker is on · ${n} blocked here`, fn: () => {} }];
+  if (adblock && host) {
+    items.push({ label: here ? `Turn on for ${host}` : `Turn off for ${host}`, fn: () => setSiteAllowed(host, !here) });
+  }
+  items.push(adblock ? { label: "Turn off for all sites", fn: () => setAdblock(false) } : { label: "Turn on", fn: () => setAdblock(true) });
+  showMenu(Math.max(rect.right - 210, 8), rect.bottom + 6, items);
 });
 
 // While typing, keep a peeking sidebar on screen even if the pointer wanders off.
@@ -836,6 +849,7 @@ document.addEventListener("keydown", e => {
 call("get_settings").then(s => {
   if (!s) return;
   adblock = s.adblock;
+  adblockAllow = s.adblockAllow || [];
   document.body.classList.toggle("collapsed", s.collapsed);
   $("toggle-sidebar").title = s.collapsed ? "Show sidebar" : "Hide sidebar";
   renderChrome();

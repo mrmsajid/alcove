@@ -17,6 +17,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let config = {
   collapsed: false,
   adblock: true,
+  adblockAllow: [], // hostnames where the blocker is off
   activeProfile: "default",
   profiles: [{ id: "default", name: "Default", color: COLORS[0] }],
 };
@@ -178,6 +179,36 @@ const COSMETIC_CHANNELS = [
   "@ghostery/adblocker/is-mutation-observer-enabled",
 ];
 
+const adStats = { cosmeticCalls: 0, observerChecks: 0 };
+
+function siteAllowed(wc) {
+  try {
+    const host = new URL(wc.getURL()).hostname.replace(/^www\./, "");
+    return config.adblockAllow.some(d => host === d || host.endsWith(`.${d}`));
+  } catch { return false; }
+}
+
+// Replaces the blocker's own handlers so we can (1) skip sites the user turned the blocker off for and
+// (2) stop the page's DOM observer from messaging us on every change, which is very costly on busy
+// pages like YouTube. Page-specific rules and scripts still apply.
+function installBlockerHooks(ses) {
+  const [inject, observer] = COSMETIC_CHANNELS;
+  ipcMain.removeHandler(inject);
+  ipcMain.removeHandler(observer);
+  ipcMain.handle(inject, (event, url, msg) => {
+    adStats.cosmeticCalls++;
+    return siteAllowed(event.sender) ? undefined : blocker.onInjectCosmeticFilters(event, url, msg);
+  });
+  ipcMain.handle(observer, () => {
+    adStats.observerChecks++;
+    return process.env.ALCOVE_DOM_OBSERVER === "1"; // env switch is for measuring only
+  });
+  ses.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) => {
+    if (details.webContents && siteAllowed(details.webContents)) callback({});
+    else blocker.onBeforeRequest(details, callback);
+  });
+}
+
 // Only the active profile's web session is filtered. The blocker registers global IPC
 // handlers per session, so it can only be enabled on one session at a time.
 function applyBlocking() {
@@ -191,6 +222,7 @@ function applyBlocking() {
     if (config.adblock && !blocker.isBlockingEnabled(active)) {
       for (const ch of COSMETIC_CHANNELS) ipcMain.removeHandler(ch);
       blocker.enableBlockingInSession(active);
+      installBlockerHooks(active);
     }
   } catch (e) { console.error("ad blocker:", e.message); }
 }
@@ -915,7 +947,15 @@ const commands = {
   drag_start: startDrag,
   drag_end: () => clearInterval(dragTimer),
   sidebar_busy: ({ busy }) => { sidebarBusy = !!busy; },
-  get_settings: () => ({ adblock: config.adblock, collapsed, adblockReady: !!blocker }),
+  get_settings: () => ({ adblock: config.adblock, adblockAllow: config.adblockAllow, collapsed, adblockReady: !!blocker }),
+  set_adblock_site: ({ host, allowed }) => {
+    const h = String(host).replace(/^www\./, "").toLowerCase();
+    config.adblockAllow = config.adblockAllow.filter(d => d !== h);
+    if (allowed) config.adblockAllow.push(h);
+    saveConfig();
+    return config.adblockAllow;
+  },
+  adblock_stats: () => adStats,
   set_adblock: ({ enabled }) => {
     config.adblock = !!enabled;
     saveConfig();
