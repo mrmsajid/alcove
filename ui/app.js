@@ -1,19 +1,26 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
+const $ = id => document.getElementById(id);
 const COLORS = ["#7c8cff", "#ff7c9c", "#5fd6a0", "#ffb86b", "#c27cff"];
 const HOME = "https://duckduckgo.com";
-const KEY = "alcove-state-v1";
+const STATE_KEY = "alcove-state-v1";
+const BM_KEY = "alcove-bookmarks";
+const HIST_KEY = "alcove-history";
+const DL_KEY = "alcove-downloads";
 
-let state = load() || {
+const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+let state = read(STATE_KEY, null) || {
   spaces: [{ id: uid(), name: "Space 1", color: COLORS[0], tabs: [], active: null }],
   space: 0,
 };
 const opened = new Set(); // tab ids with a live webview this session
-
-function uid() { return Math.random().toString(36).slice(2, 10); }
-function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} }
+const closed = [];        // recently closed tabs, for Reopen Closed Tab
+let panel = null;
+let dragId = null;
 
 const space = () => state.spaces[state.space];
 const activeTab = () => space().tabs.find(t => t.id === space().active);
@@ -28,8 +35,19 @@ function normalize(input) {
   return "https://duckduckgo.com/?q=" + encodeURIComponent(v);
 }
 
+let toastTimer;
+function toast(msg) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 1600);
+}
+
+// ---- tabs ----
+
 async function newTab(url = HOME) {
-  const tab = { id: uid(), url, title: "New Tab" };
+  const tab = { id: uid(), url, title: "New Tab", pinned: false };
   space().tabs.push(tab);
   await activate(tab.id);
 }
@@ -41,42 +59,219 @@ async function activate(id) {
   if (tab && !opened.has(tab.id)) {
     await invoke("open_tab", { id: tab.id, url: tab.url });
     opened.add(tab.id);
+    if (tab.zoom && tab.zoom !== 1) invoke("zoom", { id: tab.id, factor: tab.zoom });
   } else {
     await invoke("switch_tab", { id: tab ? tab.id : null });
   }
+  closeFind();
   render();
+}
+
+async function goToTab(id) {
+  const i = state.spaces.findIndex(s => s.tabs.some(t => t.id === id));
+  if (i < 0) return;
+  state.space = i;
+  panel = null;
+  await activate(id);
 }
 
 async function closeTab(id) {
   const s = space();
   const i = s.tabs.findIndex(t => t.id === id);
   if (i < 0) return;
-  s.tabs.splice(i, 1);
+  const t = s.tabs[i];
   if (opened.delete(id)) await invoke("close_tab", { id });
+  if (t.pinned) {
+    t.url = t.pinUrl || t.url; // pinned tabs unload instead of disappearing
+  } else {
+    s.tabs.splice(i, 1);
+    closed.push({ url: t.url, title: t.title });
+  }
   if (s.active === id) {
-    const next = s.tabs[Math.min(i, s.tabs.length - 1)];
+    const rest = s.tabs.filter(x => x.id !== id);
+    const next = rest[Math.min(i, rest.length - 1)];
     await activate(next ? next.id : null);
   } else {
     render();
   }
 }
 
-function render() {
-  save();
-  const s = space();
-  const tabs = document.getElementById("tabs");
-  tabs.replaceChildren(...s.tabs.map(t => {
-    const el = document.createElement("div");
-    el.className = "tab" + (t.id === s.active ? " active" : "");
-    el.innerHTML = '<span class="fav"></span><span class="title"></span><button class="close">×</button>';
-    el.querySelector(".fav").textContent = (t.title || "?")[0].toUpperCase();
-    el.querySelector(".title").textContent = t.title || t.url;
-    el.addEventListener("click", () => activate(t.id));
-    el.querySelector(".close").addEventListener("click", e => { e.stopPropagation(); closeTab(t.id); });
-    return el;
-  }));
+async function reopenClosed() {
+  const t = closed.pop();
+  if (t) await newTab(t.url);
+}
 
-  document.getElementById("spaces").replaceChildren(...state.spaces.map((sp, i) => {
+function togglePin(id) {
+  const t = findTab(id);
+  if (!t) return;
+  t.pinned = !t.pinned;
+  t.pinUrl = t.pinned ? t.url : undefined;
+  render();
+}
+
+function moveTab(id, beforeId, pinned) {
+  if (id === beforeId) return;
+  const tabs = space().tabs;
+  const i = tabs.findIndex(t => t.id === id);
+  if (i < 0) return;
+  const [t] = tabs.splice(i, 1);
+  const j = beforeId ? tabs.findIndex(x => x.id === beforeId) : -1;
+  if (j >= 0) {
+    t.pinned = tabs[j].pinned;
+    tabs.splice(j, 0, t);
+  } else {
+    t.pinned = !!pinned;
+    tabs.push(t);
+  }
+  if (t.pinned && !t.pinUrl) t.pinUrl = t.url;
+  render();
+}
+
+async function openUrl(url, inNewTab = false) {
+  panel = null;
+  renderPanel();
+  const t = activeTab();
+  if (!t || inNewTab) return newTab(url);
+  t.url = url;
+  if (opened.has(t.id)) await invoke("navigate", { id: t.id, url });
+  else await activate(t.id);
+  render();
+}
+
+function navAction(action) {
+  const t = activeTab();
+  if (t && opened.has(t.id)) invoke("nav_action", { id: t.id, action });
+}
+
+// ---- history / bookmarks ----
+
+function recordHistory(tab) {
+  if (!/^https?:/.test(tab.url)) return;
+  const h = read(HIST_KEY, []);
+  if (h[0] && h[0].url === tab.url) h[0].ts = Date.now();
+  else h.unshift({ url: tab.url, title: tab.title || tab.url, ts: Date.now() });
+  write(HIST_KEY, h.slice(0, 3000));
+}
+
+const isBookmarked = url => read(BM_KEY, []).some(b => b.url === url);
+
+function toggleBookmark() {
+  const t = activeTab();
+  if (!t) return;
+  let b = read(BM_KEY, []);
+  if (b.some(x => x.url === t.url)) {
+    b = b.filter(x => x.url !== t.url);
+    toast("Bookmark removed");
+  } else {
+    b.unshift({ url: t.url, title: t.title || t.url });
+    toast("Bookmarked");
+  }
+  write(BM_KEY, b);
+  render();
+  if (panel === "bookmarks") renderPanel();
+}
+
+// ---- find / zoom ----
+
+function openFind() {
+  if (!activeTab()) return;
+  $("findbar").hidden = false;
+  invoke("focus_ui").then(() => { $("find-input").focus(); $("find-input").select(); });
+}
+
+function closeFind() {
+  if ($("findbar").hidden) return;
+  $("findbar").hidden = true;
+  const t = activeTab();
+  if (t && opened.has(t.id)) invoke("clear_find", { id: t.id });
+}
+
+function doFind(backwards) {
+  const t = activeTab();
+  const text = $("find-input").value;
+  if (t && opened.has(t.id) && text) invoke("find", { id: t.id, text, backwards });
+}
+
+async function setZoom(delta) {
+  const t = activeTab();
+  if (!t || !opened.has(t.id)) return;
+  t.zoom = delta === 0 ? 1 : Math.min(3, Math.max(0.5, Math.round(((t.zoom || 1) + delta) * 10) / 10));
+  await invoke("zoom", { id: t.id, factor: t.zoom });
+  write(STATE_KEY, state);
+  toast(`Zoom ${Math.round(t.zoom * 100)}%`);
+}
+
+// ---- rendering ----
+
+function favNode(t) {
+  const span = document.createElement("span");
+  span.className = "fav";
+  span.textContent = (t.title || t.url || "?")[0].toUpperCase();
+  try {
+    const u = new URL(t.url);
+    if (/^https?:$/.test(u.protocol)) {
+      const img = new Image();
+      img.onload = () => span.replaceChildren(img);
+      img.src = u.origin + "/favicon.ico";
+    }
+  } catch {}
+  return span;
+}
+
+function tabEl(t) {
+  const el = document.createElement("div");
+  el.className = "tab" + (t.pinned ? " pin" : "") + (t.id === space().active ? " active" : "")
+    + (opened.has(t.id) ? "" : " unloaded");
+  el.draggable = true;
+  el.title = t.title || t.url;
+  const title = document.createElement("span");
+  title.className = "title";
+  title.textContent = t.title || t.url;
+  const close = document.createElement("button");
+  close.className = "close";
+  close.textContent = "×";
+  el.append(favNode(t), title, close);
+
+  el.addEventListener("click", () => activate(t.id));
+  el.addEventListener("auxclick", e => { if (e.button === 1) closeTab(t.id); });
+  close.addEventListener("click", e => { e.stopPropagation(); closeTab(t.id); });
+  el.addEventListener("contextmenu", e => {
+    e.preventDefault();
+    showMenu(e.clientX, e.clientY, [
+      { label: t.pinned ? "Unpin tab" : "Pin tab", fn: () => togglePin(t.id) },
+      { label: "Duplicate", fn: () => newTab(t.url) },
+      { label: "Copy link", fn: () => navigator.clipboard.writeText(t.url).then(() => toast("Link copied")) },
+      { label: t.pinned ? "Unload tab" : "Close tab", fn: () => closeTab(t.id) },
+    ]);
+  });
+  el.addEventListener("dragstart", e => {
+    dragId = t.id;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", t.id);
+    el.classList.add("dragging");
+  });
+  el.addEventListener("dragend", () => { dragId = null; render(); });
+  el.addEventListener("dragover", e => {
+    if (!dragId) return;
+    e.preventDefault();
+    el.classList.add("drop-before");
+  });
+  el.addEventListener("dragleave", () => el.classList.remove("drop-before"));
+  el.addEventListener("drop", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dragId) moveTab(dragId, t.id);
+  });
+  return el;
+}
+
+function render() {
+  write(STATE_KEY, state);
+  const s = space();
+  $("pinned").replaceChildren(...s.tabs.filter(t => t.pinned).map(tabEl));
+  $("tabs").replaceChildren(...s.tabs.filter(t => !t.pinned).map(tabEl));
+
+  $("spaces").replaceChildren(...state.spaces.map((sp, i) => {
     const d = document.createElement("div");
     d.className = "space-dot" + (i === state.space ? " active" : "");
     d.style.background = sp.color;
@@ -85,57 +280,225 @@ function render() {
     return d;
   }));
 
-  const addr = document.getElementById("addr");
-  if (document.activeElement !== addr) addr.value = activeTab() ? activeTab().url : "";
+  const t = activeTab();
+  const addr = $("addr");
+  if (document.activeElement !== addr) addr.value = t ? t.url : "";
+  const on = !!t && isBookmarked(t.url);
+  $("star").textContent = on ? "★" : "☆";
+  $("star").classList.toggle("on", on);
 }
 
 async function switchSpace(i) {
   state.space = i;
+  panel = null;
+  renderPanel();
   await activate(space().active);
 }
 
-document.getElementById("addr-form").addEventListener("submit", async e => {
-  e.preventDefault();
-  const url = normalize(document.getElementById("addr").value);
-  if (!url) return;
-  document.getElementById("addr").blur();
-  const tab = activeTab();
-  if (!tab) return newTab(url);
-  tab.url = url;
-  if (opened.has(tab.id)) await invoke("navigate", { id: tab.id, url });
-  else await activate(tab.id);
-});
-
-document.getElementById("new-tab").addEventListener("click", () => newTab());
-document.getElementById("new-space").addEventListener("click", async () => {
+function newSpace() {
   const n = state.spaces.length;
   state.spaces.push({ id: uid(), name: "Space " + (n + 1), color: COLORS[n % COLORS.length], tabs: [], active: null });
-  await switchSpace(n);
-});
-for (const action of ["back", "forward", "reload"]) {
-  document.getElementById(action).addEventListener("click", () => {
-    const tab = activeTab();
-    if (tab && opened.has(tab.id)) invoke("nav_action", { id: tab.id, action });
-  });
+  return switchSpace(n);
 }
 
-document.addEventListener("keydown", e => {
-  if (!e.ctrlKey && !e.metaKey) return;
-  if (e.key === "l") { e.preventDefault(); const a = document.getElementById("addr"); a.focus(); a.select(); }
-  else if (e.key === "t") { e.preventDefault(); newTab(); }
-  else if (e.key === "w") { e.preventDefault(); const t = activeTab(); if (t) closeTab(t.id); }
+// ---- panels (bookmarks / history / downloads) ----
+
+function row(title, sub, onClick, actions = []) {
+  const el = document.createElement("div");
+  el.className = "row";
+  const main = document.createElement("div");
+  main.className = "main";
+  const t = document.createElement("div");
+  t.className = "t";
+  t.textContent = title;
+  const u = document.createElement("div");
+  u.className = "u";
+  u.textContent = sub;
+  main.append(t, u);
+  el.append(main);
+  el.addEventListener("click", onClick);
+  for (const a of actions) {
+    const b = document.createElement("button");
+    b.textContent = a.label;
+    b.title = a.title || "";
+    b.addEventListener("click", e => { e.stopPropagation(); a.fn(); });
+    el.append(b);
+  }
+  return el;
+}
+
+function openPanel(name) {
+  panel = panel === name ? null : name;
+  $("panel-search").value = "";
+  renderPanel();
+}
+
+function renderPanel() {
+  document.body.classList.toggle("panel-open", !!panel);
+  $("panel").hidden = !panel;
+  if (!panel) return;
+  $("panel-title").textContent = { bookmarks: "Bookmarks", history: "History", downloads: "Downloads" }[panel];
+  $("panel-search").hidden = panel === "downloads";
+  $("panel-clear").hidden = panel === "bookmarks";
+  const q = $("panel-search").value.trim().toLowerCase();
+  const match = x => !q || (x.title || "").toLowerCase().includes(q) || x.url.toLowerCase().includes(q);
+  let rows = [];
+
+  if (panel === "bookmarks") {
+    rows = read(BM_KEY, []).filter(match).map(b => row(b.title, b.url, () => openUrl(b.url), [
+      { label: "×", title: "Remove", fn: () => {
+        write(BM_KEY, read(BM_KEY, []).filter(x => x.url !== b.url));
+        renderPanel();
+        render();
+      } },
+    ]));
+  } else if (panel === "history") {
+    rows = read(HIST_KEY, []).filter(match).slice(0, 200).map(h =>
+      row(h.title || h.url, h.url, () => openUrl(h.url)));
+  } else {
+    rows = read(DL_KEY, []).map(d => row(
+      d.path.split(/[\\/]/).pop(),
+      d.state === "done" ? "Done · click to show in folder" : d.state === "failed" ? "Failed" : "Downloading…",
+      () => invoke("reveal", { path: d.path }),
+    ));
+  }
+  $("panel-body").replaceChildren(...(rows.length ? rows : [Object.assign(document.createElement("div"),
+    { className: "empty", textContent: "Nothing here yet" })]));
+}
+
+// ---- context menu ----
+
+function showMenu(x, y, items) {
+  const m = $("menu");
+  m.replaceChildren(...items.map(i => {
+    const d = document.createElement("div");
+    d.textContent = i.label;
+    d.addEventListener("click", () => { hideMenu(); i.fn(); });
+    return d;
+  }));
+  m.hidden = false;
+  m.style.left = Math.min(x, window.innerWidth - m.offsetWidth - 4) + "px";
+  m.style.top = Math.min(y, window.innerHeight - m.offsetHeight - 4) + "px";
+}
+const hideMenu = () => { $("menu").hidden = true; };
+
+// ---- shortcuts (native menu accelerators and palette commands) ----
+
+const focusAddr = () => invoke("focus_ui").then(() => { $("addr").focus(); $("addr").select(); });
+
+const actions = {
+  "new-tab": () => newTab(),
+  "reopen-tab": reopenClosed,
+  "close-tab": () => { const t = activeTab(); if (t) closeTab(t.id); },
+  "palette": () => invoke("show_palette"),
+  "focus-address": focusAddr,
+  "bookmark": toggleBookmark,
+  "find": openFind,
+  "reload": () => navAction("reload"),
+  "back": () => navAction("back"),
+  "forward": () => navAction("forward"),
+  "zoom-in": () => setZoom(0.1),
+  "zoom-out": () => setZoom(-0.1),
+  "zoom-reset": () => setZoom(0),
+  "bookmarks": () => openPanel("bookmarks"),
+  "history": () => openPanel("history"),
+  "downloads": () => openPanel("downloads"),
+  "new-space": newSpace,
+  "pin-tab": () => { const t = activeTab(); if (t) togglePin(t.id); },
+};
+
+listen("shortcut", e => actions[e.payload]?.());
+
+listen("palette-action", ({ payload: p }) => {
+  if (p.type === "tab") goToTab(p.id);
+  else if (p.type === "url") openUrl(p.url, !!p.newTab);
+  else if (p.type === "cmd") actions[p.id]?.();
 });
+
+listen("new-tab-request", ({ payload }) => newTab(payload.url));
 
 listen("tab-url", ({ payload }) => {
   const t = findTab(payload.id);
-  if (t) { t.url = payload.url; render(); }
+  if (!t) return;
+  t.url = payload.url;
+  recordHistory(t);
+  render();
 });
+
 listen("tab-title", ({ payload }) => {
   const t = findTab(payload.id);
-  if (t) { t.title = payload.title; render(); }
+  if (!t) return;
+  t.title = payload.title;
+  const h = read(HIST_KEY, []);
+  const e = h.find(x => x.url === t.url);
+  if (e && e.title !== t.title) { e.title = t.title; write(HIST_KEY, h); }
+  render();
+});
+
+listen("download", ({ payload: p }) => {
+  const d = read(DL_KEY, []);
+  if (p.state === "started") {
+    d.unshift({ url: p.url, path: p.path, state: "downloading", ts: Date.now() });
+    toast("Download started");
+  } else {
+    const e = d.find(x => x.url === p.url && x.state === "downloading");
+    if (e) { e.state = p.state; if (p.path) e.path = p.path; }
+    toast(p.state === "done" ? "Download finished" : "Download failed");
+  }
+  write(DL_KEY, d.slice(0, 200));
+  if (panel === "downloads") renderPanel();
+});
+
+// ---- wiring ----
+
+$("addr-form").addEventListener("submit", e => {
+  e.preventDefault();
+  const url = normalize($("addr").value);
+  if (!url) return;
+  $("addr").blur();
+  openUrl(url);
+});
+$("addr").addEventListener("focus", () => $("addr").select());
+
+$("new-tab").addEventListener("click", () => newTab());
+$("new-space").addEventListener("click", newSpace);
+for (const a of ["back", "forward", "reload"]) $(a).addEventListener("click", () => navAction(a));
+$("star").addEventListener("click", toggleBookmark);
+$("open-bookmarks").addEventListener("click", () => openPanel("bookmarks"));
+$("open-history").addEventListener("click", () => openPanel("history"));
+$("open-downloads").addEventListener("click", () => openPanel("downloads"));
+$("panel-close").addEventListener("click", () => { panel = null; renderPanel(); });
+$("panel-search").addEventListener("input", renderPanel);
+$("panel-clear").addEventListener("click", () => {
+  write(panel === "history" ? HIST_KEY : DL_KEY, []);
+  renderPanel();
+});
+
+$("find-input").addEventListener("input", () => doFind(false));
+$("find-input").addEventListener("keydown", e => {
+  if (e.key === "Enter") doFind(e.shiftKey);
+  if (e.key === "Escape") closeFind();
+});
+$("find-next").addEventListener("click", () => doFind(false));
+$("find-prev").addEventListener("click", () => doFind(true));
+$("find-close").addEventListener("click", closeFind);
+
+// Dropping on empty list space moves the tab to the end of that group.
+for (const [id, pinned] of [["pinned", true], ["tabs", false]]) {
+  $(id).addEventListener("dragover", e => { if (dragId) e.preventDefault(); });
+  $(id).addEventListener("drop", e => { e.preventDefault(); if (dragId) moveTab(dragId, null, pinned); });
+}
+
+document.addEventListener("click", hideMenu);
+window.addEventListener("blur", hideMenu);
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  hideMenu();
+  if (panel) { panel = null; renderPanel(); }
 });
 
 // Restore: reopen the active tab of the current space; other tabs open lazily.
+renderPanel();
 activate(space().active && activeTab() ? space().active : null).then(() => {
   if (!space().tabs.length) newTab();
 });

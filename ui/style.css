@@ -7,6 +7,7 @@
   --accent: #7c8cff;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body {
   margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 13px system-ui, "Segoe UI", sans-serif; user-select: none;
@@ -17,30 +18,64 @@ button {
   cursor: pointer; font: inherit; padding: 6px 10px;
 }
 button:hover { background: var(--hover); }
-.toolbar { display: flex; gap: 2px; }
-.toolbar button { font-size: 18px; line-height: 1; padding: 4px 10px; }
-#addr {
+input {
   width: 100%; background: var(--panel); color: var(--text); border: 1px solid transparent;
-  border-radius: 10px; padding: 9px 12px; font: inherit; outline: none;
+  border-radius: 10px; padding: 9px 12px; font: inherit; outline: none; user-select: text;
 }
-#addr:focus { border-color: var(--accent); }
+input:focus { border-color: var(--accent); }
+.spacer { flex: 1; }
+.toolbar { display: flex; gap: 2px; align-items: center; }
+.toolbar button { font-size: 16px; line-height: 1; padding: 5px 8px; }
+#back, #forward, #reload { font-size: 18px; }
+#star.on { color: #ffd166; }
+.findbar { display: flex; gap: 2px; align-items: center; }
+.findbar input { padding: 6px 10px; }
 .new-tab { text-align: left; color: var(--muted); }
-.tabs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.tabs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; min-height: 40px; }
+.pinned { display: flex; flex-wrap: wrap; gap: 6px; }
+.pinned:empty { display: none; }
 .tab {
   display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; cursor: pointer;
+  border-top: 2px solid transparent;
 }
 .tab:hover { background: var(--hover); }
 .tab.active { background: var(--panel); }
-.tab .fav {
+.tab.drop-before { border-top-color: var(--accent); }
+.tab.dragging { opacity: .4; }
+.tab.pin { padding: 10px; background: var(--panel); width: 56px; height: 40px; justify-content: center; }
+.tab.pin.active { outline: 2px solid var(--accent); }
+.tab.pin .title, .tab.pin .close { display: none; }
+.tab.unloaded { opacity: .6; }
+.fav {
   width: 16px; height: 16px; border-radius: 4px; background: var(--accent); color: #111;
-  font-size: 10px; font-weight: 700; display: grid; place-items: center; flex: none;
+  font-size: 10px; font-weight: 700; display: grid; place-items: center; flex: none; overflow: hidden;
 }
+.fav img { width: 16px; height: 16px; object-fit: contain; background: #fff; }
 .tab .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab .close { padding: 0 6px; color: var(--muted); visibility: hidden; }
 .tab:hover .close { visibility: visible; }
+.panel { flex: 1; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.panel-head { display: flex; align-items: center; gap: 4px; }
+.panel-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+.row:hover { background: var(--hover); }
+.row .main { flex: 1; min-width: 0; }
+.row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .u { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+.row button { padding: 2px 6px; color: var(--muted); }
+.empty { color: var(--muted); padding: 12px 8px; }
+body.panel-open #tabs, body.panel-open #pinned, body.panel-open #new-tab { display: none; }
 .spaces { display: flex; align-items: center; justify-content: space-between; }
 .space-dots { display: flex; gap: 6px; }
-.space-dot {
-  width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; cursor: pointer;
-}
+.space-dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
 .space-dot.active { border-color: var(--text); }
+.ctx {
+  position: fixed; z-index: 10; background: var(--panel); border: 1px solid var(--hover);
+  border-radius: 10px; padding: 4px; min-width: 150px; box-shadow: 0 8px 24px #0008;
+}
+.ctx div { padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+.ctx div:hover { background: var(--hover); }
+.toast {
+  position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); background: var(--panel);
+  border: 1px solid var(--hover); border-radius: 8px; padding: 6px 12px; z-index: 11;
+}

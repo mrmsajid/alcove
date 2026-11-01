@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Command Palette</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    html, body { padding: 8px; gap: 8px; background: var(--panel); border: 1px solid var(--hover); }
+    #q { background: var(--bg); font-size: 15px; }
+    #list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+    .row.sel { background: var(--hover); }
+    .kind { color: var(--muted); font-size: 11px; flex: none; }
+  </style>
+</head>
+<body>
+  <input id="q" type="text" spellcheck="false" autocomplete="off" autofocus
+         placeholder="Search tabs, bookmarks, history — or type a URL">
+  <div id="list"></div>
+  <script src="palette.js"></script>
+</body>
+</html>

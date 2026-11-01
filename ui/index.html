@@ -11,17 +11,41 @@
     <button id="back" title="Back">‹</button>
     <button id="forward" title="Forward">›</button>
     <button id="reload" title="Reload">⟳</button>
+    <span class="spacer"></span>
+    <button id="star" title="Bookmark this page">☆</button>
+    <button id="open-bookmarks" title="Bookmarks">🔖</button>
+    <button id="open-history" title="History">🕘</button>
+    <button id="open-downloads" title="Downloads">⬇</button>
   </div>
   <form id="addr-form">
     <input id="addr" type="text" spellcheck="false" autocomplete="off"
-           placeholder="Search or enter address (Ctrl+L)">
+           placeholder="Search or enter address">
   </form>
+  <div id="findbar" class="findbar" hidden>
+    <input id="find-input" type="text" spellcheck="false" placeholder="Find in page">
+    <button id="find-prev" title="Previous">↑</button>
+    <button id="find-next" title="Next">↓</button>
+    <button id="find-close" title="Close">×</button>
+  </div>
+  <div id="pinned" class="pinned"></div>
   <button id="new-tab" class="new-tab">+ New Tab</button>
   <div id="tabs" class="tabs"></div>
+  <div id="panel" class="panel" hidden>
+    <div class="panel-head">
+      <strong id="panel-title"></strong>
+      <span class="spacer"></span>
+      <button id="panel-clear" hidden>Clear</button>
+      <button id="panel-close" title="Close">×</button>
+    </div>
+    <input id="panel-search" type="text" spellcheck="false" placeholder="Search" hidden>
+    <div id="panel-body" class="panel-body"></div>
+  </div>
   <div class="spaces">
     <div id="spaces" class="space-dots"></div>
     <button id="new-space" title="New space">+</button>
   </div>
+  <div id="menu" class="ctx" hidden></div>
+  <div id="toast" class="toast" hidden></div>
   <script src="app.js"></script>
 </body>
 </html>
