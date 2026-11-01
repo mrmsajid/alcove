@@ -266,6 +266,11 @@ function openTab(id, url) {
       send("tab-blocked", { id, count: 0 });
     }
   });
+  wc.on("dom-ready", () => { if (STORE_URL.test(wc.getURL())) injectStoreFixes(wc); });
+  wc.on("console-message", (e, _level, legacyMessage) => {
+    const message = typeof e.message === "string" ? e.message : legacyMessage;
+    if (message === STORE_MARK && STORE_URL.test(wc.getURL())) send("store-install", { id, url: wc.getURL() });
+  });
   wc.on("did-navigate", (_e, u) => send("tab-url", { id, url: u }));
   wc.on("did-navigate-in-page", (_e, u, isMainFrame) => { if (isMainFrame) send("tab-url", { id, url: u }); });
   wc.on("page-title-updated", (_e, title) => send("tab-title", { id, title }));
@@ -437,6 +442,69 @@ async function finishRegion(rect) {
 }
 
 // ---- extensions ----
+
+// The Web Store refuses non-Chrome browsers ("Switch to Chrome", disabled button). On store pages we
+// relabel the button to "Add to Alcove", enable it, hide the banner, and report clicks to the sidebar.
+const STORE_URL = /^https:\/\/(?:chromewebstore\.google\.com|chrome\.google\.com\/webstore)\//;
+const STORE_MARK = "__alcove_install__";
+
+const storeScript = installed => `(() => {
+  const MARK = ${JSON.stringify(STORE_MARK)};
+  window.__alcoveInstalled = window.__alcoveInstalled || new Set(${JSON.stringify(installed)});
+  if (window.__alcoveApply) { window.__alcoveApply(); return; }
+  const extId = () => (location.href.match(/[a-p]{32}/) || [])[0];
+  const isDone = () => window.__alcoveInstalled.has(extId());
+  const label = () => (isDone() ? "Added to Alcove ✓" : "Add to Alcove");
+  const deep = function* (root) {
+    for (const el of root.querySelectorAll("*")) {
+      yield el;
+      if (el.shadowRoot) yield* deep(el.shadowRoot);
+    }
+  };
+  const up = el => el.parentElement || (el.getRootNode() instanceof ShadowRoot ? el.getRootNode().host : null);
+  const button = el => {
+    for (let n = el; n; n = up(n)) if (n.tagName === "BUTTON" || n.getAttribute?.("role") === "button") return n;
+    return el;
+  };
+  const apply = () => {
+    for (const el of deep(document)) {
+      if (el.children.length) continue;
+      const t = (el.textContent || "").trim();
+      if (/^(add to chrome|add to alcove|added to alcove ✓)$/i.test(t)) {
+        if (el.textContent !== label()) el.textContent = label();
+        const b = button(el);
+        b.removeAttribute("disabled");
+        b.removeAttribute("aria-disabled");
+        b.disabled = false;
+        const bg = isDone() ? "#5f6368" : "#1a73e8";
+        for (const [k, v] of [["background", bg], ["color", "#fff"], ["cursor", "pointer"], ["pointer-events", "auto"], ["opacity", "1"]]) {
+          b.style.setProperty(k, v, "important");
+        }
+        if (!b.__alcove) {
+          b.__alcove = true;
+          b.addEventListener("click", ev => {
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+            if (!isDone()) console.log(MARK);
+          }, true);
+        }
+      } else if (/^switch to chrome to install/i.test(t)) {
+        let n = el;
+        while (up(n) && (up(n).textContent || "").trim().length < 90) n = up(n);
+        n.style.setProperty("display", "none", "important");
+      }
+    }
+  };
+  window.__alcoveApply = apply;
+  apply();
+  setInterval(apply, 700); // the store is a single-page app and re-renders inside shadow roots
+})()`;
+
+function injectStoreFixes(wc) {
+  let installed = [];
+  try { installed = fs.readdirSync(extRoot(config.activeProfile)); } catch {}
+  wc.executeJavaScript(storeScript(installed)).catch(() => {});
+}
 
 const activeWebSession = () => session.fromPartition(webPartition(config.activeProfile));
 const extRoot = profileId => path.join(app.getPath("userData"), "extensions", profileId);
@@ -704,6 +772,9 @@ const commands = {
   install_unpacked_extension: () => installUnpacked(),
   remove_extension: ({ id }) => removeExtension(id),
   extension_popup: ({ id }) => openExtPopup(id),
+  store_button: ({ id, folder }) => wcOf(id)?.executeJavaScript(
+    `window.__alcoveInstalled && window.__alcoveInstalled.add(${JSON.stringify(folder)}); window.__alcoveApply && window.__alcoveApply();`,
+  ).catch(() => {}),
 
   toggle_sidebar: toggleSidebar,
   window_action: ({ action }) => windowAction(action),

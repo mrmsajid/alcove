@@ -474,10 +474,11 @@ async function renderExtensions() {
     { className: "empty", textContent: "No extensions yet. Paste a Chrome Web Store link above, or load an unpacked folder." })]));
 }
 
-async function installExtension(input) {
+async function installExtension(input, tabId) {
   toast("Installing extension…", 8000);
   try {
     const x = await invoke("install_extension", { input });
+    if (tabId) call("store_button", { id: tabId, folder: x.folder }); // flips the store page's button to "Added"
     $("panel-search").value = "";
     toast(`Added ${x.name}`, 3000);
     refreshExtensions();
@@ -695,7 +696,8 @@ $("open-bookmarks").addEventListener("click", () => openPanel("bookmarks"));
 $("open-history").addEventListener("click", () => openPanel("history"));
 $("open-downloads").addEventListener("click", () => openPanel("downloads"));
 $("open-extensions").addEventListener("click", () => openPanel("extensions"));
-$("store-add").addEventListener("click", () => { const t = activeTab(); if (t) installExtension(t.url); });
+$("store-add").addEventListener("click", () => { const t = activeTab(); if (t) installExtension(t.url, t.id); });
+listen("store-install", ({ payload }) => installExtension(payload.url, payload.id));
 $("panel-close").addEventListener("click", () => { panel = null; renderPanel(); });
 $("panel-search").addEventListener("input", () => { if (panel !== "extensions") renderPanel(); });
 $("panel-search").addEventListener("keydown", e => {
