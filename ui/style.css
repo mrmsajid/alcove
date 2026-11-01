@@ -202,3 +202,6 @@ body { transition: border-color .2s ease; }
   background: var(--accent); color: #fff; font-weight: 600; padding: 9px 12px; border-radius: var(--radius);
 }
 .browse-btn:hover { background: var(--accent); filter: brightness(1.08); }
+
+.banner button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.banner button.ghost:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); filter: none; }

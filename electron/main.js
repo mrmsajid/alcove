@@ -2,6 +2,7 @@ const {
   app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net, nativeImage,
 } = require("electron");
 const AdmZip = require("adm-zip");
+const { spawn, execFileSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
@@ -441,6 +442,101 @@ async function finishRegion(rect) {
   await showShotPopup(png);
 }
 
+// ---- video downloads (yt-dlp) ----
+
+// Alcove drives the open-source yt-dlp program; it does not implement any extraction itself.
+const YT_HOST = /^(?:www\.|m\.|music\.)?youtube\.com$|^youtu\.be$/;
+const binDir = () => path.join(app.getPath("userData"), "bin");
+const exeName = n => (process.platform === "win32" ? `${n}.exe` : n);
+const downloadDir = () => process.env.ALCOVE_DOWNLOAD_DIR || app.getPath("downloads"); // env override is for tests
+
+function findBinary(name, envVar) {
+  if (envVar && process.env[envVar] && fs.existsSync(process.env[envVar])) return process.env[envVar];
+  const own = path.join(binDir(), exeName(name));
+  if (fs.existsSync(own)) return own;
+  // GUI apps on macOS get a minimal PATH, so add the usual package-manager folders.
+  const extra = ["/opt/homebrew/bin", "/usr/local/bin"].join(path.delimiter);
+  try {
+    const out = execFileSync(process.platform === "win32" ? "where" : "which", [name], {
+      env: { ...process.env, PATH: `${process.env.PATH || ""}${path.delimiter}${extra}` },
+      encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.split(/\r?\n/)[0] || null;
+  } catch { return null; }
+}
+
+const videoTools = () => ({ ytdlp: findBinary("yt-dlp", "ALCOVE_YTDLP"), ffmpeg: findBinary("ffmpeg", "ALCOVE_FFMPEG") });
+
+// One-time download of the official yt-dlp release into Alcove's own data folder.
+async function installDownloader() {
+  const asset = { darwin: "yt-dlp_macos", win32: "yt-dlp.exe" }[process.platform] || "yt-dlp";
+  const res = await net.fetch(`https://github.com/yt-dlp/yt-dlp/releases/latest/download/${asset}`, { redirect: "follow" });
+  if (!res.ok) throw new Error(`download failed (${res.status})`);
+  fs.mkdirSync(binDir(), { recursive: true });
+  const dest = path.join(binDir(), exeName("yt-dlp"));
+  fs.writeFileSync(dest, Buffer.from(await res.arrayBuffer()), { mode: 0o755 });
+  return true;
+}
+
+const jobs = new Map(); // job id -> child process
+let jobSeq = 0;
+
+function startVideoDownload(url, kind) {
+  let host;
+  try { host = new URL(url).hostname; } catch { throw new Error("not a valid link"); }
+  if (!YT_HOST.test(host)) throw new Error("this downloader only handles YouTube links");
+  const { ytdlp, ffmpeg } = videoTools();
+  if (!ytdlp) throw new Error("downloader not set up");
+
+  // Without ffmpeg only single-file formats are possible (video tops out around 720p).
+  const audio = kind === "audio";
+  const format = audio ? (ffmpeg ? "ba/b" : "ba[ext=m4a]/ba") : (ffmpeg ? "bv*+ba/b" : "b[ext=mp4]/b");
+  const args = [
+    "--no-playlist", "--newline", "--no-warnings", "--no-simulate", "--print", "after_move:filepath",
+    "-f", format, "-o", path.join(downloadDir(), "%(title).120B [%(id)s].%(ext)s"),
+  ];
+  if (ffmpeg) args.push("--ffmpeg-location", path.dirname(ffmpeg));
+  if (ffmpeg && audio) args.push("-x", "--audio-format", "mp3");
+  if (ffmpeg && !audio) args.push("--merge-output-format", "mp4");
+  args.push("--", url);
+
+  const id = ++jobSeq;
+  const child = spawn(ytdlp, args, { stdio: ["ignore", "pipe", "pipe"] });
+  jobs.set(id, child);
+  let filePath = null;
+  let lastErr = "";
+  let buf = "";
+  const onLine = line => {
+    const m = line.match(/^\[download\]\s+([\d.]+)%/);
+    if (m) send("video-download", { job: id, state: "progress", percent: Math.min(100, parseFloat(m[1])) });
+    else if (line && !line.startsWith("[") && path.isAbsolute(line.trim())) filePath = line.trim();
+  };
+  child.stdout.on("data", d => {
+    buf += d.toString();
+    const lines = buf.split(/\r?\n/);
+    buf = lines.pop();
+    lines.forEach(onLine);
+  });
+  child.stderr.on("data", d => { lastErr = d.toString().trim().split(/\r?\n/).pop() || lastErr; });
+  child.on("error", e => { jobs.delete(id); send("video-download", { job: id, state: "error", message: e.message }); });
+  child.on("close", code => {
+    if (buf) onLine(buf);
+    const cancelled = !jobs.has(id);
+    jobs.delete(id);
+    if (cancelled) send("video-download", { job: id, state: "cancelled" });
+    else if (code === 0 && filePath) send("video-download", { job: id, state: "done", path: filePath });
+    else send("video-download", { job: id, state: "error", message: lastErr || `downloader exited with code ${code}` });
+  });
+  return { job: id, ffmpeg: !!ffmpeg };
+}
+
+function cancelVideoDownload(job) {
+  const child = jobs.get(job);
+  if (!child) return;
+  jobs.delete(job); // marks it as cancelled for the close handler
+  child.kill();
+}
+
 // ---- extensions ----
 
 // The Web Store refuses non-Chrome browsers ("Switch to Chrome", disabled button). On store pages we
@@ -772,6 +868,11 @@ const commands = {
   install_unpacked_extension: () => installUnpacked(),
   remove_extension: ({ id }) => removeExtension(id),
   extension_popup: ({ id }) => openExtPopup(id),
+
+  video_tools: () => { const t = videoTools(); return { ready: !!t.ytdlp, ffmpeg: !!t.ffmpeg }; },
+  install_downloader: () => installDownloader(),
+  download_video: ({ url, kind }) => startVideoDownload(String(url), kind),
+  cancel_video: ({ job }) => cancelVideoDownload(job),
   store_button: ({ id, folder }) => wcOf(id)?.executeJavaScript(
     `window.__alcoveInstalled && window.__alcoveInstalled.add(${JSON.stringify(folder)}); window.__alcoveApply && window.__alcoveApply();`,
   ).catch(() => {}),
@@ -823,6 +924,7 @@ function buildMenu() {
       item("palette", "Command Palette", "CmdOrCtrl+K"),
       item("focus-address", "Open Location", "CmdOrCtrl+L"),
       item("bookmark", "Bookmark This Page", "CmdOrCtrl+D"),
+      item("download-video", "Download YouTube Video", "CmdOrCtrl+Shift+D"),
       item("screenshot-region", "Screenshot Selected Area", "CmdOrCtrl+Shift+4"),
       item("screenshot", "Screenshot Visible Area", "CmdOrCtrl+Shift+S"),
       item("screenshot-full", "Screenshot Full Page", "CmdOrCtrl+Alt+Shift+S"),

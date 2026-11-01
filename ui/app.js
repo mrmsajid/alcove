@@ -213,6 +213,69 @@ function screenshotMenu() {
   ]);
 }
 
+// ---- YouTube downloads (powered by yt-dlp) ----
+
+const errText = e => String(e.message || e).replace(/^Error invoking remote method 'invoke': Error: /, "");
+
+async function setUpDownloader() {
+  toast("Downloading the video downloader (yt-dlp, about 35 MB)…", 60000);
+  try {
+    await invoke("install_downloader");
+    toast("Downloader ready. Click Video or Audio.", 4000);
+  } catch (e) {
+    toast(`Setup failed: ${errText(e)}`, 6000);
+  }
+  refreshVideoTools();
+}
+
+async function downloadVideo(kind) {
+  const t = activeTab();
+  if (!t || !YT_RE.test(t.url)) return toast("Open a YouTube video first");
+  if (!videoTools.ready) return setUpDownloader();
+  if (!read("alcove-yt-consent", false)) {
+    const ok = confirm("Only download videos you own or have permission to save.\n\n"
+      + "Downloading may go against YouTube's Terms of Service and copyright law, and you are responsible for what you save.\n\nContinue?");
+    if (!ok) return;
+    write("alcove-yt-consent", true);
+  }
+  try {
+    const r = await invoke("download_video", { url: t.url, kind });
+    videoJob = { id: r.job, title: t.title || "video", kind, percent: 0, url: t.url };
+    showVideoProgress();
+    renderChrome();
+    if (kind === "video" && !r.ffmpeg) toast("Starting… (no ffmpeg found, so video is limited to about 720p)", 4000);
+  } catch (e) {
+    toast(`Could not start: ${errText(e)}`, 6000);
+  }
+}
+
+function showVideoProgress() {
+  if (!videoJob) return;
+  toast(`Downloading ${videoJob.kind}… ${Math.round(videoJob.percent)}%`, 60000, [
+    { label: "Cancel", fn: () => call("cancel_video", { job: videoJob.id }) },
+  ]);
+}
+
+listen("video-download", ({ payload: p }) => {
+  if (!videoJob || p.job !== videoJob.id) return;
+  if (p.state === "progress") {
+    videoJob.percent = p.percent;
+    showVideoProgress();
+    return;
+  }
+  const job = videoJob;
+  videoJob = null;
+  if (p.state === "done") {
+    const d = read(DL_KEY, []);
+    d.unshift({ url: job.url, path: p.path, state: "done", ts: Date.now() });
+    write(DL_KEY, d.slice(0, 200));
+    if (panel === "downloads") renderPanel();
+    toast("Saved to Downloads", 8000, [{ label: "Show", fn: () => call("reveal", { path: p.path }) }]);
+  } else if (p.state === "cancelled") toast("Download cancelled", 2500);
+  else toast(`Download failed: ${p.message}`, 7000);
+  renderChrome();
+});
+
 // ---- find / zoom ----
 
 function openFind() {
@@ -343,9 +406,19 @@ const refreshExtensions = () => call("list_extensions").then(l => {
   renderChrome();
 });
 
+const YT_RE = /^https:\/\/(?:(?:www\.|m\.)?youtube\.com\/(?:watch\?|shorts\/)|youtu\.be\/)/;
+let videoTools = { ready: false, ffmpeg: false };
+const refreshVideoTools = () => call("video_tools").then(v => { if (v) { videoTools = v; renderChrome(); } });
+let videoJob = null; // the running download, if any
+
 function renderChrome() {
   document.documentElement.style.setProperty("--space", space().color);
   const t = activeTab();
+  $("yt-banner").hidden = !(t && YT_RE.test(t.url));
+  $("yt-text").textContent = videoJob ? "Downloading…" : videoTools.ready ? "Save this video" : "Download videos from YouTube";
+  $("yt-video").textContent = videoTools.ready ? "Video" : "Set up";
+  $("yt-audio").hidden = !videoTools.ready;
+  $("yt-video").disabled = $("yt-audio").disabled = !!videoJob;
   const storeId = t && (STORE_RE.exec(t.url) || [])[1];
   $("store-banner").hidden = !storeId || installedFolders.has(storeId);
   if (storeId) {
@@ -608,6 +681,7 @@ const actions = {
   "history": () => openPanel("history"),
   "downloads": () => openPanel("downloads"),
   "extensions": () => openPanel("extensions"),
+  "download-video": () => downloadVideo("video"),
   "browse-extensions": browseStore,
   "new-space": newSpace,
   "pin-tab": () => { const t = activeTab(); if (t) togglePin(t.id); },
@@ -680,6 +754,8 @@ $("new-tab").addEventListener("click", () => newTab());
 $("new-space").addEventListener("click", newSpace);
 for (const a of ["back", "forward", "reload"]) $(a).addEventListener("click", () => navAction(a));
 $("star").addEventListener("click", toggleBookmark);
+$("yt-video").addEventListener("click", () => downloadVideo("video"));
+$("yt-audio").addEventListener("click", () => downloadVideo("audio"));
 $("screenshot").addEventListener("click", e => { e.stopPropagation(); screenshotMenu(); });
 
 // Window controls and drag handle (the window has no native title bar).
@@ -754,6 +830,7 @@ call("get_settings").then(s => {
 });
 loadProfiles();
 refreshExtensions();
+refreshVideoTools();
 
 // Restore: reopen the active tab of the current space; other tabs open lazily.
 renderPanel();
