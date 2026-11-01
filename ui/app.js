@@ -11,6 +11,7 @@ const DL_KEY = "alcove-downloads";
 
 const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 let state = read(STATE_KEY, null) || {
@@ -21,6 +22,8 @@ const opened = new Set(); // tab ids with a live webview this session
 const closed = [];        // recently closed tabs, for Reopen Closed Tab
 let panel = null;
 let dragId = null;
+const seen = new Map(); // tab id -> first render time, so only new tabs animate in
+document.body.classList.add(/Mac/.test(navigator.userAgent) ? "mac" : "win");
 // Newer commands may be missing on other shells (e.g. the Tauri build), so failures are swallowed.
 const call = (cmd, args) => invoke(cmd, args).catch(() => null);
 let adblock = true;
@@ -85,6 +88,8 @@ async function closeTab(id) {
   const i = s.tabs.findIndex(t => t.id === id);
   if (i < 0) return;
   const t = s.tabs[i];
+  const el = document.querySelector(`.tab[data-id="${id}"]`);
+  if (el && !t.pinned) { el.classList.add("leaving"); await sleep(150); }
   if (opened.delete(id)) await invoke("close_tab", { id });
   if (t.pinned) {
     t.url = t.pinUrl || t.url; // pinned tabs unload instead of disappearing
@@ -228,6 +233,13 @@ function tabEl(t) {
   el.className = "tab" + (t.pinned ? " pin" : "") + (t.id === space().active ? " active" : "")
     + (opened.has(t.id) ? "" : " unloaded");
   el.draggable = true;
+  el.dataset.id = t.id;
+  if (!seen.has(t.id)) seen.set(t.id, Date.now());
+  const age = Date.now() - seen.get(t.id);
+  if (age < 220) { // re-renders mid-animation resume it instead of restarting or cutting it off
+    el.classList.add("enter");
+    el.style.animationDelay = `-${age}ms`;
+  }
   el.title = t.title || t.url;
   const title = document.createElement("span");
   title.className = "title";
@@ -308,6 +320,11 @@ function renderChrome() {
 }
 
 async function switchSpace(i) {
+  for (const id of ["tabs", "pinned"]) {
+    $(id).classList.remove("swap");
+    void $(id).offsetWidth; // restart the animation
+    $(id).classList.add("swap");
+  }
   state.space = i;
   panel = null;
   renderPanel();
@@ -545,6 +562,15 @@ $("new-tab").addEventListener("click", () => newTab());
 $("new-space").addEventListener("click", newSpace);
 for (const a of ["back", "forward", "reload"]) $(a).addEventListener("click", () => navAction(a));
 $("star").addEventListener("click", toggleBookmark);
+
+// Window controls and drag handle (the window has no native title bar).
+for (const b of document.querySelectorAll(".dot")) {
+  b.addEventListener("click", () => call("window_action", { action: b.dataset.act }));
+  b.addEventListener("mousedown", e => e.stopPropagation());
+}
+$("titlebar").addEventListener("mousedown", e => { if (e.button === 0) call("drag_start"); });
+$("titlebar").addEventListener("dblclick", () => call("window_action", { action: "maximize" }));
+for (const ev of ["mouseup", "blur"]) window.addEventListener(ev, () => call("drag_end"));
 $("toggle-sidebar").addEventListener("click", () => call("toggle_sidebar"));
 $("profile").addEventListener("click", e => { e.stopPropagation(); profileMenu(); });
 $("shield").addEventListener("click", async () => {

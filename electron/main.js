@@ -49,8 +49,11 @@ let blockerReady = Promise.resolve();
 let collapsed = false;
 let peeking = false;
 let sidebarBusy = false;
-let sidebarX = 0;
+let sidebarX = 0;       // x of the sidebar view; negative while hidden
+let contentLeft = SIDEBAR_W; // x where web content starts; animates with the sidebar
 let animTimer = null;
+let lightsShown = false;
+let dragTimer = null;
 
 const send = (name, payload) => {
   if (ui && !ui.webContents.isDestroyed()) ui.webContents.send("event", name, payload);
@@ -60,8 +63,8 @@ const send = (name, payload) => {
 
 function layout() {
   const { width, height } = win.getContentBounds();
-  const left = collapsed ? 0 : SIDEBAR_W;
-  ui.setBounds({ x: Math.round(collapsed ? sidebarX : 0), y: 0, width: SIDEBAR_W, height });
+  const left = Math.round(contentLeft);
+  ui.setBounds({ x: Math.round(sidebarX), y: 0, width: SIDEBAR_W, height });
   for (const v of tabs.values()) {
     v.setBounds({ x: left, y: 0, width: Math.max(width - left, 1), height });
   }
@@ -69,13 +72,17 @@ function layout() {
 
 const raiseUi = () => win.contentView.addChildView(ui); // re-adding moves a view to the top
 
-function animateSidebar(to, ms = 170) {
+// Slides the sidebar and the page edge together so content glides instead of jumping.
+function animate(toX, toLeft, ms = 200) {
   clearInterval(animTimer);
-  const from = sidebarX;
+  const fromX = sidebarX;
+  const fromLeft = contentLeft;
   const start = Date.now();
   animTimer = setInterval(() => {
     const t = Math.min((Date.now() - start) / ms, 1);
-    sidebarX = from + (to - from) * (1 - Math.pow(1 - t, 3));
+    const e = 1 - Math.pow(1 - t, 3); // ease-out cubic
+    sidebarX = fromX + (toX - fromX) * e;
+    contentLeft = fromLeft + (toLeft - fromLeft) * e;
     layout();
     if (t === 1) clearInterval(animTimer);
   }, 16);
@@ -87,7 +94,7 @@ function peek(on) {
   if (!collapsed || peeking === on) return;
   peeking = on;
   if (on) raiseUi();
-  animateSidebar(on ? 0 : -SIDEBAR_W);
+  animate(on ? 0 : -SIDEBAR_W, contentLeft, 180);
   sidebarState();
 }
 
@@ -96,30 +103,56 @@ function toggleSidebar() {
   config.collapsed = collapsed;
   saveConfig();
   peeking = false;
-  clearInterval(animTimer);
-  if (collapsed) {
-    raiseUi();
-    sidebarX = 0;
-    layout();
-    animateSidebar(-SIDEBAR_W);
-  } else {
-    sidebarX = 0;
-    layout();
-  }
+  if (collapsed) raiseUi();
+  animate(collapsed ? -SIDEBAR_W : 0, collapsed ? 0 : SIDEBAR_W, 240);
   sidebarState();
 }
 
 // Cursor polling is simpler and more reliable than a transparent hot-zone view over the page.
 function watchCursor() {
+  const mac = process.platform === "darwin";
   setInterval(() => {
-    if (!collapsed || !win || win.isDestroyed() || !win.isFocused()) return;
+    if (!win || win.isDestroyed() || !win.isFocused()) return;
     const p = screen.getCursorScreenPoint();
     const b = win.getContentBounds();
     const inside = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
     const rel = p.x - b.x;
+    const relY = p.y - b.y;
+    if (mac) {
+      // Native traffic lights stay hidden until the pointer nears the top-left corner.
+      const near = inside && rel < 120 && relY < 44;
+      if (near !== lightsShown) {
+        lightsShown = near;
+        win.setWindowButtonVisibility(near);
+      }
+    }
+    if (!collapsed) return;
     if (!peeking && inside && rel <= 3) peek(true);
     else if (peeking && !sidebarBusy && (!inside || rel > SIDEBAR_W + 12)) peek(false);
-  }, 80);
+  }, 50);
+}
+
+// Frameless window: the sidebar's top strip acts as the title bar.
+function startDrag() {
+  if (win.isMaximized() || win.isFullScreen()) return;
+  const start = screen.getCursorScreenPoint();
+  const [x0, y0] = win.getPosition();
+  clearInterval(dragTimer);
+  const began = Date.now();
+  dragTimer = setInterval(() => {
+    if (Date.now() - began > 15000) return clearInterval(dragTimer); // failsafe if mouseup is missed
+    const p = screen.getCursorScreenPoint();
+    win.setPosition(x0 + p.x - start.x, y0 + p.y - start.y);
+  }, 8);
+}
+
+function windowAction(action) {
+  if (action === "close") win.close();
+  else if (action === "minimize") win.minimize();
+  else if (action === "maximize") {
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+  }
 }
 
 // ---- sessions, downloads, ad blocker ----
@@ -299,6 +332,7 @@ function createUi() {
   win.contentView.addChildView(ui);
   ui.webContents.loadFile(uiFile("index.html"));
   sidebarX = collapsed ? -SIDEBAR_W : 0;
+  contentLeft = collapsed ? 0 : SIDEBAR_W;
   peeking = false;
   layout();
 }
@@ -377,6 +411,9 @@ const commands = {
   reveal: ({ path: p }) => shell.showItemInFolder(p),
 
   toggle_sidebar: toggleSidebar,
+  window_action: ({ action }) => windowAction(action),
+  drag_start: startDrag,
+  drag_end: () => clearInterval(dragTimer),
   sidebar_busy: ({ busy }) => { sidebarBusy = !!busy; },
   get_settings: () => ({ adblock: config.adblock, collapsed, adblockReady: !!blocker }),
   set_adblock: ({ enabled }) => {
@@ -460,7 +497,12 @@ app.whenReady().then(() => {
     title: p.id === "default" ? "Alcove" : `Alcove — ${p.name}`,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#17171c" : "#f4f4f7",
     autoHideMenuBar: true,
+    // No title bar: window controls live in the sidebar (native lights on macOS, drawn ones elsewhere).
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 16, y: 11 } }
+      : { frame: false }),
   });
+  if (process.platform === "darwin") win.setWindowButtonVisibility(false);
   createUi();
   win.on("resize", layout);
   watchCursor();
