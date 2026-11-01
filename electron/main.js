@@ -68,7 +68,6 @@ let sidebarBusy = false;
 let sidebarX = 0;       // x of the sidebar view; negative while hidden
 let contentLeft = SIDEBAR_W; // x where web content starts; animates with the sidebar
 let animTimer = null;
-let lightsShown = false;
 let peekHoldUntil = 0; // keeps the startup peek on screen briefly
 let dragTimer = null;
 
@@ -78,22 +77,61 @@ const send = (name, payload) => {
 
 // ---- layout / sliding sidebar ----
 
-function layout() {
+// Web pages sit in a rounded card with a small gap on every side. With the sidebar hidden, the card
+// leaves a slim strip at the top for the window buttons, which doubles as a drag handle.
+const GAP = 8;
+const HIDE_X = -(SIDEBAR_W + GAP + 4); // sidebar x when hidden (fully off screen)
+let uiRadius = -1;
+const STRIP_H = 34;
+const CARD_RADIUS = 10;
+
+function contentRect() {
   const { width, height } = win.getContentBounds();
-  const left = Math.round(contentLeft);
-  ui.setBounds({ x: Math.round(sidebarX), y: 0, width: SIDEBAR_W, height });
-  const sb = split ? splitBounds() : null;
+  const hidden = 1 - Math.min(1, Math.max(0, contentLeft / SIDEBAR_W)); // 0 = sidebar shown, 1 = hidden (animates)
+  const x = Math.round(contentLeft + GAP * hidden);
+  const y = Math.round(GAP + (STRIP_H - GAP) * hidden);
+  return { x, y, w: Math.max(width - x - GAP, 1), h: Math.max(height - y - GAP, 1), hidden, width };
+}
+
+function layout() {
+  const { height } = win.getContentBounds();
+  // Docked: flush with the window. Sliding out over the page (sidebar collapsed): a floating rounded panel.
+  const floating = collapsed;
+  ui.setBounds(floating
+    ? { x: Math.round(sidebarX) + GAP, y: GAP, width: SIDEBAR_W, height: height - 2 * GAP }
+    : { x: Math.round(sidebarX), y: 0, width: SIDEBAR_W, height });
+  const radius = floating ? 14 : 0;
+  if (radius !== uiRadius && typeof ui.setBorderRadius === "function") { ui.setBorderRadius(radius); uiRadius = radius; }
+  const c = contentRect();
+  const lw = split ? Math.round((c.w - DIVIDER_W) * split.ratio) : 0;
   for (const [k, v] of tabs) {
-    if (sb && k === split.left) v.setBounds({ x: left, y: 0, width: sb.lw, height });
-    else if (sb && k === split.right) v.setBounds({ x: left + sb.lw + DIVIDER_W, y: 0, width: sb.w - sb.lw - DIVIDER_W, height });
-    else v.setBounds({ x: left, y: 0, width: Math.max(width - left, 1), height });
+    if (split && k === split.left) v.setBounds({ x: c.x, y: c.y, width: lw, height: c.h });
+    else if (split && k === split.right) v.setBounds({ x: c.x + lw + DIVIDER_W, y: c.y, width: c.w - lw - DIVIDER_W, height: c.h });
+    else v.setBounds({ x: c.x, y: c.y, width: c.w, height: c.h });
   }
-  if (divider && sb) {
+  if (divider && split) {
     // While dragging, the divider covers both panes so it keeps receiving the mouse.
-    divider.setBounds(dividerDragging ? { x: left, y: 0, width: sb.w, height } : { x: left + sb.lw, y: 0, width: DIVIDER_W, height });
+    divider.setBounds(dividerDragging ? { x: c.x, y: c.y, width: c.w, height: c.h } : { x: c.x + lw, y: c.y, width: DIVIDER_W, height: c.h });
+  }
+  if (strip) {
+    strip.setVisible(c.hidden > 0.5);
+    strip.setBounds({ x: 0, y: 0, width: c.width, height: STRIP_H });
   }
   placePeek();
   placeShotPopup();
+}
+
+// Top strip shown while the sidebar is hidden: drag to move the window, double-click to zoom,
+// and on Windows it carries the window buttons (macOS draws its own there).
+let strip = null;
+function createStrip() {
+  strip = new WebContentsView({
+    webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
+  });
+  strip.setBackgroundColor("#00000000");
+  strip.webContents.loadFile(uiFile("strip.html"));
+  win.contentView.addChildView(strip);
+  layout();
 }
 
 const raiseUi = () => win.contentView.addChildView(ui); // re-adding moves a view to the top
@@ -120,7 +158,7 @@ function peek(on) {
   if (!collapsed || peeking === on) return;
   peeking = on;
   if (on) raiseUi();
-  animate(on ? 0 : -SIDEBAR_W, contentLeft, 180);
+  animate(on ? 0 : HIDE_X, contentLeft, 180);
   sidebarState();
 }
 
@@ -145,13 +183,12 @@ function toggleSidebar() {
   saveConfig();
   peeking = false;
   if (collapsed) raiseUi();
-  animate(collapsed ? -SIDEBAR_W : 0, collapsed ? 0 : SIDEBAR_W, 240);
+  animate(collapsed ? HIDE_X : 0, collapsed ? 0 : SIDEBAR_W, 240);
   sidebarState();
 }
 
 // Cursor polling is simpler and more reliable than a transparent hot-zone view over the page.
 function watchCursor() {
-  const mac = process.platform === "darwin";
   setInterval(() => {
     if (extPopup) {
       if (extPopup.webContents.isFocused()) extPopupFocused = true;
@@ -162,19 +199,6 @@ function watchCursor() {
     const b = win.getContentBounds();
     const inside = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
     const rel = p.x - b.x;
-    const relY = p.y - b.y;
-    if (mac) {
-      // Native traffic lights sit in the sidebar's top strip: shown whenever the sidebar is on screen,
-      // and while the sidebar is hidden, when the pointer nears the top-left corner. Checked even when
-      // the window isn't focused, so they never get stuck hidden.
-      const near = inside && rel < 120 && relY < 44;
-      const want = !collapsed || peeking || near;
-      if (want !== lightsShown) {
-        lightsShown = want;
-        win.setWindowButtonVisibility(want);
-        perf(`window buttons ${want ? "shown" : "hidden"}`);
-      }
-    }
     if (!win.isFocused()) return;
     if (!collapsed) return;
     if (!peeking && inside && rel <= 3) peek(true);
@@ -490,6 +514,7 @@ function openTab(id, url) {
       sandbox: true, contextIsolation: true, nodeIntegration: false,
     },
   });
+  if (typeof view.setBorderRadius === "function") view.setBorderRadius(CARD_RADIUS);
   const wc = view.webContents;
   tabs.set(id, view);
   wcToTab.set(wc.id, id);
@@ -517,9 +542,9 @@ function openTab(id, url) {
   // Cmd/Ctrl+click opens a background tab; Shift+click (a featureless new window) opens Peek.
   // Popups that ask for a size (sign-in windows, for example) still become normal tabs.
   wc.setWindowOpenHandler(({ url: u, disposition, features }) => {
-    if (disposition === "background-tab") send("new-tab-request", { url: u, background: true });
+    if (disposition === "background-tab") send("new-tab-request", { url: u, background: true, from: id });
     else if (disposition === "new-window" && !features) openPeek(u);
-    else send("new-tab-request", { url: u });
+    else send("new-tab-request", { url: u, from: id });
     return { action: "deny" };
   });
   wc.on("context-menu", (_e, p) => pageMenu(id, wc, p).popup());
@@ -544,12 +569,6 @@ let split = null;           // { left, right, ratio }: two tab ids shown side by
 let divider = null;         // thin view between the panes
 let dividerDragging = false;
 const DIVIDER_W = 8;
-
-function splitBounds() {
-  const { width } = win.getContentBounds();
-  const w = Math.max(width - Math.round(contentLeft), 2 * DIVIDER_W);
-  return { w, lw: Math.round((w - DIVIDER_W) * split.ratio) };
-}
 
 function setSplit(next) {
   split = next && next.left !== next.right && tabs.has(next.left) && tabs.has(next.right)
@@ -579,12 +598,10 @@ let peekBackdrop = null;  // dimmed layer behind it with the Open/Close controls
 
 function placePeek() {
   if (!peekView) return;
-  const { width, height } = win.getContentBounds();
-  const left = Math.round(contentLeft);
-  const w = Math.max(width - left, 1);
-  peekBackdrop.setBounds({ x: left, y: 0, width: w, height });
-  const pw = Math.round(Math.min(w - 48, Math.max(w * 0.84, 360)));
-  peekView.setBounds({ x: left + Math.round((w - pw) / 2), y: 56, width: Math.max(pw, 200), height: Math.max(height - 76, 200) });
+  const c = contentRect();
+  peekBackdrop.setBounds({ x: c.x, y: c.y, width: c.w, height: c.h });
+  const pw = Math.round(Math.min(c.w - 48, Math.max(c.w * 0.84, 360)));
+  peekView.setBounds({ x: c.x + Math.round((c.w - pw) / 2), y: c.y + 48, width: Math.max(pw, 200), height: Math.max(c.h - 68, 200) });
 }
 
 const peekInfo = info => { if (peekBackdrop) peekBackdrop.webContents.send("event", "peek-info", info); };
@@ -598,7 +615,7 @@ function openPeek(url) {
   peekView = new WebContentsView({
     webPreferences: { partition: webPartition(config.activeProfile), sandbox: true, contextIsolation: true },
   });
-  if (typeof peekView.setBorderRadius === "function") peekView.setBorderRadius(12);
+  if (typeof peekView.setBorderRadius === "function") peekView.setBorderRadius(CARD_RADIUS + 2);
   win.contentView.addChildView(peekBackdrop);
   win.contentView.addChildView(peekView);
   placePeek();
@@ -656,8 +673,8 @@ function pageMenu(tabId, wc, p) {
   const sep = () => { if (items.length && items[items.length - 1].type !== "separator") items.push({ type: "separator" }); };
   if (p.linkURL && /^https?:/i.test(p.linkURL)) {
     items.push(
-      { label: "Open Link in New Tab", click: () => send("new-tab-request", { url: p.linkURL }) },
-      { label: "Open Link in Background", click: () => send("new-tab-request", { url: p.linkURL, background: true }) },
+      { label: "Open Link in New Tab", click: () => send("new-tab-request", { url: p.linkURL, from: tabId }) },
+      { label: "Open Link in Background", click: () => send("new-tab-request", { url: p.linkURL, background: true, from: tabId }) },
       { label: "Open Link in Peek", click: () => openPeek(p.linkURL) },
       ...(tabId ? [{ label: "Open Link in Split View", click: () => send("split-request", { url: p.linkURL, with: tabId }) }] : []),
       { label: "Copy Link Address", click: () => clipboard.writeText(p.linkURL) },
@@ -1391,7 +1408,8 @@ function createUi() {
     if (m && m.startsWith("[perf]")) perf(`sidebar says: ${m.slice(7)}`);
   });
   ui.webContents.loadFile(uiFile("index.html"));
-  sidebarX = collapsed ? -SIDEBAR_W : 0;
+  sidebarX = collapsed ? HIDE_X : 0;
+  uiRadius = -1;
   contentLeft = collapsed ? 0 : SIDEBAR_W;
   peeking = false;
   layout();
@@ -1523,6 +1541,7 @@ const commands = {
   ).catch(() => {}),
 
   toggle_sidebar: toggleSidebar,
+  set_chrome_color: ({ color }) => { if (/^#[0-9a-f]{6}$/i.test(String(color))) win.setBackgroundColor(color); },
   window_action: ({ action }) => windowAction(action),
   drag_start: startDrag,
   drag_end: () => clearInterval(dragTimer),
@@ -1555,7 +1574,7 @@ const commands = {
 };
 
 const fromOurPages = e =>
-  [ui, palette, region, shotView, peekBackdrop, divider].some(v => v && e.sender === v.webContents);
+  [ui, palette, region, shotView, peekBackdrop, divider, strip].some(v => v && e.sender === v.webContents);
 
 ipcMain.handle("invoke", (e, cmd, args) => {
   if (!fromOurPages(e)) throw new Error("forbidden");
@@ -1667,15 +1686,12 @@ app.whenReady().then(() => {
     autoHideMenuBar: true,
     // No title bar: window controls live in the sidebar (native lights on macOS, drawn ones elsewhere).
     ...(process.platform === "darwin"
-      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 16, y: 11 } }
+      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 18, y: 15 } }
       : { frame: false }),
   });
-  if (process.platform === "darwin") {
-    lightsShown = !collapsed; // buttons start visible when the sidebar is
-    win.setWindowButtonVisibility(lightsShown);
-  }
   perf("window created");
   createUi();
+  createStrip();
   win.on("resize", layout);
   watchCursor();
 });

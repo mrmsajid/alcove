@@ -22,6 +22,10 @@
       <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M10 4a2 2 0 1 1 4 0v2h4v4h-2a2 2 0 1 0 0 4h2v4h-4v-2a2 2 0 1 0-4 0v2H6v-4h2a2 2 0 1 0 0-4H6V6h4z"/></symbol>
       <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v1H7v-1l3-3z"/><path d="M12 13v7"/></symbol>
       <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+      <symbol id="i-tune" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+      <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="4" rx="1"/><path d="M5 8.5v10a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-10"/><path d="M10 12h4"/></symbol>
+      <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3c.6 4.6 3.4 7.4 8 8-4.6.6-7.4 3.4-8 8-.6-4.6-3.4-7.4-8-8 4.6-.6 7.4-3.4 8-8z"/></symbol>
+      <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
       <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
       <symbol id="i-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
@@ -29,15 +33,14 @@
     </defs>
   </svg>
 
-  <div id="titlebar" class="titlebar">
+  <!-- Top row: window buttons (macOS draws its own in the gap on the left), sidebar toggle, navigation.
+       Empty space in this row drags the window. -->
+  <div id="topbar" class="top">
     <div class="winctl">
       <button class="dot close" data-act="close" title="Close"></button>
       <button class="dot min" data-act="minimize" title="Minimize"></button>
       <button class="dot max" data-act="maximize" title="Maximize"></button>
     </div>
-  </div>
-
-  <div class="top">
     <button id="toggle-sidebar" class="icon" title="Hide sidebar"><svg><use href="#i-sidebar"/></svg></button>
     <span class="spacer"></span>
     <button id="back" class="icon" title="Back"><svg><use href="#i-back"/></svg></button>
@@ -46,11 +49,11 @@
   </div>
 
   <form id="addr-form" class="pill">
+    <div id="addr-display" class="addr-display"></div>
     <input id="addr" type="text" spellcheck="false" autocomplete="off" placeholder="Search or enter address">
-    <button type="button" id="shield" class="icon sm" title="Ad blocker">
-      <svg><use href="#i-shield"/></svg><span id="shield-count"></span>
+    <button type="button" id="shield" class="icon sm" title="Site settings">
+      <svg><use href="#i-tune"/></svg><span id="shield-count"></span>
     </button>
-    <button type="button" id="star" class="icon sm" title="Bookmark this page"><svg><use href="#i-star"/></svg></button>
   </form>
 
   <div id="findbar" class="findbar" hidden>
@@ -71,8 +74,8 @@
     <button id="yt-audio" class="ghost">Audio</button>
   </div>
 
-  <div id="space-title" class="space-title"></div>
   <div id="pinned" class="pinned"></div>
+  <div id="space-title" class="space-title"></div>
   <div class="new-row">
     <button id="new-tab" class="new-tab"><svg><use href="#i-plus"/></svg>New Tab</button>
     <button id="new-group" class="icon sm" title="New tab group"><svg><use href="#i-folder"/></svg></button>
@@ -91,15 +94,15 @@
   </div>
 
   <div class="bottom">
-    <button id="profile" class="avatar" title="Profile"></button>
+    <div class="b-left">
+      <button id="profile" class="avatar" title="Profile"></button>
+      <button id="open-library" class="icon sm" title="Library: bookmarks, history, downloads, extensions, screenshot"><svg><use href="#i-archive"/></svg></button>
+      <button id="open-palette" class="icon sm" title="Command palette (⌘K)"><svg><use href="#i-sparkle"/></svg></button>
+    </div>
     <div id="spaces" class="space-dots"></div>
-    <button id="new-space" class="icon sm" title="New space"><svg><use href="#i-plus"/></svg></button>
-    <span class="spacer"></span>
-    <button id="screenshot" class="icon sm" title="Screenshot"><svg><use href="#i-camera"/></svg></button>
-    <button id="open-extensions" class="icon sm" title="Extensions"><svg><use href="#i-puzzle"/></svg></button>
-    <button id="open-bookmarks" class="icon sm" title="Bookmarks"><svg><use href="#i-bookmark"/></svg></button>
-    <button id="open-history" class="icon sm" title="History"><svg><use href="#i-history"/></svg></button>
-    <button id="open-downloads" class="icon sm" title="Downloads"><svg><use href="#i-download"/></svg></button>
+    <div class="b-right">
+      <button id="new-space" class="icon sm" title="New space"><svg><use href="#i-plus"/></svg></button>
+    </div>
   </div>
 
   <div id="menu" class="ctx" hidden></div>

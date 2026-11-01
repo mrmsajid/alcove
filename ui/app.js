@@ -70,19 +70,35 @@ function toast(msg, ms = 1600, actions = []) {
 
 // ---- tabs ----
 
-async function newTab(url = HOME) {
-  const tab = { id: uid(), url, title: "New Tab", pinned: false };
-  space().tabs.push(tab);
+async function newTab(url = HOME, from = null) {
+  const tab = childTab(url, from) || { id: uid(), url, title: "New Tab", pinned: false };
+  if (!space().tabs.includes(tab)) space().tabs.push(tab);
   await activate(tab.id);
 }
 
-// Opened with Cmd/Ctrl+click or "Open Link in Background": placed after the current tab, loaded when first shown.
-function backgroundTab(url) {
+// A tab opened from a page nests under that page's tab in the sidebar (after its earlier children).
+function childTab(url, from) {
+  const s = space();
+  const parent = from && s.tabs.find(t => t.id === from);
+  if (!parent || parent.pinned) return null;
+  const tab = { id: uid(), url, title: hostOf(url) || "New Tab", pinned: false, groupId: parent.groupId || null, parentId: parent.id };
+  let at = s.tabs.indexOf(parent);
+  s.tabs.forEach((t, k) => { if (t.parentId === parent.id) at = k; });
+  s.tabs.splice(at + 1, 0, tab);
+  parent.kidsCollapsed = false;
+  return tab;
+}
+
+// Opened with Cmd/Ctrl+click or "Open Link in Background": nests under its opener, loaded when first shown.
+function backgroundTab(url, from = null) {
   const s = space();
   const cur = activeTab();
-  const tab = { id: uid(), url, title: hostOf(url) || "New Tab", pinned: false, groupId: cur && !cur.pinned ? cur.groupId || null : null };
-  const i = cur ? s.tabs.indexOf(cur) : -1;
-  s.tabs.splice(i >= 0 ? i + 1 : s.tabs.length, 0, tab);
+  let tab = childTab(url, from || (cur && cur.id));
+  if (!tab) {
+    tab = { id: uid(), url, title: hostOf(url) || "New Tab", pinned: false, groupId: cur && !cur.pinned ? cur.groupId || null : null };
+    const i = cur ? s.tabs.indexOf(cur) : -1;
+    s.tabs.splice(i >= 0 ? i + 1 : s.tabs.length, 0, tab);
+  }
   render();
   return tab;
 }
@@ -201,6 +217,7 @@ function moveTab(id, beforeId, { pinned = false, toGroup = null } = {}) {
   const i = tabs.findIndex(t => t.id === id);
   if (i < 0) return;
   const [t] = tabs.splice(i, 1);
+  t.parentId = null;
   const j = beforeId ? tabs.findIndex(x => x.id === beforeId) : -1;
   if (toGroup) {
     let last = -1;
@@ -358,7 +375,8 @@ function groupEl(g, members) {
   const body = document.createElement("div");
   body.className = "group-tabs";
   // A collapsed group still shows its active tab so the current page never disappears from the list.
-  body.append(...(g.collapsed ? members.filter(t => t.id === s.active) : members).map(tabEl));
+  body.append(...(g.collapsed ? members.filter(t => t.id === s.active).map(t => tabEl(t))
+    : members.filter(t => isRoot(t, members)).flatMap(t => tabTree(t, members, 0))));
   wrap.append(head, body);
   return wrap;
 }
@@ -424,8 +442,8 @@ listen("screenshot-saved", ({ payload }) =>
   toast("Screenshot saved", 6000, [{ label: "Show", fn: () => call("reveal", { path: payload.path }) }]));
 
 function screenshotMenu() {
-  const rect = $("screenshot").getBoundingClientRect();
-  showMenu(rect.left - 90, rect.top - 3 * 32 - 14, [
+  const rect = $("open-library").getBoundingClientRect();
+  showMenu(rect.left, rect.top - 3 * 32 - 14, [
     { label: "Selected area", fn: () => shoot("region") },
     { label: "Visible area", fn: () => shoot("visible") },
     { label: "Full page", fn: () => shoot("full") },
@@ -541,7 +559,22 @@ function favNode(t) {
   return span;
 }
 
-function tabEl(t) {
+// Search result pages read better as their query, with the engine as a quiet suffix.
+function displayTitle(t) {
+  try {
+    const u = new URL(t.url);
+    const q = u.searchParams.get("q");
+    const engine = /(^|\.)google\./.test(u.hostname) && u.pathname === "/search" ? "Google"
+      : /(^|\.)duckduckgo\.com$/.test(u.hostname) ? "DuckDuckGo"
+      : /(^|\.)bing\.com$/.test(u.hostname) && u.pathname === "/search" ? "Bing"
+      : /(^|\.)youtube\.com$/.test(u.hostname) && u.pathname === "/results" ? "YouTube" : null;
+    const query = q || (engine === "YouTube" && u.searchParams.get("search_query"));
+    if (engine && query) return { main: query, sub: engine };
+  } catch {}
+  return { main: t.title || t.url, sub: "" };
+}
+
+function tabEl(t, depth = 0, kids = 0) {
   const el = document.createElement("div");
   el.className = "tab" + (t.pinned ? " pin" : "") + (t.id === space().active ? " active" : "") + (inSplit(t.id) ? " in-split" : "")
     + (opened.has(t.id) ? "" : " unloaded");
@@ -556,7 +589,15 @@ function tabEl(t) {
   el.title = t.title || t.url;
   const title = document.createElement("span");
   title.className = "title";
-  title.textContent = t.title || t.url;
+  const dt = displayTitle(t);
+  title.textContent = dt.main;
+  if (dt.sub) {
+    const sub = document.createElement("span");
+    sub.className = "sub";
+    sub.textContent = dt.sub;
+    title.append(sub);
+  }
+  if (!t.pinned && depth) el.style.paddingLeft = `${8 + depth * 18}px`;
   const pin = document.createElement("button");
   pin.className = "pin-btn";
   pin.title = "Pin tab";
@@ -564,6 +605,15 @@ function tabEl(t) {
   const close = document.createElement("button");
   close.className = "close";
   close.innerHTML = '<svg><use href="#i-x"/></svg>';
+  if (!t.pinned && kids) {
+    // Parent of opened-from tabs: the chevron shows or hides its children.
+    const chev = document.createElement("button");
+    chev.className = "kids" + (t.kidsCollapsed ? " collapsed" : "");
+    chev.title = t.kidsCollapsed ? `Show ${kids} tab${kids === 1 ? "" : "s"}` : "Hide tabs opened from here";
+    chev.innerHTML = '<svg><use href="#i-down"/></svg>';
+    chev.addEventListener("click", e => { e.stopPropagation(); t.kidsCollapsed = !t.kidsCollapsed; render(); });
+    el.append(chev);
+  }
   el.append(favNode(t), title, pin, close);
   pin.addEventListener("click", e => { e.stopPropagation(); togglePin(t.id); });
 
@@ -610,6 +660,18 @@ function tabEl(t) {
   return el;
 }
 
+// Tab tree: a tab whose opener is in the same list is drawn under it (up to 3 levels deep).
+const isRoot = (t, pool) => !t.parentId || !pool.some(p => p.id === t.parentId);
+function tabTree(t, pool, depth) {
+  const kids = pool.filter(k => k.parentId === t.id);
+  const out = [tabEl(t, depth, kids.length)];
+  for (const k of kids) {
+    if (t.kidsCollapsed && k.id !== space().active) continue; // the active tab always stays visible
+    out.push(...tabTree(k, pool, Math.min(depth + 1, 3)));
+  }
+  return out;
+}
+
 function render() {
   write(STATE_KEY, state);
   const s = space();
@@ -622,8 +684,12 @@ function render() {
   if (!typing) {
     const items = [];
     const drawn = new Set();
+    const loose = s.tabs.filter(x => !x.pinned && !x.groupId);
     for (const t of s.tabs.filter(x => !x.pinned)) {
-      if (!t.groupId) { items.push(tabEl(t)); continue; }
+      if (!t.groupId) {
+        if (isRoot(t, loose)) items.push(...tabTree(t, loose, 0));
+        continue;
+      }
       if (drawn.has(t.groupId)) continue;
       drawn.add(t.groupId);
       items.push(groupEl(groupById(t.groupId), groupTabs(t.groupId)));
@@ -650,7 +716,7 @@ function render() {
   const t = activeTab();
   const addr = $("addr");
   if (document.activeElement !== addr) addr.value = t ? t.url : "";
-  $("star").classList.toggle("on", !!t && isBookmarked(t.url));
+  renderAddr(t);
   renderChrome();
 }
 
@@ -666,10 +732,42 @@ let videoTools = { ready: false, ffmpeg: false };
 const refreshVideoTools = () => call("video_tools").then(v => { if (v) { videoTools = v; renderChrome(); } });
 let videoJob = null; // the running download, if any
 
+// The sidebar and the window frame around the page share one color: the theme background tinted
+// slightly (4%) toward the space color.
+const hexRgb = h => {
+  h = String(h).trim().replace("#", "");
+  if (h.length === 3) h = [...h].map(c => c + c).join("");
+  return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) || 0);
+};
+const mixHex = (a, b, t) => "#" + hexRgb(a).map((x, i) => Math.round(x * t + hexRgb(b)[i] * (1 - t)).toString(16).padStart(2, "0")).join("");
+let sentChrome = null;
+
+// When the address bar isn't being edited it shows the site in bold and the path dimmed.
+function renderAddr(t) {
+  const d = $("addr-display");
+  d.replaceChildren();
+  if (!t) return;
+  try {
+    const u = new URL(t.url);
+    if (/^https?:$/.test(u.protocol)) {
+      const host = document.createElement("b");
+      host.textContent = u.hostname.replace(/^www\./, "");
+      const rest = document.createElement("span");
+      rest.textContent = (u.pathname === "/" ? "" : u.pathname) + u.search;
+      d.append(host, rest);
+      return;
+    }
+  } catch {}
+  d.textContent = t.url;
+}
+
 function renderChrome() {
   document.documentElement.style.setProperty("--space", space().color);
   document.body.classList.toggle("theme-light", space().theme === "light");
   document.body.classList.toggle("theme-dark", space().theme === "dark");
+  const chrome = mixHex(space().color, getComputedStyle(document.body).getPropertyValue("--bg"), 0.04);
+  document.documentElement.style.setProperty("--chrome", chrome);
+  if (chrome !== sentChrome) { sentChrome = chrome; call("set_chrome_color", { color: chrome }); }
   const t = activeTab();
   $("yt-banner").hidden = !(t && YT_RE.test(t.url));
   const full = videoTools.ready && videoTools.ffmpeg;
@@ -1096,8 +1194,8 @@ listen("palette-action", ({ payload: p }) => {
 });
 
 listen("new-tab-request", ({ payload }) => {
-  if (payload.background) { backgroundTab(payload.url); toast("Opened in background", 1500); }
-  else newTab(payload.url);
+  if (payload.background) { backgroundTab(payload.url, payload.from); toast("Opened in background", 1500); }
+  else newTab(payload.url, payload.from);
 });
 listen("split-request", ({ payload }) => {
   const t = backgroundTab(payload.url);
@@ -1169,18 +1267,29 @@ $("space-title").addEventListener("dblclick", () => spaceInput(state.space, "nam
 $("space-title").addEventListener("contextmenu", e => { e.preventDefault(); spaceMenu(state.space, e.clientX, e.clientY); });
 $("new-space").addEventListener("click", newSpace);
 for (const a of ["back", "forward", "reload"]) $(a).addEventListener("click", () => navAction(a));
-$("star").addEventListener("click", toggleBookmark);
 $("yt-video").addEventListener("click", () => downloadVideo("video"));
 $("yt-audio").addEventListener("click", () => downloadVideo("audio"));
-$("screenshot").addEventListener("click", e => { e.stopPropagation(); screenshotMenu(); });
+$("open-library").addEventListener("click", e => {
+  e.stopPropagation();
+  const r = $("open-library").getBoundingClientRect();
+  showMenu(r.left, r.top - 6 * 32 - 14, [
+    { label: "Bookmarks", fn: () => openPanel("bookmarks") },
+    { label: "History", fn: () => openPanel("history") },
+    { label: "Downloads", fn: () => openPanel("downloads") },
+    { label: "Extensions", fn: () => openPanel("extensions") },
+    { label: "Screenshot…", fn: () => setTimeout(screenshotMenu, 0) },
+    { label: "Import from browser…", fn: () => openPanel("import") },
+  ]);
+});
+$("open-palette").addEventListener("click", () => call("show_palette"));
 
 // Window controls and drag handle (the window has no native title bar).
 for (const b of document.querySelectorAll(".dot")) {
   b.addEventListener("click", () => call("window_action", { action: b.dataset.act }));
   b.addEventListener("mousedown", e => e.stopPropagation());
 }
-$("titlebar").addEventListener("mousedown", e => { if (e.button === 0) call("drag_start"); });
-$("titlebar").addEventListener("dblclick", () => call("window_action", { action: "maximize" }));
+$("topbar").addEventListener("mousedown", e => { if (e.button === 0 && !e.target.closest("button")) call("drag_start"); });
+$("topbar").addEventListener("dblclick", e => { if (!e.target.closest("button")) call("window_action", { action: "maximize" }); });
 for (const ev of ["mouseup", "blur"]) window.addEventListener(ev, () => call("drag_end"));
 $("toggle-sidebar").addEventListener("click", () => call("toggle_sidebar"));
 $("profile").addEventListener("click", e => { e.stopPropagation(); profileMenu(); });
@@ -1220,7 +1329,12 @@ $("shield").addEventListener("click", e => {
   const rect = $("shield").getBoundingClientRect();
   const host = t ? hostOf(t.url) : "";
   const here = host && siteOff(host);
-  const items = [{ label: !adblock ? "Ad blocker is off" : here ? `Ad blocker is off on ${host}` : `Ad blocker is on · ${n} blocked here`, fn: () => {} }];
+  const items = [];
+  if (t) {
+    items.push({ label: isBookmarked(t.url) ? "Remove bookmark" : "Bookmark this page", fn: toggleBookmark });
+    items.push({ label: "Copy link", fn: () => navigator.clipboard.writeText(t.url).then(() => toast("Link copied")) });
+  }
+  items.push({ label: !adblock ? "Ad blocker is off" : here ? `Ad blocker is off on ${host}` : `Ad blocker is on · ${n} blocked here`, fn: () => {} });
   if (adblock && host) {
     items.push({ label: here ? `Turn on for ${host}` : `Turn off for ${host}`, fn: () => setSiteAllowed(host, !here) });
   }
@@ -1242,10 +1356,7 @@ for (const id of ["addr", "find-input", "panel-search"]) {
   $(id).addEventListener("focus", () => call("sidebar_busy", { busy: true }));
   $(id).addEventListener("blur", () => call("sidebar_busy", { busy: false }));
 }
-$("open-bookmarks").addEventListener("click", () => openPanel("bookmarks"));
-$("open-history").addEventListener("click", () => openPanel("history"));
-$("open-downloads").addEventListener("click", () => openPanel("downloads"));
-$("open-extensions").addEventListener("click", () => openPanel("extensions"));
+
 $("store-add").addEventListener("click", () => { const t = activeTab(); if (t) installExtension(t.url, t.id); });
 listen("store-install", ({ payload }) => installExtension(payload.url, payload.id));
 $("panel-close").addEventListener("click", () => { panel = null; renderPanel(); });
@@ -1293,6 +1404,7 @@ call("get_settings").then(s => {
 });
 loadProfiles();
 refreshExtensions();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderChrome); // follow system light/dark
 // A profile created by "Import … as new profile" receives its bookmarks and history here.
 call("take_pending_import").then(d => {
   if (!d) return;
