@@ -768,12 +768,24 @@ $("titlebar").addEventListener("dblclick", () => call("window_action", { action:
 for (const ev of ["mouseup", "blur"]) window.addEventListener(ev, () => call("drag_end"));
 $("toggle-sidebar").addEventListener("click", () => call("toggle_sidebar"));
 $("profile").addEventListener("click", e => { e.stopPropagation(); profileMenu(); });
-$("shield").addEventListener("click", async () => {
-  adblock = !adblock;
-  await call("set_adblock", { enabled: adblock });
-  toast(adblock ? "Ad blocker on" : "Ad blocker off");
+// A menu (not a bare toggle) so the blocker can't be switched off by a stray click.
+async function setAdblock(on) {
+  adblock = on;
+  await call("set_adblock", { enabled: on });
+  toast(on ? "Ad blocker on" : "Ad blocker off");
   renderChrome();
   navAction("reload"); // apply to the page being viewed
+}
+
+$("shield").addEventListener("click", e => {
+  e.stopPropagation();
+  const t = activeTab();
+  const n = (t && blocked.get(t.id)) || 0;
+  const rect = $("shield").getBoundingClientRect();
+  showMenu(Math.max(rect.right - 190, 8), rect.bottom + 6, [
+    { label: adblock ? `Ad blocker is on · ${n} blocked here` : "Ad blocker is off", fn: () => {} },
+    adblock ? { label: "Turn off for all sites", fn: () => setAdblock(false) } : { label: "Turn on", fn: () => setAdblock(true) },
+  ]);
 });
 
 // While typing, keep a peeking sidebar on screen even if the pointer wanders off.

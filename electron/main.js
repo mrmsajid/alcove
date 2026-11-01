@@ -231,8 +231,15 @@ function onBlocked(request) {
   }, 250);
 }
 
+const ENGINE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 async function initBlocker() {
   try {
+    // Rules go stale quickly (YouTube changes its ads often), so rebuild the cached engine daily.
+    const cache = path.join(app.getPath("userData"), "adblock-engine.bin");
+    try {
+      if (Date.now() - fs.statSync(cache).mtimeMs > ENGINE_MAX_AGE_MS) fs.rmSync(cache);
+    } catch {}
     const { ElectronBlocker } = require("@ghostery/adblocker-electron");
     blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
       path: path.join(app.getPath("userData"), "adblock-engine.bin"),
