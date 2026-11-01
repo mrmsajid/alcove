@@ -7,7 +7,7 @@ const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; 
 const COMMANDS = [
   ["new-tab", "New Tab"], ["reopen-tab", "Reopen Closed Tab"], ["close-tab", "Close Tab"],
   ["new-space", "New Space"], ["pin-tab", "Pin / Unpin Tab"], ["new-group", "New Tab Group"], ["bookmark", "Bookmark This Page"],
-  ["find", "Find in Page"], ["screenshot-region", "Screenshot Selected Area"], ["screenshot", "Screenshot Visible Area"], ["screenshot-full", "Screenshot Full Page"], ["extensions", "Show Extensions"], ["download-video", "Download YouTube Video"], ["browse-extensions", "Browse Chrome Web Store Extensions"], ["reload", "Reload"], ["zoom-in", "Zoom In"], ["zoom-out", "Zoom Out"],
+  ["find", "Find in Page"], ["screenshot-region", "Screenshot Selected Area"], ["screenshot", "Screenshot Visible Area"], ["screenshot-full", "Screenshot Full Page"], ["extensions", "Show Extensions"], ["import", "Import from Browser (Chrome, Edge, Brave, Arc)"], ["download-video", "Download YouTube Video"], ["browse-extensions", "Browse Chrome Web Store Extensions"], ["reload", "Reload"], ["zoom-in", "Zoom In"], ["zoom-out", "Zoom Out"],
   ["zoom-reset", "Actual Size"], ["bookmarks", "Show Bookmarks"], ["history", "Show History"],
   ["downloads", "Show Downloads"],
 ];

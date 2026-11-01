@@ -675,12 +675,13 @@ function renderPanel() {
   document.body.classList.toggle("panel-open", !!panel);
   $("panel").hidden = !panel;
   if (!panel) return;
-  $("panel-title").textContent = { bookmarks: "Bookmarks", history: "History", downloads: "Downloads", extensions: "Extensions" }[panel];
-  $("panel-search").hidden = panel === "downloads";
+  $("panel-title").textContent = { bookmarks: "Bookmarks", history: "History", downloads: "Downloads", extensions: "Extensions", import: "Import from browser" }[panel];
+  $("panel-search").hidden = panel === "downloads" || panel === "import";
   $("panel-search").placeholder = panel === "extensions" ? "Chrome Web Store link or ID, then Enter" : "Search";
-  $("panel-clear").hidden = panel === "bookmarks";
+  $("panel-clear").hidden = panel === "bookmarks" || panel === "import";
   $("panel-clear").textContent = panel === "extensions" ? "Load unpacked…" : "Clear";
   if (panel === "extensions") return renderExtensions();
+  if (panel === "import") return renderImport();
   const q = $("panel-search").value.trim().toLowerCase();
   const match = x => !q || (x.title || "").toLowerCase().includes(q) || x.url.toLowerCase().includes(q);
   let rows = [];
@@ -705,6 +706,75 @@ function renderPanel() {
   }
   $("panel-body").replaceChildren(...(rows.length ? rows : [Object.assign(document.createElement("div"),
     { className: "empty", textContent: "Nothing here yet" })]));
+}
+
+// ---- import from Chrome, Edge, Brave, Arc, Vivaldi ----
+
+const importWhat = { bookmarks: true, history: true, extensions: true };
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+async function renderImport() {
+  const sources = await call("list_import_sources");
+  if (panel !== "import") return;
+  const opts = document.createElement("div");
+  opts.className = "import-opts";
+  for (const [key, label] of [["bookmarks", "Bookmarks"], ["history", "History"], ["extensions", "Extensions"]]) {
+    const l = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = importWhat[key];
+    box.addEventListener("change", () => { importWhat[key] = box.checked; });
+    l.append(box, label);
+    opts.append(l);
+  }
+  const rows = [];
+  for (const src of sources || []) {
+    for (const p of src.profiles) {
+      rows.push(row(`${src.browser} · ${p.name}`,
+        `${plural(p.bookmarks, "bookmark")} · ${plural(p.extensions, "extension")}${p.history ? " · history" : ""}`, () => {}, [
+          { label: "Import", title: "Add to this Alcove profile", fn: () => runImport(src, p, false) },
+          { label: "New profile", title: `Create an Alcove profile named “${p.name}”`, fn: () => runImport(src, p, true) },
+        ]));
+    }
+  }
+  const empty = Object.assign(document.createElement("div"), {
+    className: "empty",
+    textContent: sources ? "No Chrome, Edge, Brave, Arc or Vivaldi profiles found on this computer." : "Import is only available in the Electron build.",
+  });
+  const note = Object.assign(document.createElement("div"), {
+    className: "import-note",
+    textContent: "Passwords and sign-ins aren't imported (the other browser keeps them encrypted), so you'll sign in to sites once.",
+  });
+  $("panel-body").replaceChildren(opts, ...(rows.length ? rows : [empty]), note);
+}
+
+// Adds imported bookmarks and history to this profile, skipping ones already here.
+function mergeImport({ bookmarks = [], history = [] }) {
+  const bm = read(BM_KEY, []);
+  const have = new Set(bm.map(b => b.url));
+  let added = 0;
+  for (const b of bookmarks) if (!have.has(b.url)) { bm.push({ url: b.url, title: b.title }); have.add(b.url); added++; }
+  write(BM_KEY, bm);
+  const h = read(HIST_KEY, []);
+  const seenH = new Set(h.map(x => `${x.url}|${x.ts}`));
+  const fresh = history.filter(x => !seenH.has(`${x.url}|${x.ts}`));
+  write(HIST_KEY, h.concat(fresh).sort((a, b) => b.ts - a.ts).slice(0, 3000));
+  render();
+  return { bookmarks: added, history: fresh.length };
+}
+
+async function runImport(src, p, asNew) {
+  if (!Object.values(importWhat).some(Boolean)) return toast("Choose what to import first");
+  toast(`Importing from ${src.browser}…`, 30000);
+  try {
+    const r = await invoke("import_browser", { root: src.root, dir: p.dir, what: importWhat, asNew, name: p.name });
+    if (asNew) return toast(`Created profile “${r.profile}”. Switching to it…`, 3000); // the new sidebar applies the rest
+    const n = mergeImport(r);
+    toast(`Imported ${plural(n.bookmarks, "bookmark")}, ${plural(n.history, "history item")} and ${plural(r.extensions.length, "extension")}`, 6000);
+    refreshExtensions();
+  } catch (e) {
+    toast(`Import failed: ${errText(e)}`, 6000);
+  }
 }
 
 // ---- extensions ----
@@ -810,6 +880,7 @@ function profileMenu() {
     },
   }));
   items.push({ label: "New profile…", fn: () => setTimeout(newProfile, 0) });
+  items.push({ label: "Import from Chrome…", fn: () => openPanel("import") });
   showMenu(rect.left, rect.top - items.length * 32 - 14, items);
 }
 
@@ -864,6 +935,7 @@ const actions = {
   "history": () => openPanel("history"),
   "downloads": () => openPanel("downloads"),
   "extensions": () => openPanel("extensions"),
+  "import": () => openPanel("import"),
   "download-video": () => downloadVideo("video"),
   "browse-extensions": browseStore,
   "new-space": newSpace,
@@ -1039,6 +1111,12 @@ call("get_settings").then(s => {
 });
 loadProfiles();
 refreshExtensions();
+// A profile created by "Import … as new profile" receives its bookmarks and history here.
+call("take_pending_import").then(d => {
+  if (!d) return;
+  const n = mergeImport(d);
+  toast(`Imported ${plural(n.bookmarks, "bookmark")} and ${plural(n.history, "history item")}`, 5000);
+});
 refreshVideoTools();
 
 // Restore: reopen the active tab of the current space; other tabs open lazily.

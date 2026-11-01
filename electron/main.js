@@ -910,6 +910,170 @@ function openExtPopup(id) {
   extPopup.webContents.focus();
 }
 
+// ---- import from Chrome and other Chromium browsers ----
+
+// Bookmarks, history and installed extensions are plain files in each browser profile. Passwords and
+// cookies are encrypted with a Keychain/DPAPI key, so they are not imported (sites need one new sign-in).
+function browserRoots() {
+  if (process.env.ALCOVE_IMPORT_ROOT) return [{ browser: "Test Browser", dir: process.env.ALCOVE_IMPORT_ROOT }]; // tests only
+  const home = app.getPath("home");
+  if (process.platform === "darwin") {
+    const as = path.join(home, "Library", "Application Support");
+    return [
+      { browser: "Google Chrome", dir: path.join(as, "Google", "Chrome") },
+      { browser: "Microsoft Edge", dir: path.join(as, "Microsoft Edge") },
+      { browser: "Brave", dir: path.join(as, "BraveSoftware", "Brave-Browser") },
+      { browser: "Arc", dir: path.join(as, "Arc", "User Data") },
+      { browser: "Vivaldi", dir: path.join(as, "Vivaldi") },
+      { browser: "Chromium", dir: path.join(as, "Chromium") },
+    ];
+  }
+  if (process.platform === "win32") {
+    const local = process.env.LOCALAPPDATA || path.join(home, "AppData", "Local");
+    return [
+      { browser: "Google Chrome", dir: path.join(local, "Google", "Chrome", "User Data") },
+      { browser: "Microsoft Edge", dir: path.join(local, "Microsoft", "Edge", "User Data") },
+      { browser: "Brave", dir: path.join(local, "BraveSoftware", "Brave-Browser", "User Data") },
+      { browser: "Vivaldi", dir: path.join(local, "Vivaldi", "User Data") },
+    ];
+  }
+  const cfg = path.join(home, ".config");
+  return [
+    { browser: "Google Chrome", dir: path.join(cfg, "google-chrome") },
+    { browser: "Chromium", dir: path.join(cfg, "chromium") },
+    { browser: "Brave", dir: path.join(cfg, "BraveSoftware", "Brave-Browser") },
+    { browser: "Microsoft Edge", dir: path.join(cfg, "microsoft-edge") },
+  ];
+}
+
+const readJson = file => { try { return JSON.parse(fs.readFileSync(file, "utf8").replace(/^﻿/, "")); } catch { return null; } };
+
+function bookmarksOf(profileDir) {
+  const data = readJson(path.join(profileDir, "Bookmarks"));
+  const out = [];
+  const walk = n => {
+    if (!n || typeof n !== "object") return;
+    if (n.type === "url" && /^https?:/i.test(n.url || "")) out.push({ url: n.url, title: n.name || n.url });
+    for (const c of n.children || []) walk(c);
+  };
+  if (data && data.roots) for (const r of Object.values(data.roots)) walk(r);
+  return out;
+}
+
+// Chrome stores history in SQLite and keeps the file open, so read a copy.
+function historyOf(profileDir, limit = 3000) {
+  const src = path.join(profileDir, "History");
+  if (!fs.existsSync(src)) return [];
+  const tmp = path.join(app.getPath("temp"), `alcove-import-history-${Date.now()}.sqlite`);
+  try {
+    fs.copyFileSync(src, tmp);
+    const { DatabaseSync } = require("node:sqlite");
+    const db = new DatabaseSync(tmp, { readOnly: true });
+    const stmt = db.prepare("SELECT url, title, last_visit_time AS t FROM urls WHERE hidden = 0 ORDER BY last_visit_time DESC LIMIT ?");
+    stmt.setReadBigInts(true);
+    const rows = stmt.all(limit);
+    db.close();
+    // Chrome times are microseconds since 1601-01-01.
+    return rows
+      .filter(r => /^https?:/i.test(r.url))
+      .map(r => ({ url: r.url, title: r.title || r.url, ts: Number(BigInt(r.t) / 1000n) - 11644473600000 }));
+  } catch (e) {
+    console.error("history import:", e.message);
+    return [];
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
+function extensionName(manifest, dir) {
+  const name = manifest.name || "";
+  const m = /^__MSG_(\w+)__$/.exec(name);
+  if (!m) return name;
+  for (const loc of [manifest.default_locale, "en", "en_US"].filter(Boolean)) {
+    const msgs = readJson(path.join(dir, "_locales", loc, "messages.json"));
+    const hit = msgs && (msgs[m[1]] || msgs[m[1].toLowerCase()] || Object.entries(msgs).find(([k]) => k.toLowerCase() === m[1].toLowerCase())?.[1]);
+    if (hit && hit.message) return hit.message;
+  }
+  return name;
+}
+
+// Installed extensions live unpacked in Extensions/<id>/<version>/; take the newest version.
+function extensionsOf(profileDir) {
+  const root = path.join(profileDir, "Extensions");
+  let ids = [];
+  try { ids = fs.readdirSync(root).filter(id => /^[a-p]{32}$/.test(id)); } catch { return []; }
+  const out = [];
+  for (const id of ids) {
+    let versions = [];
+    try { versions = fs.readdirSync(path.join(root, id)).filter(v => fs.existsSync(path.join(root, id, v, "manifest.json"))); } catch {}
+    if (!versions.length) continue;
+    versions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const dir = path.join(root, id, versions[versions.length - 1]);
+    out.push({ id, dir, name: extensionName(readJson(path.join(dir, "manifest.json")) || {}, dir) });
+  }
+  return out;
+}
+
+function listImportSources() {
+  const out = [];
+  for (const r of browserRoots()) {
+    const state = readJson(path.join(r.dir, "Local State"));
+    const cache = state && state.profile && state.profile.info_cache;
+    if (!cache) continue;
+    const profiles = Object.entries(cache)
+      .filter(([dir]) => fs.existsSync(path.join(r.dir, dir)))
+      .map(([dir, info]) => {
+        const pdir = path.join(r.dir, dir);
+        return {
+          dir,
+          name: info.name || dir,
+          bookmarks: bookmarksOf(pdir).length,
+          extensions: extensionsOf(pdir).length,
+          history: fs.existsSync(path.join(pdir, "History")),
+        };
+      });
+    if (profiles.length) out.push({ browser: r.browser, root: r.dir, profiles });
+  }
+  return out;
+}
+
+const pendingImports = new Map(); // new profile id -> { bookmarks, history }, handed to its sidebar on load
+
+async function importFromBrowser({ root, dir, what = {}, asNew = false, name }) {
+  const r = browserRoots().find(x => path.resolve(x.dir) === path.resolve(String(root)));
+  if (!r) throw new Error("unknown browser");
+  const pdir = path.resolve(r.dir, String(dir));
+  if (path.dirname(pdir) !== path.resolve(r.dir) || !fs.existsSync(pdir)) throw new Error("profile not found");
+  const data = {
+    bookmarks: what.bookmarks ? bookmarksOf(pdir) : [],
+    history: what.history ? historyOf(pdir) : [],
+  };
+  const exts = what.extensions ? extensionsOf(pdir) : [];
+
+  if (asNew) {
+    // Copy extensions into the new profile's folder; they load when the app switches to it.
+    const profile = createProfile(String(name || dir).slice(0, 30));
+    let copied = 0;
+    for (const x of exts) {
+      try {
+        const dest = path.join(extRoot(profile.id), x.id);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.cpSync(x.dir, dest, { recursive: true });
+        copied++;
+      } catch (e) { console.error("extension import:", x.id, e.message); }
+    }
+    pendingImports.set(profile.id, data);
+    setImmediate(() => switchProfile(profile.id));
+    return { profile: profile.name, bookmarks: data.bookmarks.length, history: data.history.length, extensions: copied };
+  }
+
+  const installed = [];
+  for (const x of exts) {
+    try { installed.push((await installFromDir(x.dir, x.id)).name); } catch (e) { console.error("extension import:", x.id, e.message); }
+  }
+  return { ...data, extensions: installed };
+}
+
 // ---- command palette ----
 
 function hidePalette() {
@@ -1086,6 +1250,13 @@ const commands = {
     applyBlocking();
   },
   get_profiles: () => ({ profiles: config.profiles, active: config.activeProfile }),
+  list_import_sources: () => listImportSources(),
+  import_browser: args => importFromBrowser(args),
+  take_pending_import: () => {
+    const d = pendingImports.get(config.activeProfile) || null;
+    pendingImports.delete(config.activeProfile);
+    return d;
+  },
   create_profile: ({ name }) => createProfile(String(name).trim().slice(0, 30) || "Profile"),
   switch_profile: ({ id }) => { setImmediate(() => switchProfile(id)); },
   delete_profile: ({ id }) => deleteProfile(id),
@@ -1148,6 +1319,8 @@ function buildMenu() {
       item("bookmarks", "Bookmarks", "CmdOrCtrl+Shift+B"),
       item("history", "History", "CmdOrCtrl+Y"),
       item("downloads", "Downloads", "CmdOrCtrl+Shift+J"),
+      { type: "separator" },
+      { label: "Import from Browser…", click: () => send("shortcut", "import") },
     ] },
     { role: "windowMenu" },
   ]);
