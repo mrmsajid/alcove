@@ -196,3 +196,9 @@ body { transition: border-color .2s ease; }
 .banner span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner button { background: var(--accent); color: #fff; font-weight: 600; padding: 4px 10px; flex: none; }
 .banner button:hover { background: var(--accent); filter: brightness(1.08); }
+
+.browse-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 6px;
+  background: var(--accent); color: #fff; font-weight: 600; padding: 9px 12px; border-radius: var(--radius);
+}
+.browse-btn:hover { background: var(--accent); filter: brightness(1.08); }

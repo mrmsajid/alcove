@@ -453,6 +453,14 @@ function renderPanel() {
 
 // ---- extensions ----
 
+const STORE_HOME = "https://chromewebstore.google.com/category/extensions";
+
+function browseStore() {
+  panel = null;
+  renderPanel();
+  newTab(STORE_HOME);
+}
+
 async function renderExtensions() {
   const list = await call("list_extensions");
   if (panel !== "extensions") return;
@@ -470,8 +478,12 @@ async function renderExtensions() {
       refreshExtensions();
       renderExtensions();
     } }]));
-  $("panel-body").replaceChildren(...(rows.length ? rows : [Object.assign(document.createElement("div"),
-    { className: "empty", textContent: "No extensions yet. Paste a Chrome Web Store link above, or load an unpacked folder." })]));
+  const browse = document.createElement("button");
+  browse.className = "browse-btn";
+  browse.innerHTML = '<svg><use href="#i-puzzle"/></svg>Browse Chrome Web Store';
+  browse.addEventListener("click", browseStore);
+  $("panel-body").replaceChildren(browse, ...(rows.length ? rows : [Object.assign(document.createElement("div"),
+    { className: "empty", textContent: "No extensions yet. Browse the store, paste a link above, or load an unpacked folder." })]));
 }
 
 async function installExtension(input, tabId) {
@@ -596,6 +608,7 @@ const actions = {
   "history": () => openPanel("history"),
   "downloads": () => openPanel("downloads"),
   "extensions": () => openPanel("extensions"),
+  "browse-extensions": browseStore,
   "new-space": newSpace,
   "pin-tab": () => { const t = activeTab(); if (t) togglePin(t.id); },
 };
