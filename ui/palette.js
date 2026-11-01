@@ -6,7 +6,7 @@ const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; 
 
 const COMMANDS = [
   ["new-tab", "New Tab"], ["reopen-tab", "Reopen Closed Tab"], ["close-tab", "Close Tab"],
-  ["new-space", "New Space"], ["pin-tab", "Pin / Unpin Tab"], ["bookmark", "Bookmark This Page"],
+  ["new-space", "New Space"], ["pin-tab", "Pin / Unpin Tab"], ["new-group", "New Tab Group"], ["bookmark", "Bookmark This Page"],
   ["find", "Find in Page"], ["screenshot-region", "Screenshot Selected Area"], ["screenshot", "Screenshot Visible Area"], ["screenshot-full", "Screenshot Full Page"], ["extensions", "Show Extensions"], ["download-video", "Download YouTube Video"], ["browse-extensions", "Browse Chrome Web Store Extensions"], ["reload", "Reload"], ["zoom-in", "Zoom In"], ["zoom-out", "Zoom Out"],
   ["zoom-reset", "Actual Size"], ["bookmarks", "Show Bookmarks"], ["history", "Show History"],
   ["downloads", "Show Downloads"],
@@ -21,7 +21,10 @@ function normalize(input) {
 }
 
 const state = read("alcove-state-v1", { spaces: [] });
-const tabs = state.spaces.flatMap(s => s.tabs.map(t => ({ ...t, space: s.name })));
+const tabs = state.spaces.flatMap(s => s.tabs.map(t => {
+  const g = (s.groups || []).find(x => x.id === t.groupId);
+  return { ...t, space: g ? `${s.name} › ${g.name}` : s.name };
+}));
 const bookmarks = read("alcove-bookmarks", []);
 const history = read("alcove-history", []).slice(0, 300);
 

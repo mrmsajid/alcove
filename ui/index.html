@@ -20,6 +20,8 @@
       <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.5 11L12 15.5 16.5 11"/><path d="M5 19h14"/></symbol>
       <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2.5h7L17 8h3v11H4z"/><circle cx="12" cy="13.5" r="3.5"/></symbol>
       <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M10 4a2 2 0 1 1 4 0v2h4v4h-2a2 2 0 1 0 0 4h2v4h-4v-2a2 2 0 1 0-4 0v2H6v-4h2a2 2 0 1 0 0-4H6V6h4z"/></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v1H7v-1l3-3z"/><path d="M12 13v7"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
       <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
       <symbol id="i-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
@@ -70,7 +72,10 @@
   </div>
 
   <div id="pinned" class="pinned"></div>
-  <button id="new-tab" class="new-tab"><svg><use href="#i-plus"/></svg>New Tab</button>
+  <div class="new-row">
+    <button id="new-tab" class="new-tab"><svg><use href="#i-plus"/></svg>New Tab</button>
+    <button id="new-group" class="icon sm" title="New tab group"><svg><use href="#i-folder"/></svg></button>
+  </div>
   <div id="tabs" class="tabs"></div>
 
   <div id="panel" class="panel" hidden>

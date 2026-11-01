@@ -18,6 +18,9 @@ let state = read(STATE_KEY, null) || {
   spaces: [{ id: uid(), name: "Space 1", color: COLORS[0], tabs: [], active: null }],
   space: 0,
 };
+for (const sp of state.spaces) sp.groups ||= []; // tab groups: { id, name, color, collapsed }
+const GROUP_COLORS = ["#7c8cff", "#ff7c9c", "#5fd6a0", "#ffb86b", "#c27cff", "#6cc7ff", "#9aa0a6"];
+let renamingGroup = null; // group id whose name is being edited
 const opened = new Set(); // tab ids with a live webview this session
 const closed = [];        // recently closed tabs, for Reopen Closed Tab
 let panel = null;
@@ -126,25 +129,177 @@ function togglePin(id) {
   if (!t) return;
   t.pinned = !t.pinned;
   t.pinUrl = t.pinned ? t.url : undefined;
+  if (t.pinned) t.groupId = null;
   render();
 }
 
-function moveTab(id, beforeId, pinned) {
+// Drop before another tab (joining its pinned area or group), at the end of a group, or at the end of a list.
+function moveTab(id, beforeId, { pinned = false, toGroup = null } = {}) {
   if (id === beforeId) return;
   const tabs = space().tabs;
   const i = tabs.findIndex(t => t.id === id);
   if (i < 0) return;
   const [t] = tabs.splice(i, 1);
   const j = beforeId ? tabs.findIndex(x => x.id === beforeId) : -1;
-  if (j >= 0) {
+  if (toGroup) {
+    let last = -1;
+    tabs.forEach((x, k) => { if (!x.pinned && x.groupId === toGroup) last = k; });
+    t.pinned = false;
+    t.groupId = toGroup;
+    tabs.splice(last >= 0 ? last + 1 : tabs.length, 0, t);
+  } else if (j >= 0) {
     t.pinned = tabs[j].pinned;
+    t.groupId = t.pinned ? null : tabs[j].groupId || null;
     tabs.splice(j, 0, t);
   } else {
     t.pinned = !!pinned;
+    t.groupId = null;
     tabs.push(t);
   }
   if (t.pinned && !t.pinUrl) t.pinUrl = t.url;
   render();
+}
+
+// ---- tab groups ----
+
+const groupById = id => space().groups.find(g => g.id === id);
+const groupTabs = gid => space().tabs.filter(t => !t.pinned && t.groupId === gid);
+
+function focusRename() {
+  setTimeout(() => {
+    const input = document.querySelector(".group-head input");
+    if (input) { input.focus(); input.select(); }
+  }, 0);
+}
+
+function newGroup(tabId) {
+  const s = space();
+  const t = s.tabs.find(x => x.id === tabId);
+  if (!t) return;
+  const g = { id: uid(), name: "New group", color: GROUP_COLORS[s.groups.length % GROUP_COLORS.length], collapsed: false };
+  s.groups.push(g);
+  t.pinned = false;
+  t.pinUrl = undefined;
+  t.groupId = g.id;
+  renamingGroup = g.id;
+  render();
+  focusRename();
+}
+
+async function newGroupWithTab() {
+  await newTab();
+  const t = activeTab();
+  if (t) newGroup(t.id);
+}
+
+async function newTabInGroup(gid) {
+  const s = space();
+  const tab = { id: uid(), url: HOME, title: "New Tab", pinned: false, groupId: gid };
+  let last = -1;
+  s.tabs.forEach((x, k) => { if (!x.pinned && x.groupId === gid) last = k; });
+  s.tabs.splice(last >= 0 ? last + 1 : s.tabs.length, 0, tab);
+  const g = groupById(gid);
+  if (g) g.collapsed = false;
+  await activate(tab.id);
+}
+
+function commitRename(gid, value) {
+  const g = groupById(gid);
+  if (g && value.trim()) g.name = value.trim().slice(0, 40);
+  renamingGroup = null;
+  render();
+}
+
+function toggleGroup(gid) {
+  const g = groupById(gid);
+  if (g) { g.collapsed = !g.collapsed; render(); }
+}
+
+function recolorGroup(gid) {
+  const g = groupById(gid);
+  if (!g) return;
+  g.color = GROUP_COLORS[(GROUP_COLORS.indexOf(g.color) + 1) % GROUP_COLORS.length];
+  render();
+}
+
+function ungroup(gid) {
+  for (const t of space().tabs) if (t.groupId === gid) t.groupId = null;
+  space().groups = space().groups.filter(g => g.id !== gid);
+  render();
+}
+
+async function closeGroup(gid) {
+  for (const t of groupTabs(gid)) await closeTab(t.id);
+}
+
+function setTabGroup(tabId, gid) {
+  if (gid) return moveTab(tabId, null, { toGroup: gid });
+  const t = findTab(tabId);
+  if (t) { t.groupId = null; render(); }
+}
+
+function groupEl(g, members) {
+  const s = space();
+  const wrap = document.createElement("div");
+  wrap.className = "group" + (g.collapsed ? " collapsed" : "");
+  wrap.style.setProperty("--g", g.color);
+  const head = document.createElement("div");
+  head.className = "group-head";
+  head.title = g.collapsed ? "Expand group" : "Collapse group";
+  const dot = document.createElement("span");
+  dot.className = "gdot";
+  let name;
+  if (renamingGroup === g.id) {
+    name = document.createElement("input");
+    name.value = g.name;
+    name.addEventListener("click", e => e.stopPropagation());
+    name.addEventListener("keydown", e => {
+      if (e.key === "Enter") commitRename(g.id, name.value);
+      if (e.key === "Escape") { renamingGroup = null; render(); }
+    });
+    name.addEventListener("blur", () => { if (renamingGroup === g.id) commitRename(g.id, name.value); });
+  } else {
+    name = document.createElement("span");
+    name.className = "gname";
+    name.textContent = g.name;
+  }
+  const count = document.createElement("span");
+  count.className = "gcount";
+  count.textContent = members.length;
+  const chev = document.createElement("span");
+  chev.className = "chev";
+  chev.innerHTML = '<svg><use href="#i-down"/></svg>';
+  head.append(dot, name, count, chev);
+
+  head.addEventListener("click", () => { if (renamingGroup !== g.id) toggleGroup(g.id); });
+  head.addEventListener("dblclick", e => { e.stopPropagation(); renamingGroup = g.id; render(); focusRename(); });
+  head.addEventListener("contextmenu", e => {
+    e.preventDefault();
+    showMenu(e.clientX, e.clientY, [
+      { label: "Rename group", fn: () => { renamingGroup = g.id; render(); focusRename(); } },
+      { label: "Change color", fn: () => recolorGroup(g.id) },
+      { label: "New tab in group", fn: () => newTabInGroup(g.id) },
+      { label: g.collapsed ? "Expand" : "Collapse", fn: () => toggleGroup(g.id) },
+      { label: "Ungroup", fn: () => ungroup(g.id) },
+      { label: `Close group (${members.length})`, fn: () => closeGroup(g.id) },
+    ]);
+  });
+  head.addEventListener("dragover", e => { if (!dragId) return; e.preventDefault(); head.classList.add("drop-into"); });
+  head.addEventListener("dragleave", () => head.classList.remove("drop-into"));
+  head.addEventListener("drop", e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!dragId) return;
+    g.collapsed = false;
+    moveTab(dragId, null, { toGroup: g.id });
+  });
+
+  const body = document.createElement("div");
+  body.className = "group-tabs";
+  // A collapsed group still shows its active tab so the current page never disappears from the list.
+  body.append(...(g.collapsed ? members.filter(t => t.id === s.active) : members).map(tabEl));
+  wrap.append(head, body);
+  return wrap;
 }
 
 async function openUrl(url, inNewTab = false) {
@@ -341,18 +496,29 @@ function tabEl(t) {
   const title = document.createElement("span");
   title.className = "title";
   title.textContent = t.title || t.url;
+  const pin = document.createElement("button");
+  pin.className = "pin-btn";
+  pin.title = "Pin tab";
+  pin.innerHTML = '<svg><use href="#i-pin"/></svg>';
   const close = document.createElement("button");
   close.className = "close";
   close.innerHTML = '<svg><use href="#i-x"/></svg>';
-  el.append(favNode(t), title, close);
+  el.append(favNode(t), title, pin, close);
+  pin.addEventListener("click", e => { e.stopPropagation(); togglePin(t.id); });
 
   el.addEventListener("click", () => activate(t.id));
   el.addEventListener("auxclick", e => { if (e.button === 1) closeTab(t.id); });
   close.addEventListener("click", e => { e.stopPropagation(); closeTab(t.id); });
   el.addEventListener("contextmenu", e => {
     e.preventDefault();
+    const groupItems = t.pinned ? [] : [
+      { label: "Add to new group", fn: () => newGroup(t.id) },
+      ...space().groups.filter(g => g.id !== t.groupId).map(g => ({ label: `Move to “${g.name}”`, fn: () => setTabGroup(t.id, g.id) })),
+      ...(t.groupId ? [{ label: "Remove from group", fn: () => setTabGroup(t.id, null) }] : []),
+    ];
     showMenu(e.clientX, e.clientY, [
       { label: t.pinned ? "Unpin tab" : "Pin tab", fn: () => togglePin(t.id) },
+      ...groupItems,
       { label: "Duplicate", fn: () => newTab(t.url) },
       { label: "Copy link", fn: () => navigator.clipboard.writeText(t.url).then(() => toast("Link copied")) },
       { label: t.pinned ? "Unload tab" : "Close tab", fn: () => closeTab(t.id) },
@@ -382,8 +548,23 @@ function tabEl(t) {
 function render() {
   write(STATE_KEY, state);
   const s = space();
+  // Drop groups that no longer have tabs (except one being named right now).
+  s.groups = s.groups.filter(g => g.id === renamingGroup || s.tabs.some(t => !t.pinned && t.groupId === g.id));
+  for (const t of s.tabs) if (t.groupId && !s.groups.some(g => g.id === t.groupId)) t.groupId = null;
   $("pinned").replaceChildren(...s.tabs.filter(t => t.pinned).map(tabEl));
-  $("tabs").replaceChildren(...s.tabs.filter(t => !t.pinned).map(tabEl));
+  // Don't rebuild the list while a group name is being typed, or the text box would be replaced mid-edit.
+  const typing = renamingGroup && document.activeElement && document.activeElement.closest(".group-head");
+  if (!typing) {
+    const items = [];
+    const drawn = new Set();
+    for (const t of s.tabs.filter(x => !x.pinned)) {
+      if (!t.groupId) { items.push(tabEl(t)); continue; }
+      if (drawn.has(t.groupId)) continue;
+      drawn.add(t.groupId);
+      items.push(groupEl(groupById(t.groupId), groupTabs(t.groupId)));
+    }
+    $("tabs").replaceChildren(...items);
+  }
 
   $("spaces").replaceChildren(...state.spaces.map((sp, i) => {
     const d = document.createElement("div");
@@ -687,6 +868,7 @@ const actions = {
   "browse-extensions": browseStore,
   "new-space": newSpace,
   "pin-tab": () => { const t = activeTab(); if (t) togglePin(t.id); },
+  "new-group": () => { const t = activeTab(); if (t && !t.pinned && !t.groupId) newGroup(t.id); else newGroupWithTab(); },
 };
 
 listen("shortcut", e => actions[e.payload]?.());
@@ -753,6 +935,7 @@ $("addr-form").addEventListener("submit", e => {
 $("addr").addEventListener("focus", () => $("addr").select());
 
 $("new-tab").addEventListener("click", () => newTab());
+$("new-group").addEventListener("click", () => newGroupWithTab());
 $("new-space").addEventListener("click", newSpace);
 for (const a of ["back", "forward", "reload"]) $(a).addEventListener("click", () => navAction(a));
 $("star").addEventListener("click", toggleBookmark);
@@ -835,7 +1018,7 @@ $("find-close").addEventListener("click", closeFind);
 // Dropping on empty list space moves the tab to the end of that group.
 for (const [id, pinned] of [["pinned", true], ["tabs", false]]) {
   $(id).addEventListener("dragover", e => { if (dragId) e.preventDefault(); });
-  $(id).addEventListener("drop", e => { e.preventDefault(); if (dragId) moveTab(dragId, null, pinned); });
+  $(id).addEventListener("drop", e => { e.preventDefault(); if (dragId) moveTab(dragId, null, { pinned }); });
 }
 
 document.addEventListener("click", hideMenu);

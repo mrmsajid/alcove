@@ -110,7 +110,7 @@ input:focus { border-color: var(--accent); }
 .row .u { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
 .row button { padding: 2px 6px; color: var(--muted); }
 .empty { color: var(--muted); padding: 12px 8px; }
-body.panel-open #tabs, body.panel-open #pinned, body.panel-open #new-tab { display: none; }
+body.panel-open #tabs, body.panel-open #pinned, body.panel-open .new-row { display: none; }
 
 .bottom { padding-top: 6px; border-top: 1px solid var(--border); }
 .avatar {
@@ -205,3 +205,30 @@ body { transition: border-color .2s ease; }
 
 .banner button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
 .banner button.ghost:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); filter: none; }
+
+/* ---- new tab row, pin button, tab groups ---- */
+.new-row { display: flex; align-items: center; gap: 2px; }
+.new-row .new-tab { flex: 1; }
+.tab .pin-btn { width: 20px; height: 20px; padding: 0; color: var(--muted); visibility: hidden; }
+.tab .pin-btn svg { width: 13px; height: 13px; }
+.tab:hover .pin-btn { visibility: visible; }
+.tab.pin .pin-btn { display: none; }
+.group { display: flex; flex-direction: column; gap: 2px; }
+.group-head {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius);
+  cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; transition: background .14s ease;
+}
+.group-head:hover { background: var(--hover); }
+.group-head.drop-into { box-shadow: inset 0 0 0 2px var(--g); }
+.group-head .gdot { width: 10px; height: 10px; border-radius: 3px; background: var(--g); flex: none; }
+.group-head .gname { flex: 1; min-width: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-head input { flex: 1; min-width: 0; padding: 3px 7px; font-size: 12px; font-weight: 600; }
+.group-head .gcount { font-weight: 500; font-variant-numeric: tabular-nums; }
+.group-head .chev { display: inline-flex; transition: transform .18s ease; }
+.group-head .chev svg { width: 13px; height: 13px; }
+.group.collapsed .chev { transform: rotate(-90deg); }
+.group-tabs {
+  display: flex; flex-direction: column; gap: 2px; margin-left: 12px; padding-left: 6px;
+  border-left: 2px solid color-mix(in srgb, var(--g) 60%, transparent);
+}
+.group-tabs:empty { display: none; }
