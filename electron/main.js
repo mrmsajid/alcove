@@ -516,6 +516,9 @@ function startVideoDownload(url, kind) {
   const args = [
     "--no-playlist", "--newline", "--no-warnings", "--no-simulate", "--print", "after_move:filepath",
     "-f", format, "-o", path.join(downloadDir(), "%(title).120B [%(id)s].%(ext)s"),
+    // Speed: fetch up to 8 fragments at once, and request large files in 10 MB pieces
+    // (which also avoids YouTube slowing down one long connection).
+    "-N", "8", "--http-chunk-size", "10M",
   ];
   if (ffmpeg) args.push("--ffmpeg-location", path.dirname(ffmpeg));
   if (ffmpeg && audio) args.push("-x", "--audio-format", "mp3");
