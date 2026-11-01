@@ -31,6 +31,7 @@ let config = {
   adblockAllow: [], // hostnames where the blocker is off
   sponsorBlock: true, // skip sponsor segments on YouTube
   sitePermissions: {}, // "origin permission" -> allowed (true/false), for remembered choices
+  forceDark: [], // hostnames shown with a forced dark theme
   activeProfile: "default",
   profiles: [{ id: "default", name: "Default", color: COLORS[0] }],
 };
@@ -531,6 +532,7 @@ function openTab(id, url) {
     const u = wc.getURL();
     if (STORE_URL.test(u)) injectStoreFixes(wc);
     if (YT_PAGE.test(u)) applyYouTubeMode(wc);
+    if (config.forceDark.includes(hostKey(u))) applyDark(wc, true);
   });
   wc.on("console-message", (e, _level, legacyMessage) => {
     const message = typeof e.message === "string" ? e.message : legacyMessage;
@@ -548,6 +550,7 @@ function openTab(id, url) {
     return { action: "deny" };
   });
   wc.on("context-menu", (_e, p) => pageMenu(id, wc, p).popup());
+  wc.on("audio-state-changed", e => send("tab-audio", { id, audible: typeof e.audible === "boolean" ? e.audible : wc.isCurrentlyAudible(), muted: wc.isAudioMuted() }));
   wc.on("focus", () => send("tab-focused", { id })); // tells the sidebar which split pane is active
   showOnly(id);
   // Give the ad blocker a moment to load its rules so the first page is filtered too.
@@ -648,6 +651,21 @@ function peekToTab() {
   const url = peekView.webContents.getURL();
   closePeek();
   send("new-tab-request", { url });
+}
+
+// ---- forced dark mode for sites without one ----
+
+const DARK_CSS = `
+  html { filter: invert(.92) hue-rotate(180deg) !important; background: #fff !important; }
+  img, video, picture, canvas, iframe, embed, object, [style*="background-image"] { filter: invert(1) hue-rotate(180deg) !important; }
+`;
+const darkKeys = new WeakMap(); // webContents -> inserted CSS key
+const hostKey = url => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
+
+async function applyDark(wc, on) {
+  const key = darkKeys.get(wc);
+  if (key) { await wc.removeInsertedCSS(key).catch(() => {}); darkKeys.delete(wc); }
+  if (on) darkKeys.set(wc, await wc.insertCSS(DARK_CSS).catch(() => null));
 }
 
 // ---- picture in picture ----
@@ -1460,6 +1478,7 @@ async function deleteProfile(id) {
 // ---- IPC ----
 
 const wcOf = id => tabs.get(id)?.webContents;
+const fxCache = new Map();
 
 const commands = {
   open_tab: ({ id, url }) => openTab(id, url),
@@ -1489,6 +1508,62 @@ const commands = {
   peek_close: () => setImmediate(closePeek),
   peek_open_tab: () => setImmediate(peekToTab),
   pip: ({ id }) => pictureInPicture(wcOf(id)),
+  copy_text: ({ text }) => clipboard.writeText(String(text)),
+  mute_tab: ({ id }) => {
+    const wc = wcOf(id);
+    if (!wc) return null;
+    wc.setAudioMuted(!wc.isAudioMuted());
+    send("tab-audio", { id, audible: wc.isCurrentlyAudible(), muted: wc.isAudioMuted() });
+    return wc.isAudioMuted();
+  },
+  mute_all: ({ muted }) => {
+    for (const [id, v] of tabs) {
+      v.webContents.setAudioMuted(!!muted);
+      send("tab-audio", { id, audible: v.webContents.isCurrentlyAudible(), muted: !!muted });
+    }
+  },
+  toggle_dark: async ({ id }) => {
+    const wc = wcOf(id);
+    const host = wc && hostKey(wc.getURL());
+    if (!host) return null;
+    const on = !config.forceDark.includes(host);
+    config.forceDark = on ? [...config.forceDark, host] : config.forceDark.filter(h => h !== host);
+    saveConfig();
+    for (const v of tabs.values()) if (hostKey(v.webContents.getURL()) === host) await applyDark(v.webContents, on);
+    return { host, on };
+  },
+  // Finds text inside the pages of open tabs (tabs not loaded yet can't be searched).
+  search_tabs: async ({ q }) => {
+    const needle = String(q).toLowerCase().slice(0, 100);
+    if (needle.length < 3) return [];
+    const out = [];
+    await Promise.all([...tabs].map(async ([id, v]) => {
+      try {
+        const text = await Promise.race([
+          v.webContents.executeJavaScript(`(document.body && document.body.innerText || "").slice(0, 200000)`),
+          sleep(800).then(() => ""),
+        ]);
+        const i = String(text).toLowerCase().indexOf(needle);
+        if (i >= 0) out.push({ id, snippet: text.slice(Math.max(0, i - 40), i + needle.length + 60).replace(/\s+/g, " ").trim() });
+      } catch {}
+    }));
+    return out;
+  },
+  // Daily exchange rates (open.er-api.com, no account needed), cached for 6 hours.
+  fx_rates: async ({ base }) => {
+    const b = String(base).toUpperCase();
+    if (!/^[A-Z]{3}$/.test(b)) return null;
+    const hit = fxCache.get(b);
+    if (hit && Date.now() - hit.at < 6 * 3600e3) return hit.data;
+    try {
+      const res = await net.fetch(`https://open.er-api.com/v6/latest/${b}`);
+      const j = res.ok ? await res.json() : null;
+      if (!j || j.result !== "success") return null;
+      const data = { rates: j.rates, updated: j.time_last_update_utc };
+      fxCache.set(b, { at: Date.now(), data });
+      return data;
+    } catch { return null; }
+  },
   set_sponsorblock: ({ enabled }) => { config.sponsorBlock = !!enabled; saveConfig(); },
   site_permissions: ({ url }) => {
     let origin; try { origin = new URL(String(url)).origin; } catch { return []; }

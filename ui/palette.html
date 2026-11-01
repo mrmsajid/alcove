@@ -11,13 +11,22 @@
     #q { background: var(--bg); font-size: 15px; }
     #list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
     .row.sel { background: var(--hover); }
-    .kind { color: var(--muted); font-size: 11px; flex: none; }
+    .kind { color: var(--muted); font-size: 11px; flex: none; min-width: 58px; text-align: right; }
+    kbd {
+      flex: none; font: 11px -apple-system, "Segoe UI", sans-serif; color: var(--muted); padding: 2px 6px;
+      border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+    }
+    #qr { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+    #qr svg { width: 220px; height: 220px; background: #fff; border-radius: 10px; }
+    .qr-cap { color: var(--muted); font-size: 12px; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   </style>
 </head>
 <body>
   <input id="q" type="text" spellcheck="false" autocomplete="off" autofocus
-         placeholder="Search tabs, bookmarks, history — or type a URL">
+         placeholder="Search or run anything: tabs, history, yt …, 5 kg to lb, =12*8">
   <div id="list"></div>
+  <div id="qr" hidden></div>
+  <script src="vendor/qrcode.js"></script>
   <script src="palette.js"></script>
 </body>
 </html>

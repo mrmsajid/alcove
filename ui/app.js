@@ -25,7 +25,8 @@ for (const sp of state.spaces) {
 const GROUP_COLORS = ["#7c8cff", "#ff7c9c", "#5fd6a0", "#ffb86b", "#c27cff", "#6cc7ff", "#9aa0a6"];
 let renamingGroup = null; // group id whose name is being edited
 const opened = new Set(); // tab ids with a live webview this session
-const closed = [];        // recently closed tabs, for Reopen Closed Tab
+const CLOSED_KEY = "alcove-closed"; // recently closed tabs (newest first), shared with the palette
+const audio = new Map();  // tab id -> { audible, muted }
 let panel = null;
 let dragId = null;
 const seen = new Map(); // tab id -> first render time, so only new tabs animate in
@@ -185,7 +186,7 @@ async function closeTab(id) {
     t.url = t.pinUrl || t.url; // pinned tabs unload instead of disappearing
   } else {
     s.tabs.splice(i, 1);
-    closed.push({ url: t.url, title: t.title });
+    write(CLOSED_KEY, [{ url: t.url, title: t.title, ts: Date.now() }, ...read(CLOSED_KEY, [])].slice(0, 25));
   }
   if (s.active === id) {
     const rest = s.tabs.filter(x => x.id !== id);
@@ -196,9 +197,79 @@ async function closeTab(id) {
   }
 }
 
-async function reopenClosed() {
-  const t = closed.pop();
+async function reopenClosed(url) {
+  const list = read(CLOSED_KEY, []);
+  const i = url ? list.findIndex(c => c.url === url) : 0;
+  const t = i >= 0 ? list.splice(i, 1)[0] : (url ? { url } : null);
+  write(CLOSED_KEY, list);
   if (t) await newTab(t.url);
+}
+
+// ---- tab cleanup (palette commands) ----
+
+async function closeDuplicates() {
+  const cur = activeTab();
+  const seen = new Set(cur ? [cur.url] : []);
+  const dupes = [];
+  for (const t of orderedTabs()) {
+    if (cur && t.id === cur.id) continue;
+    if (seen.has(t.url) && !t.pinned) dupes.push(t.id);
+    else seen.add(t.url);
+  }
+  for (const id of dupes) await closeTab(id);
+  toast(dupes.length ? `Closed ${plural(dupes.length, "duplicate tab")}` : "No duplicate tabs");
+}
+
+async function closeMany(ids, what) {
+  if (ids.length >= 6 && !confirm(`Close ${ids.length} ${what}?`)) return;
+  for (const id of ids) await closeTab(id);
+  toast(ids.length ? `Closed ${plural(ids.length, "tab")} · reopen with ⌘⇧T` : "Nothing to close");
+}
+const closeOthers = () => closeMany(space().tabs.filter(t => !t.pinned && t.id !== space().active).map(t => t.id), "other tabs");
+function closeBelow() {
+  const list = orderedTabs().filter(t => !t.pinned);
+  const i = list.findIndex(t => t.id === space().active);
+  return closeMany(i >= 0 ? list.slice(i + 1).map(t => t.id) : [], "tabs below this one");
+}
+
+// Groups loose tabs by site: every site with two or more tabs gets its own tab group.
+function tidyTabs() {
+  const s = space();
+  const bySite = new Map();
+  for (const t of s.tabs) {
+    if (t.pinned || t.groupId) continue;
+    const host = hostOf(t.url);
+    if (!host) continue;
+    if (!bySite.has(host)) bySite.set(host, []);
+    bySite.get(host).push(t);
+  }
+  let made = 0;
+  for (const [host, list] of bySite) {
+    if (list.length < 2) continue;
+    const label = host.split(".").slice(-2, -1)[0] || host;
+    const g = { id: uid(), name: label.charAt(0).toUpperCase() + label.slice(1), color: GROUP_COLORS[s.groups.length % GROUP_COLORS.length], collapsed: false };
+    s.groups.push(g);
+    for (const t of list) { t.groupId = g.id; t.parentId = null; }
+    made++;
+  }
+  render();
+  toast(made ? `Grouped tabs into ${plural(made, "site group")}` : "No site has more than one tab");
+}
+
+async function moveTabToSpace(index) {
+  const s = space();
+  const t = activeTab();
+  const target = state.spaces[index];
+  if (!t || !target || target === s) return;
+  if (inSplit(t.id)) await exitSplit();
+  s.tabs = s.tabs.filter(x => x.id !== t.id);
+  Object.assign(t, { groupId: null, parentId: null, pinned: false });
+  target.tabs.push(t);
+  const next = orderedTabs()[0];
+  s.active = next ? next.id : null;
+  state.space = index;
+  await activate(t.id);
+  toast(`Moved to ${target.name}`);
 }
 
 function togglePin(id) {
@@ -614,7 +685,16 @@ function tabEl(t, depth = 0, kids = 0) {
     chev.addEventListener("click", e => { e.stopPropagation(); t.kidsCollapsed = !t.kidsCollapsed; render(); });
     el.append(chev);
   }
-  el.append(favNode(t), title, pin, close);
+  const snd = audio.get(t.id);
+  let sound = null;
+  if (snd && (snd.audible || snd.muted)) {
+    sound = document.createElement("button");
+    sound.className = "sound" + (snd.muted ? " muted" : "");
+    sound.title = snd.muted ? "Unmute tab" : "Mute tab";
+    sound.innerHTML = `<svg><use href="#${snd.muted ? "i-muted" : "i-speaker"}"/></svg>`;
+    sound.addEventListener("click", e => { e.stopPropagation(); call("mute_tab", { id: t.id }); });
+  }
+  el.append(favNode(t), title, ...(sound ? [sound] : []), pin, close);
   pin.addEventListener("click", e => { e.stopPropagation(); togglePin(t.id); });
 
   el.addEventListener("click", () => activate(t.id));
@@ -1182,6 +1262,24 @@ const actions = {
     else if (r && String(r).startsWith("error")) toast("Picture in picture isn't available for this video");
   },
   "toggle-sponsorblock": () => setSponsorBlock(!sponsorBlock),
+  "tidy-tabs": tidyTabs,
+  "close-duplicates": closeDuplicates,
+  "close-others": closeOthers,
+  "close-below": closeBelow,
+  "mute-tab": async () => {
+    const t = activeTab();
+    if (!t || !opened.has(t.id)) return;
+    const m = await call("mute_tab", { id: t.id });
+    toast(m ? "Tab muted" : "Tab unmuted");
+  },
+  "mute-all": () => { call("mute_all", { muted: true }); toast("All tabs muted"); },
+  "unmute-all": () => { call("mute_all", { muted: false }); toast("All tabs unmuted"); },
+  "force-dark": async () => {
+    const t = activeTab();
+    if (!t || !opened.has(t.id)) return;
+    const r = await call("toggle_dark", { id: t.id });
+    if (r) toast(r.on ? `Dark mode forced on ${r.host}` : `Forced dark mode off for ${r.host}`);
+  },
   "new-group": () => { const t = activeTab(); if (t && !t.pinned && !t.groupId) newGroup(t.id); else newGroupWithTab(); },
 };
 
@@ -1191,7 +1289,14 @@ listen("palette-action", ({ payload: p }) => {
   if (p.type === "tab") goToTab(p.id);
   else if (p.type === "url") openUrl(p.url, !!p.newTab);
   else if (p.type === "cmd") actions[p.id]?.();
+  else if (p.type === "space") switchSpace(p.index);
+  else if (p.type === "profile") call("switch_profile", { id: p.id });
+  else if (p.type === "split") { const a = space().active; if (a) startSplit(a, p.id); }
+  else if (p.type === "move") moveTabToSpace(p.index);
+  else if (p.type === "reopen") reopenClosed(p.url);
+  else if (p.type === "toast") toast(p.text);
 });
+listen("tab-audio", ({ payload: p }) => { audio.set(p.id, { audible: p.audible, muted: p.muted }); render(); });
 
 listen("new-tab-request", ({ payload }) => {
   if (payload.background) { backgroundTab(payload.url, payload.from); toast("Opened in background", 1500); }

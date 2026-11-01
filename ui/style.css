@@ -333,3 +333,7 @@ body.win .winctl { margin-right: 6px; }
 .avatar { width: 22px; height: 22px; margin-right: 4px; }
 .space-dot { width: 7px; height: 7px; }
 .space-dot.active { transform: scale(1.35); }
+/* speaker on tabs playing sound (click to mute) */
+.tab .sound { width: 20px; height: 20px; padding: 0; color: var(--muted); flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.tab .sound svg { width: 14px; height: 14px; }
+.tab .sound:not(.muted) { color: var(--text); }
