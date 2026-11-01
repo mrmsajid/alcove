@@ -76,7 +76,11 @@ const BANGS = {
 const ASIN = /^B0[A-Z0-9]{8}$/i;
 
 let appSettings = {}; // for the search engine (Settings › Search engine)
-invoke("get_app_settings").then(s => { appSettings = s || {}; render(); }).catch(() => {});
+invoke("get_app_settings").then(s => {
+  appSettings = s || {};
+  if (appSettings.accent) document.documentElement.style.setProperty("--accent", appSettings.accent);
+  render();
+}).catch(() => {});
 
 function normalize(input) {
   const v = input.trim();

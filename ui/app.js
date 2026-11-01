@@ -10,7 +10,7 @@ const newTabUrl = () => appSettings.newTab === "blank" ? "about:blank"
   : engineHome(appSettings);
 function applyAppSettings(s) {
   appSettings = s || {};
-  document.documentElement.style.setProperty("--accent", appSettings.accent || "#7c8cff");
+  document.documentElement.style.setProperty("--accent", appSettings.accent || "#76767f");
   const size = { small: "12.5px", large: "15px" }[appSettings.textSize] || "13.5px";
   document.documentElement.style.fontSize = document.body.style.fontSize = size;
 }
@@ -828,8 +828,9 @@ let videoTools = { ready: false, ffmpeg: false };
 const refreshVideoTools = () => call("video_tools").then(v => { if (v) { videoTools = v; renderChrome(); } });
 let videoJob = null; // the running download, if any
 
-// The sidebar and the window frame around the page share one color: the theme background tinted
-// slightly (4%) toward the space color.
+// The sidebar and the window frame around the page share one neutral color. With glass on, it becomes a
+// translucent tint over the frosted window (Settings › Appearance › Frost), and the sidebar page itself
+// is transparent so both look the same.
 const hexRgb = h => {
   h = String(h).trim().replace("#", "");
   if (h.length === 3) h = [...h].map(c => c + c).join("");
@@ -861,8 +862,15 @@ function renderChrome() {
   document.documentElement.style.setProperty("--space", space().color);
   document.body.classList.toggle("theme-light", space().theme === "light");
   document.body.classList.toggle("theme-dark", space().theme === "dark");
-  const chrome = mixHex(space().color, getComputedStyle(document.body).getPropertyValue("--bg"), 0.04);
-  document.documentElement.style.setProperty("--chrome", chrome);
+  const solid = mixHex("#000000", getComputedStyle(document.body).getPropertyValue("--bg"), 0);
+  const glass = appSettings.glass !== false && /Mac|Windows/.test(navigator.userAgent);
+  const frost = Number.isFinite(appSettings.frost) ? appSettings.frost : 55;
+  const alpha = Math.round((0.15 + 0.85 * frost / 100) * 100) / 100; // 0 → mostly clear glass, 100 → solid
+  const [r, g, b] = hexRgb(solid);
+  const chrome = glass ? `rgba(${r}, ${g}, ${b}, ${alpha})` : solid;
+  document.body.classList.toggle("glass", glass);
+  document.documentElement.style.setProperty("--chrome", glass ? "transparent" : solid);
+  document.documentElement.style.setProperty("--chrome-solid", solid);
   if (chrome !== sentChrome) { sentChrome = chrome; call("set_chrome_color", { color: chrome }); }
   const t = activeTab();
   $("yt-banner").hidden = !(t && YT_RE.test(t.url));

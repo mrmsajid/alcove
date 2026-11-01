@@ -337,3 +337,11 @@ body.win .winctl { margin-right: 6px; }
 .tab .sound { width: 20px; height: 20px; padding: 0; color: var(--muted); flex: none; display: inline-flex; align-items: center; justify-content: center; }
 .tab .sound svg { width: 14px; height: 14px; }
 .tab .sound:not(.muted) { color: var(--text); }
+
+/* ---- glass: frosted window shows through; the floating sidebar stays readable over pages ---- */
+:root { --accent: #76767f; }
+body.glass { background: transparent; }
+body.glass.overlay { background: var(--chrome-solid, var(--bg)); }
+body.glass .pill { background: color-mix(in srgb, var(--text) 9%, transparent); }
+body.glass .tab.pin { background: color-mix(in srgb, var(--text) 7%, transparent); }
+body.glass .tab.active, body.glass .tab.pin.active { background: color-mix(in srgb, var(--text) 13%, transparent); }

@@ -44,7 +44,8 @@ const DEFAULT_SETTINGS = {
   startup: "restore", startupUrl: "",       // restore | newtab | custom
   newTab: "engine", newTabUrl: "",          // engine | blank | custom
   downloadDir: "", askDownload: false,
-  theme: "system", accent: "#7c8cff", textSize: "default", defaultZoom: 1, compact: false,
+  theme: "system", accent: "#76767f", textSize: "default", defaultZoom: 1, compact: false,
+  glass: true, frost: 55,                   // frosted see-through sidebar and frame; frost 0 = clear, 100 = solid
   dnt: true, httpsOnly: false, spellcheck: true,
 };
 const SETTING_RULES = {
@@ -64,6 +65,8 @@ const SETTING_RULES = {
   dnt: v => typeof v === "boolean",
   httpsOnly: v => typeof v === "boolean",
   spellcheck: v => typeof v === "boolean",
+  glass: v => typeof v === "boolean",
+  frost: v => typeof v === "number" && v >= 0 && v <= 100,
 };
 const S = () => config.settings;
 const configPath = () => path.join(app.getPath("userData"), "config.json");
@@ -71,6 +74,11 @@ const configPath = () => path.join(app.getPath("userData"), "config.json");
 function loadConfig() {
   try { config = { ...config, ...JSON.parse(fs.readFileSync(configPath(), "utf8")) }; } catch {}
   config.settings = { ...DEFAULT_SETTINGS, ...(config.settings || {}) };
+  // v2: the old blue default accent (saved by earlier builds) becomes the new neutral default.
+  if ((config.settingsVersion || 1) < 2) {
+    if (config.settings.accent === "#7c8cff") config.settings.accent = DEFAULT_SETTINGS.accent;
+    config.settingsVersion = 2;
+  }
   if (!config.profiles.some(p => p.id === config.activeProfile)) config.activeProfile = "default";
 }
 function saveConfig() {
@@ -767,7 +775,18 @@ function closeSettings() {
   send("settings-open", { open: false });
 }
 
+// Glass: the window shows the desktop blurred behind it (macOS vibrancy, Windows 11 acrylic). The sidebar
+// page is transparent and the window color carries the frost tint, so sidebar and frame match.
+function applyGlass() {
+  if (!win || win.isDestroyed()) return;
+  if (process.platform === "darwin") win.setVibrancy(S().glass ? "sidebar" : null);
+  if (process.platform === "win32" && typeof win.setBackgroundMaterial === "function") {
+    try { win.setBackgroundMaterial(S().glass ? "acrylic" : "none"); } catch {}
+  }
+}
+
 function applySetting(key) {
+  if (key === "glass") applyGlass();
   if (key === "theme") nativeTheme.themeSource = S().theme;
   if (key === "compact") {
     for (const v of tabs.values()) if (typeof v.setBorderRadius === "function") v.setBorderRadius(cardRadius());
@@ -1539,6 +1558,7 @@ function createUi() {
       partition: uiPartition(config.activeProfile),
     },
   });
+  ui.setBackgroundColor("#00000000"); // lets the glass show through when it's on
   ui.webContents.on("will-navigate", e => e.preventDefault());
   ui.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.contentView.addChildView(ui);
@@ -1635,8 +1655,8 @@ const commands = {
   debug_page_menu: ({ id, params }) => process.env.ALCOVE_TEST === "1" && wcOf(id)
     ? pageMenu(id, wcOf(id), { mediaType: "none", selectionText: "", isEditable: false, linkURL: "", srcURL: "", x: 0, y: 0, ...params }).items.map(i => i.type === "separator" ? "—" : i.label || i.role)
     : null,
-  peek_close: () => setImmediate(closePeek),
-  peek_open_tab: () => setImmediate(peekToTab),
+  peek_close: () => { setImmediate(closePeek); },
+  peek_open_tab: () => { setImmediate(peekToTab); },
   pip: ({ id }) => pictureInPicture(wcOf(id)),
   copy_text: ({ text }) => clipboard.writeText(String(text)),
 
@@ -1695,7 +1715,7 @@ const commands = {
     for (const v of tabs.values()) if (hostKey(v.webContents.getURL()) === host) applyDark(v.webContents, false);
   },
   open_settings: ({ section } = {}) => openSettings(section),
-  close_settings: () => setImmediate(closeSettings),
+  close_settings: () => { setImmediate(closeSettings); },
   mute_tab: ({ id }) => {
     const wc = wcOf(id);
     if (!wc) return null;
@@ -1778,7 +1798,7 @@ const commands = {
     ui.webContents.focus();
   },
   show_palette: showPalette,
-  hide_palette: () => setImmediate(hidePalette),
+  hide_palette: () => { setImmediate(hidePalette); },
   reveal: ({ path: p }) => shell.showItemInFolder(p),
   screenshot: ({ id, mode }) => screenshot(id, mode),
   screenshot_region: ({ id }) => startRegion(id),
@@ -1803,7 +1823,11 @@ const commands = {
   ).catch(() => {}),
 
   toggle_sidebar: toggleSidebar,
-  set_chrome_color: ({ color }) => { if (/^#[0-9a-f]{6}$/i.test(String(color))) win.setBackgroundColor(color); },
+  // Window color behind the sidebar and around the page card (translucent when glass is on).
+  set_chrome_color: ({ color }) => {
+    const c = String(color);
+    if (/^#[0-9a-f]{6}$/i.test(c) || /^rgba\(\d{1,3}, ?\d{1,3}, ?\d{1,3}, ?(0|1|0?\.\d+)\)$/.test(c)) win.setBackgroundColor(c);
+  },
   window_action: ({ action }) => windowAction(action),
   drag_start: startDrag,
   drag_end: () => clearInterval(dragTimer),
@@ -1957,7 +1981,8 @@ app.whenReady().then(() => {
   win = new BaseWindow({
     width: 1280, height: 800, minWidth: 640, minHeight: 400,
     title: p.id === "default" ? "Alcove" : `Alcove — ${p.name}`,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#17171c" : "#f4f4f7",
+    backgroundColor: S().glass ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#1d1d20" : "#ececef",
+    ...(process.platform === "darwin" && S().glass ? { vibrancy: "sidebar", visualEffectState: "active" } : {}),
     autoHideMenuBar: true,
     // No title bar: window controls live in the sidebar (native lights on macOS, drawn ones elsewhere).
     ...(process.platform === "darwin"
@@ -1965,6 +1990,7 @@ app.whenReady().then(() => {
       : { frame: false }),
   });
   perf("window created");
+  if (process.platform === "win32") applyGlass();
   createUi();
   createStrip();
   win.on("resize", layout);

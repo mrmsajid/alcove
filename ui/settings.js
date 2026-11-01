@@ -86,8 +86,10 @@ const SECTIONS = [
   ["appearance", "Appearance", () => [card(
     row("Theme", "Light or dark for Alcove and for sites that support it.", seg(S.theme, [["system", "System"], ["light", "Light"], ["dark", "Dark"]], v => set("theme", v))),
     row("Accent color", "Buttons, highlights and focus rings.",
-      h("div", { class: "swatches" }, ...["#7c8cff", "#5fd6a0", "#ff7c9c", "#ffb86b", "#c27cff", "#6cc7ff", "#e8e8ee"].map(c =>
+      h("div", { class: "swatches" }, ...["#76767f", "#7c8cff", "#5fd6a0", "#ff7c9c", "#ffb86b", "#c27cff", "#6cc7ff"].map(c =>
         h("button", { class: "swatch" + (S.accent === c ? " on" : ""), style: `background:${c}`, title: c, on: { click: () => set("accent", c) } })))),
+    row("Glass sidebar", "See-through, frosted sidebar and window frame (macOS vibrancy, Windows 11 acrylic).", toggle(S.glass, v => set("glass", v))),
+    S.glass ? row("Frost", "How much the glass is tinted: clear shows more of what's behind the window.", frostSlider()) : null,
     row("Sidebar text size", null, seg(S.textSize, [["small", "Small"], ["default", "Default"], ["large", "Large"]], v => set("textSize", v))),
     row("Page zoom", "Default zoom for new pages. ⌘+ / ⌘− still change one tab.",
       h("select", { on: { change: e => set("defaultZoom", parseFloat(e.target.value)) } },
@@ -174,6 +176,19 @@ const SECTIONS = [
   )]],
 ];
 
+// Live while dragging (throttled), saved when released.
+function frostSlider() {
+  const out = h("span", { class: "path", style: "direction:ltr;min-width:34px;text-align:right" }, `${S.frost}%`);
+  const input = h("input", { type: "range", min: "0", max: "100", step: "1", value: String(S.frost), style: "width:200px;padding:0;accent-color:var(--accent)" });
+  let last = 0;
+  input.addEventListener("input", () => {
+    out.textContent = `${input.value}%`;
+    if (Date.now() - last > 80) { last = Date.now(); invoke("set_app_setting", { key: "frost", value: Number(input.value) }).then(s => { S = s; }); }
+  });
+  input.addEventListener("change", () => invoke("set_app_setting", { key: "frost", value: Number(input.value) }).then(s => { S = s; }));
+  return h("span", { style: "display:flex;align-items:center;gap:10px" }, h("span", { class: "d", style: "color:var(--muted);font-size:12px" }, "Clear"), input, h("span", { class: "d", style: "color:var(--muted);font-size:12px" }, "Frosted"), out);
+}
+
 function clearDataCard() {
   const opts = [["history", "Browsing history", true], ["downloads", "Download list", true], ["closed", "Recently closed tabs", true], ["cookies", "Cookies and site data (signs you out of sites)", false], ["cache", "Cached images and files", true]];
   const boxes = {};
@@ -207,7 +222,7 @@ async function sidebar(cmd) {
 let current = location.hash.slice(1) || "search";
 
 function render() {
-  document.documentElement.style.setProperty("--accent", S.accent || "#7c8cff");
+  document.documentElement.style.setProperty("--accent", S.accent || "#76767f");
   const scroll = $("main").scrollTop;
   $("sections").replaceChildren(...SECTIONS.map(([id, title, build]) =>
     h("section", { id }, h("h2", {}, title), ...build())));
@@ -258,7 +273,11 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape") { if ($("find").value) { $("find").value = ""; applyFind(); } else invoke("close_settings"); }
   if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); $("find").focus(); }
 });
-listen("settings-changed", ({ payload }) => { S = payload; render(); });
+listen("settings-changed", ({ payload }) => {
+  S = payload;
+  if (document.activeElement && document.activeElement.type === "range") return; // don't rebuild the slider mid-drag
+  render();
+});
 
 Promise.all([invoke("get_app_settings"), invoke("get_app_info"), invoke("get_site_settings")]).then(([s, i, st]) => {
   S = s; info = i; sites = st;
