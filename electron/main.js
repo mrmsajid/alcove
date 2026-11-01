@@ -1,33 +1,128 @@
-const { app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session } = require("electron");
+const {
+  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme,
+} = require("electron");
 const path = require("path");
 const fs = require("fs");
 
 const SIDEBAR_W = 280;
-const PARTITION = "persist:alcove";
 const PRELOAD = path.join(__dirname, "preload.js");
+const COLORS = ["#7c8cff", "#ff7c9c", "#5fd6a0", "#ffb86b", "#c27cff"];
 const uiFile = name => path.join(__dirname, "ui", name);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ---- config (profiles + settings) ----
+
+let config = {
+  collapsed: false,
+  adblock: true,
+  activeProfile: "default",
+  profiles: [{ id: "default", name: "Default", color: COLORS[0] }],
+};
+const configPath = () => path.join(app.getPath("userData"), "config.json");
+
+function loadConfig() {
+  try { config = { ...config, ...JSON.parse(fs.readFileSync(configPath(), "utf8")) }; } catch {}
+  if (!config.profiles.some(p => p.id === config.activeProfile)) config.activeProfile = "default";
+}
+function saveConfig() {
+  try { fs.writeFileSync(configPath(), JSON.stringify(config, null, 2)); } catch {}
+}
+
+// Each profile gets its own cookie jar (web) and its own sidebar storage (ui: tabs, bookmarks, history).
+// The default profile keeps the original partitions so existing data carries over.
+const webPartition = id => (id === "default" ? "persist:alcove" : `persist:web-${id}`);
+const uiPartition = id => (id === "default" ? undefined : `persist:ui-${id}`);
+
+// ---- state ----
 
 let win;
 let ui;
 let palette = null;
-const tabs = new Map(); // tab id -> WebContentsView
+const tabs = new Map();      // tab id -> WebContentsView
+const wcToTab = new Map();   // webContents id -> tab id
 const lastFind = new Map();
+const blocked = new Map();   // tab id -> blocked request count
+const knownSessions = new Set();
+let blocker = null;
+let blockerReady = Promise.resolve();
+
+let collapsed = false;
+let peeking = false;
+let sidebarBusy = false;
+let sidebarX = 0;
+let animTimer = null;
 
 const send = (name, payload) => {
   if (ui && !ui.webContents.isDestroyed()) ui.webContents.send("event", name, payload);
 };
 
+// ---- layout / sliding sidebar ----
+
 function layout() {
   const { width, height } = win.getContentBounds();
-  ui.setBounds({ x: 0, y: 0, width: SIDEBAR_W, height });
+  const left = collapsed ? 0 : SIDEBAR_W;
+  ui.setBounds({ x: Math.round(collapsed ? sidebarX : 0), y: 0, width: SIDEBAR_W, height });
   for (const v of tabs.values()) {
-    v.setBounds({ x: SIDEBAR_W, y: 0, width: Math.max(width - SIDEBAR_W, 1), height });
+    v.setBounds({ x: left, y: 0, width: Math.max(width - left, 1), height });
   }
 }
 
-function showOnly(id) {
-  for (const [k, v] of tabs) v.setVisible(k === id);
+const raiseUi = () => win.contentView.addChildView(ui); // re-adding moves a view to the top
+
+function animateSidebar(to, ms = 170) {
+  clearInterval(animTimer);
+  const from = sidebarX;
+  const start = Date.now();
+  animTimer = setInterval(() => {
+    const t = Math.min((Date.now() - start) / ms, 1);
+    sidebarX = from + (to - from) * (1 - Math.pow(1 - t, 3));
+    layout();
+    if (t === 1) clearInterval(animTimer);
+  }, 16);
 }
+
+const sidebarState = () => send("sidebar-state", { collapsed, peek: peeking });
+
+function peek(on) {
+  if (!collapsed || peeking === on) return;
+  peeking = on;
+  if (on) raiseUi();
+  animateSidebar(on ? 0 : -SIDEBAR_W);
+  sidebarState();
+}
+
+function toggleSidebar() {
+  collapsed = !collapsed;
+  config.collapsed = collapsed;
+  saveConfig();
+  peeking = false;
+  clearInterval(animTimer);
+  if (collapsed) {
+    raiseUi();
+    sidebarX = 0;
+    layout();
+    animateSidebar(-SIDEBAR_W);
+  } else {
+    sidebarX = 0;
+    layout();
+  }
+  sidebarState();
+}
+
+// Cursor polling is simpler and more reliable than a transparent hot-zone view over the page.
+function watchCursor() {
+  setInterval(() => {
+    if (!collapsed || !win || win.isDestroyed() || !win.isFocused()) return;
+    const p = screen.getCursorScreenPoint();
+    const b = win.getContentBounds();
+    const inside = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
+    const rel = p.x - b.x;
+    if (!peeking && inside && rel <= 3) peek(true);
+    else if (peeking && !sidebarBusy && (!inside || rel > SIDEBAR_W + 12)) peek(false);
+  }, 80);
+}
+
+// ---- sessions, downloads, ad blocker ----
 
 function uniquePath(p) {
   if (!fs.existsSync(p)) return p;
@@ -38,11 +133,35 @@ function uniquePath(p) {
   }
 }
 
-function setupSession() {
-  const ses = session.fromPartition(PARTITION);
+const COSMETIC_CHANNELS = [
+  "@ghostery/adblocker/inject-cosmetic-filters",
+  "@ghostery/adblocker/is-mutation-observer-enabled",
+];
+
+// Only the active profile's web session is filtered. The blocker registers global IPC
+// handlers per session, so it can only be enabled on one session at a time.
+function applyBlocking() {
+  if (!blocker) return;
+  const active = session.fromPartition(webPartition(config.activeProfile));
+  try {
+    for (const ses of knownSessions) {
+      const want = config.adblock && ses === active;
+      if (blocker.isBlockingEnabled(ses) && !want) blocker.disableBlockingInSession(ses);
+    }
+    if (config.adblock && !blocker.isBlockingEnabled(active)) {
+      for (const ch of COSMETIC_CHANNELS) ipcMain.removeHandler(ch);
+      blocker.enableBlockingInSession(active);
+    }
+  } catch (e) { console.error("ad blocker:", e.message); }
+}
+
+function ensureSession(partition) {
+  const ses = session.fromPartition(partition);
+  if (knownSessions.has(ses)) return ses;
+  knownSessions.add(ses);
   // Some sites refuse to work when the UA names Electron.
   ses.setUserAgent(ses.getUserAgent().replace(/\s(Electron|alcove|Alcove)\/\S+/gi, ""));
-  // Deny camera, mic, geolocation, notifications etc. until the app has a permission prompt.
+  // Camera, mic, location, notifications etc. stay denied until the app has a permission prompt.
   ses.setPermissionRequestHandler((_wc, permission, cb) =>
     cb(["fullscreen", "clipboard-sanitized-write"].includes(permission)));
   ses.on("will-download", (_e, item) => {
@@ -53,16 +172,60 @@ function setupSession() {
     item.once("done", (_ev, state) =>
       send("download", { state: state === "completed" ? "done" : "failed", url, path: dest }));
   });
+  return ses;
 }
+
+const dirtyBlocked = new Set();
+let flushTimer = null;
+function onBlocked(request) {
+  const id = wcToTab.get(request.tabId);
+  if (!id) return;
+  blocked.set(id, (blocked.get(id) || 0) + 1);
+  dirtyBlocked.add(id);
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    for (const d of dirtyBlocked) send("tab-blocked", { id: d, count: blocked.get(d) || 0 });
+    dirtyBlocked.clear();
+  }, 250);
+}
+
+async function initBlocker() {
+  try {
+    const { ElectronBlocker } = require("@ghostery/adblocker-electron");
+    blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
+      path: path.join(app.getPath("userData"), "adblock-engine.bin"),
+      read: fs.promises.readFile,
+      write: fs.promises.writeFile,
+    });
+    blocker.on("request-blocked", onBlocked);
+    applyBlocking();
+  } catch (e) {
+    console.error("ad blocker unavailable:", e.message);
+  }
+}
+
+// ---- tabs ----
 
 function openTab(id, url) {
   const view = new WebContentsView({
-    webPreferences: { partition: PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      partition: webPartition(config.activeProfile),
+      sandbox: true, contextIsolation: true, nodeIntegration: false,
+    },
   });
   const wc = view.webContents;
   tabs.set(id, view);
+  wcToTab.set(wc.id, id);
   win.contentView.addChildView(view);
+  if (collapsed) raiseUi();
   layout();
+  wc.on("did-start-navigation", d => {
+    if (d.isMainFrame && !d.isSameDocument) {
+      blocked.set(id, 0);
+      send("tab-blocked", { id, count: 0 });
+    }
+  });
   wc.on("did-navigate", (_e, u) => send("tab-url", { id, url: u }));
   wc.on("did-navigate-in-page", (_e, u, isMainFrame) => { if (isMainFrame) send("tab-url", { id, url: u }); });
   wc.on("page-title-updated", (_e, title) => send("tab-title", { id, title }));
@@ -70,9 +233,29 @@ function openTab(id, url) {
     send("new-tab-request", { url: u });
     return { action: "deny" };
   });
-  wc.loadURL(url).catch(() => {}); // aborted loads (redirects) reject; the page events cover the rest
   showOnly(id);
+  // Give the ad blocker a moment to load its rules so the first page is filtered too.
+  Promise.race([blockerReady, sleep(3000)]).then(() => {
+    if (!wc.isDestroyed()) wc.loadURL(url).catch(() => {}); // aborted loads (redirects) reject
+  });
 }
+
+function showOnly(id) {
+  for (const [k, v] of tabs) v.setVisible(k === id);
+}
+
+function closeTab(id) {
+  const v = tabs.get(id);
+  if (!v) return;
+  win.contentView.removeChildView(v);
+  wcToTab.delete(v.webContents.id);
+  v.webContents.close();
+  tabs.delete(id);
+  lastFind.delete(id);
+  blocked.delete(id);
+}
+
+// ---- command palette ----
 
 function hidePalette() {
   if (!palette) return;
@@ -85,30 +268,86 @@ function hidePalette() {
 function showPalette() {
   hidePalette();
   const { width, height } = win.getContentBounds();
-  const w = Math.min(Math.max(width - SIDEBAR_W - 40, 300), 580);
-  const x = SIDEBAR_W + Math.max((width - SIDEBAR_W - w) / 2, 0);
+  const left = collapsed ? 0 : SIDEBAR_W;
+  const w = Math.min(Math.max(width - left - 40, 300), 580);
+  const x = left + Math.max((width - left - w) / 2, 0);
   palette = new WebContentsView({
-    webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
+    webPreferences: {
+      preload: PRELOAD, contextIsolation: true, sandbox: true,
+      partition: uiPartition(config.activeProfile), // same storage as the sidebar
+    },
   });
-  palette.setBounds({ x: Math.round(x), y: 70, width: Math.round(w), height: Math.max(Math.min(420, height - 90), 200) });
+  palette.setBounds({
+    x: Math.round(x), y: 70, width: Math.round(w), height: Math.max(Math.min(420, height - 90), 200),
+  });
   win.contentView.addChildView(palette);
   palette.webContents.loadFile(uiFile("palette.html"));
   palette.webContents.focus();
 }
+
+// ---- sidebar view + profiles ----
+
+function createUi() {
+  ui = new WebContentsView({
+    webPreferences: {
+      preload: PRELOAD, contextIsolation: true, sandbox: true,
+      partition: uiPartition(config.activeProfile),
+    },
+  });
+  ui.webContents.on("will-navigate", e => e.preventDefault());
+  ui.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.contentView.addChildView(ui);
+  ui.webContents.loadFile(uiFile("index.html"));
+  sidebarX = collapsed ? -SIDEBAR_W : 0;
+  peeking = false;
+  layout();
+}
+
+function activeProfile() {
+  return config.profiles.find(p => p.id === config.activeProfile);
+}
+
+function switchProfile(id) {
+  if (id === config.activeProfile || !config.profiles.some(p => p.id === id)) return;
+  hidePalette();
+  for (const tabId of [...tabs.keys()]) closeTab(tabId);
+  const old = ui;
+  config.activeProfile = id;
+  saveConfig();
+  ensureSession(webPartition(id));
+  applyBlocking();
+  createUi();
+  win.contentView.removeChildView(old);
+  setImmediate(() => old.webContents.close()); // the request may have come from the old view
+  const p = activeProfile();
+  win.setTitle(p.id === "default" ? "Alcove" : `Alcove — ${p.name}`);
+}
+
+function createProfile(name) {
+  const n = config.profiles.length;
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "profile";
+  const profile = { id: `${slug}-${Math.random().toString(36).slice(2, 6)}`, name, color: COLORS[n % COLORS.length] };
+  config.profiles.push(profile);
+  saveConfig();
+  return profile;
+}
+
+async function deleteProfile(id) {
+  if (id === "default" || id === config.activeProfile) throw new Error("cannot delete this profile");
+  config.profiles = config.profiles.filter(p => p.id !== id);
+  saveConfig();
+  await session.fromPartition(webPartition(id)).clearStorageData();
+  await session.fromPartition(uiPartition(id)).clearStorageData();
+}
+
+// ---- IPC ----
 
 const wcOf = id => tabs.get(id)?.webContents;
 
 const commands = {
   open_tab: ({ id, url }) => openTab(id, url),
   switch_tab: ({ id }) => showOnly(id),
-  close_tab: ({ id }) => {
-    const v = tabs.get(id);
-    if (!v) return;
-    win.contentView.removeChildView(v);
-    v.webContents.close();
-    tabs.delete(id);
-    lastFind.delete(id);
-  },
+  close_tab: ({ id }) => closeTab(id),
   navigate: ({ id, url }) => { wcOf(id)?.loadURL(url).catch(() => {}); },
   nav_action: ({ id, action }) => {
     const wc = wcOf(id);
@@ -129,10 +368,26 @@ const commands = {
     lastFind.delete(id);
     wcOf(id)?.stopFindInPage("clearSelection");
   },
-  focus_ui: () => ui.webContents.focus(),
+  focus_ui: () => {
+    if (collapsed && !peeking) peek(true); // typing in the address bar needs the sidebar on screen
+    ui.webContents.focus();
+  },
   show_palette: showPalette,
   hide_palette: () => setImmediate(hidePalette),
   reveal: ({ path: p }) => shell.showItemInFolder(p),
+
+  toggle_sidebar: toggleSidebar,
+  sidebar_busy: ({ busy }) => { sidebarBusy = !!busy; },
+  get_settings: () => ({ adblock: config.adblock, collapsed, adblockReady: !!blocker }),
+  set_adblock: ({ enabled }) => {
+    config.adblock = !!enabled;
+    saveConfig();
+    applyBlocking();
+  },
+  get_profiles: () => ({ profiles: config.profiles, active: config.activeProfile }),
+  create_profile: ({ name }) => createProfile(String(name).trim().slice(0, 30) || "Profile"),
+  switch_profile: ({ id }) => { setImmediate(() => switchProfile(id)); },
+  delete_profile: ({ id }) => deleteProfile(id),
 };
 
 const fromOurPages = e => e.sender === ui?.webContents || e.sender === palette?.webContents;
@@ -147,6 +402,8 @@ ipcMain.handle("invoke", (e, cmd, args) => {
 ipcMain.on("emit", (e, name, payload) => {
   if (fromOurPages(e)) send(name, payload);
 });
+
+// ---- menu ----
 
 // Native accelerators keep shortcuts working while a web page has keyboard focus.
 function buildMenu() {
@@ -171,6 +428,8 @@ function buildMenu() {
       item("find", "Find in Page", "CmdOrCtrl+F"),
     ] },
     { label: "View", submenu: [
+      { label: "Toggle Sidebar", accelerator: "CmdOrCtrl+S", click: toggleSidebar },
+      { type: "separator" },
       item("reload", "Reload", "CmdOrCtrl+R"),
       item("back", "Back", "CmdOrCtrl+["),
       item("forward", "Forward", "CmdOrCtrl+]"),
@@ -189,23 +448,22 @@ function buildMenu() {
 }
 
 app.whenReady().then(() => {
-  setupSession();
+  loadConfig();
+  collapsed = !!config.collapsed;
+  ensureSession(webPartition(config.activeProfile));
+  blockerReady = initBlocker();
   Menu.setApplicationMenu(buildMenu());
 
+  const p = activeProfile();
   win = new BaseWindow({
     width: 1280, height: 800, minWidth: 640, minHeight: 400,
-    title: "Alcove", backgroundColor: "#1c1c22", autoHideMenuBar: true,
+    title: p.id === "default" ? "Alcove" : `Alcove — ${p.name}`,
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#17171c" : "#f4f4f7",
+    autoHideMenuBar: true,
   });
-
-  ui = new WebContentsView({
-    webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
-  });
-  ui.webContents.on("will-navigate", e => e.preventDefault());
-  ui.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  win.contentView.addChildView(ui);
-  ui.webContents.loadFile(uiFile("index.html"));
-  layout();
+  createUi();
   win.on("resize", layout);
+  watchCursor();
 });
 
 app.on("window-all-closed", () => app.quit());

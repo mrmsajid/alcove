@@ -21,6 +21,11 @@ const opened = new Set(); // tab ids with a live webview this session
 const closed = [];        // recently closed tabs, for Reopen Closed Tab
 let panel = null;
 let dragId = null;
+// Newer commands may be missing on other shells (e.g. the Tauri build), so failures are swallowed.
+const call = (cmd, args) => invoke(cmd, args).catch(() => null);
+let adblock = true;
+let profiles = { profiles: [], active: "default" };
+const blocked = new Map(); // tab id -> requests blocked on the current page
 
 const space = () => state.spaces[state.space];
 const activeTab = () => space().tabs.find(t => t.id === space().active);
@@ -229,7 +234,7 @@ function tabEl(t) {
   title.textContent = t.title || t.url;
   const close = document.createElement("button");
   close.className = "close";
-  close.textContent = "×";
+  close.innerHTML = '<svg><use href="#i-x"/></svg>';
   el.append(favNode(t), title, close);
 
   el.addEventListener("click", () => activate(t.id));
@@ -283,9 +288,23 @@ function render() {
   const t = activeTab();
   const addr = $("addr");
   if (document.activeElement !== addr) addr.value = t ? t.url : "";
-  const on = !!t && isBookmarked(t.url);
-  $("star").textContent = on ? "★" : "☆";
-  $("star").classList.toggle("on", on);
+  $("star").classList.toggle("on", !!t && isBookmarked(t.url));
+  renderChrome();
+}
+
+function renderChrome() {
+  document.documentElement.style.setProperty("--space", space().color);
+  const t = activeTab();
+  const count = (t && blocked.get(t.id)) || 0;
+  $("shield").classList.toggle("off", !adblock);
+  $("shield-count").textContent = adblock && count ? String(count) : "";
+  $("shield").title = adblock
+    ? `Ad blocker on · ${count} blocked on this page (click to turn off)`
+    : "Ad blocker off (click to turn on)";
+  const p = profiles.profiles.find(x => x.id === profiles.active);
+  $("profile").textContent = (p ? p.name : "D")[0].toUpperCase();
+  $("profile").style.background = p ? p.color : "var(--accent)";
+  $("profile").title = p ? `Profile: ${p.name}` : "Profile";
 }
 
 async function switchSpace(i) {
@@ -372,10 +391,62 @@ function showMenu(x, y, items) {
   const m = $("menu");
   m.replaceChildren(...items.map(i => {
     const d = document.createElement("div");
-    d.textContent = i.label;
+    d.className = "item";
+    const label = document.createElement("span");
+    label.className = "grow";
+    label.textContent = i.label;
+    d.append(label);
+    if (i.remove) {
+      const x = document.createElement("span");
+      x.className = "x";
+      x.textContent = "×";
+      x.title = "Delete";
+      x.addEventListener("click", e => { e.stopPropagation(); hideMenu(); i.remove(); });
+      d.append(x);
+    }
     d.addEventListener("click", () => { hideMenu(); i.fn(); });
     return d;
   }));
+  placeMenu(x, y);
+}
+
+// ---- profiles ----
+
+function profileMenu() {
+  const rect = $("profile").getBoundingClientRect();
+  const items = profiles.profiles.map(p => ({
+    label: (p.id === profiles.active ? "✓  " : "     ") + p.name,
+    fn: () => { if (p.id !== profiles.active) call("switch_profile", { id: p.id }); },
+    remove: p.id === "default" || p.id === profiles.active ? null : () => {
+      if (confirm(`Delete profile "${p.name}" and all its data?`)) {
+        call("delete_profile", { id: p.id }).then(loadProfiles);
+      }
+    },
+  }));
+  items.push({ label: "New profile…", fn: () => setTimeout(newProfile, 0) });
+  showMenu(rect.left, rect.top - items.length * 32 - 14, items);
+}
+
+function newProfile() {
+  const input = document.createElement("input");
+  input.className = "menu-input";
+  input.placeholder = "Profile name, then Enter";
+  input.addEventListener("keydown", async e => {
+    if (e.key === "Escape") hideMenu();
+    if (e.key !== "Enter" || !input.value.trim()) return;
+    const p = await call("create_profile", { name: input.value.trim() });
+    hideMenu();
+    if (p) call("switch_profile", { id: p.id });
+  });
+  const rect = $("profile").getBoundingClientRect();
+  $("menu").replaceChildren(input);
+  placeMenu(rect.left, rect.top - 60);
+  input.focus();
+}
+
+const loadProfiles = () => call("get_profiles").then(p => { if (p) { profiles = p; renderChrome(); } });
+function placeMenu(x, y) {
+  const m = $("menu");
   m.hidden = false;
   m.style.left = Math.min(x, window.innerWidth - m.offsetWidth - 4) + "px";
   m.style.top = Math.min(y, window.innerHeight - m.offsetHeight - 4) + "px";
@@ -416,6 +487,16 @@ listen("palette-action", ({ payload: p }) => {
 });
 
 listen("new-tab-request", ({ payload }) => newTab(payload.url));
+
+listen("sidebar-state", ({ payload: p }) => {
+  document.body.classList.toggle("overlay", p.collapsed && p.peek);
+  $("toggle-sidebar").title = p.collapsed ? "Show sidebar" : "Hide sidebar";
+});
+
+listen("tab-blocked", ({ payload }) => {
+  blocked.set(payload.id, payload.count);
+  renderChrome();
+});
 
 listen("tab-url", ({ payload }) => {
   const t = findTab(payload.id);
@@ -464,6 +545,21 @@ $("new-tab").addEventListener("click", () => newTab());
 $("new-space").addEventListener("click", newSpace);
 for (const a of ["back", "forward", "reload"]) $(a).addEventListener("click", () => navAction(a));
 $("star").addEventListener("click", toggleBookmark);
+$("toggle-sidebar").addEventListener("click", () => call("toggle_sidebar"));
+$("profile").addEventListener("click", e => { e.stopPropagation(); profileMenu(); });
+$("shield").addEventListener("click", async () => {
+  adblock = !adblock;
+  await call("set_adblock", { enabled: adblock });
+  toast(adblock ? "Ad blocker on" : "Ad blocker off");
+  renderChrome();
+  navAction("reload"); // apply to the page being viewed
+});
+
+// While typing, keep a peeking sidebar on screen even if the pointer wanders off.
+for (const id of ["addr", "find-input", "panel-search"]) {
+  $(id).addEventListener("focus", () => call("sidebar_busy", { busy: true }));
+  $(id).addEventListener("blur", () => call("sidebar_busy", { busy: false }));
+}
 $("open-bookmarks").addEventListener("click", () => openPanel("bookmarks"));
 $("open-history").addEventListener("click", () => openPanel("history"));
 $("open-downloads").addEventListener("click", () => openPanel("downloads"));
@@ -496,6 +592,15 @@ document.addEventListener("keydown", e => {
   hideMenu();
   if (panel) { panel = null; renderPanel(); }
 });
+
+call("get_settings").then(s => {
+  if (!s) return;
+  adblock = s.adblock;
+  document.body.classList.toggle("collapsed", s.collapsed);
+  $("toggle-sidebar").title = s.collapsed ? "Show sidebar" : "Hide sidebar";
+  renderChrome();
+});
+loadProfiles();
 
 // Restore: reopen the active tab of the current space; other tabs open lazily.
 renderPanel();
