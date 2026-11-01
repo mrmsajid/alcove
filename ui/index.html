@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alcove</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="toolbar">
+    <button id="back" title="Back">‹</button>
+    <button id="forward" title="Forward">›</button>
+    <button id="reload" title="Reload">⟳</button>
+  </div>
+  <form id="addr-form">
+    <input id="addr" type="text" spellcheck="false" autocomplete="off"
+           placeholder="Search or enter address (Ctrl+L)">
+  </form>
+  <button id="new-tab" class="new-tab">+ New Tab</button>
+  <div id="tabs" class="tabs"></div>
+  <div class="spaces">
+    <div id="spaces" class="space-dots"></div>
+    <button id="new-space" title="New space">+</button>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
