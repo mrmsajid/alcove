@@ -466,6 +466,7 @@ async function renderExtensions() {
     [{ label: "×", title: "Remove", fn: async () => {
       if (!confirm(`Remove "${x.name}"?`)) return;
       await call("remove_extension", { id: x.id });
+      toast("Removed. Restart Alcove to fully unload it.", 4000);
       refreshExtensions();
       renderExtensions();
     } }]));
@@ -478,8 +479,9 @@ async function installExtension(input) {
   try {
     const x = await invoke("install_extension", { input });
     $("panel-search").value = "";
-    toast(`Added ${x.name}. Reload open pages to apply it.`, 4000);
+    toast(`Added ${x.name}`, 3000);
     refreshExtensions();
+    setTimeout(() => navAction("reload"), 2000); // let the extension start, then apply it to the open page
   } catch (e) {
     toast(`Install failed: ${String(e.message || e).replace(/^Error invoking remote method 'invoke': Error: /, "")}`, 5000);
   }
@@ -489,7 +491,11 @@ async function installExtension(input) {
 async function loadUnpacked() {
   try {
     const x = await invoke("install_unpacked_extension");
-    if (x) toast(`Loaded ${x.name}. Reload open pages to apply it.`, 4000);
+    if (x) {
+      toast(`Loaded ${x.name}`, 3000);
+      refreshExtensions();
+      setTimeout(() => navAction("reload"), 2000);
+    }
   } catch (e) {
     toast(`Could not load: ${String(e.message || e).replace(/^Error invoking remote method 'invoke': Error: /, "")}`, 5000);
   }
