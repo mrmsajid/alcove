@@ -478,6 +478,27 @@ async function installDownloader() {
   return true;
 }
 
+// YouTube only serves separate video and audio streams, so video needs ffmpeg to merge them.
+async function installFfmpeg() {
+  const plat = process.platform;
+  const asset = `ffmpeg-${plat}-${process.arch}.gz`;
+  const supported = ["darwin-arm64", "darwin-x64", "win32-x64", "win32-ia32", "linux-x64", "linux-arm64"];
+  if (!supported.includes(`${plat}-${process.arch}`)) throw new Error(`no ffmpeg build for ${plat} ${process.arch}`);
+  const res = await net.fetch(`https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/${asset}`, { redirect: "follow" });
+  if (!res.ok) throw new Error(`ffmpeg download failed (${res.status})`);
+  fs.mkdirSync(binDir(), { recursive: true });
+  const dest = path.join(binDir(), exeName("ffmpeg"));
+  fs.writeFileSync(dest, require("zlib").gunzipSync(Buffer.from(await res.arrayBuffer())), { mode: 0o755 });
+}
+
+// Installs whichever of yt-dlp and ffmpeg is missing.
+async function installTools() {
+  const t = videoTools();
+  if (!t.ytdlp) await installDownloader();
+  if (!t.ffmpeg) await installFfmpeg();
+  return true;
+}
+
 const jobs = new Map(); // job id -> child process
 let jobSeq = 0;
 
@@ -488,9 +509,10 @@ function startVideoDownload(url, kind) {
   const { ytdlp, ffmpeg } = videoTools();
   if (!ytdlp) throw new Error("downloader not set up");
 
-  // Without ffmpeg only single-file formats are possible (video tops out around 720p).
   const audio = kind === "audio";
-  const format = audio ? (ffmpeg ? "ba/b" : "ba[ext=m4a]/ba") : (ffmpeg ? "bv*+ba/b" : "b[ext=mp4]/b");
+  if (!audio && !ffmpeg) throw new Error("video needs ffmpeg (run the setup)");
+  // Audio-only streams can be saved as-is (m4a); ffmpeg, when present, converts to mp3.
+  const format = audio ? (ffmpeg ? "ba/b" : "ba[ext=m4a]/ba") : "bv*+ba/b";
   const args = [
     "--no-playlist", "--newline", "--no-warnings", "--no-simulate", "--print", "after_move:filepath",
     "-f", format, "-o", path.join(downloadDir(), "%(title).120B [%(id)s].%(ext)s"),
@@ -870,7 +892,7 @@ const commands = {
   extension_popup: ({ id }) => openExtPopup(id),
 
   video_tools: () => { const t = videoTools(); return { ready: !!t.ytdlp, ffmpeg: !!t.ffmpeg }; },
-  install_downloader: () => installDownloader(),
+  install_downloader: () => installTools(),
   download_video: ({ url, kind }) => startVideoDownload(String(url), kind),
   cancel_video: ({ job }) => cancelVideoDownload(job),
   store_button: ({ id, folder }) => wcOf(id)?.executeJavaScript(

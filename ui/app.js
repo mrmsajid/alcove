@@ -218,7 +218,7 @@ function screenshotMenu() {
 const errText = e => String(e.message || e).replace(/^Error invoking remote method 'invoke': Error: /, "");
 
 async function setUpDownloader() {
-  toast("Downloading the video downloader (yt-dlp, about 35 MB)…", 60000);
+  toast("Setting up the downloader (yt-dlp and ffmpeg, about 55 MB)…", 120000);
   try {
     await invoke("install_downloader");
     toast("Downloader ready. Click Video or Audio.", 4000);
@@ -231,7 +231,7 @@ async function setUpDownloader() {
 async function downloadVideo(kind) {
   const t = activeTab();
   if (!t || !YT_RE.test(t.url)) return toast("Open a YouTube video first");
-  if (!videoTools.ready) return setUpDownloader();
+  if (kind === "video" ? !(videoTools.ready && videoTools.ffmpeg) : !videoTools.ready) return setUpDownloader();
   if (!read("alcove-yt-consent", false)) {
     const ok = confirm("Only download videos you own or have permission to save.\n\n"
       + "Downloading may go against YouTube's Terms of Service and copyright law, and you are responsible for what you save.\n\nContinue?");
@@ -243,7 +243,6 @@ async function downloadVideo(kind) {
     videoJob = { id: r.job, title: t.title || "video", kind, percent: 0, url: t.url };
     showVideoProgress();
     renderChrome();
-    if (kind === "video" && !r.ffmpeg) toast("Starting… (no ffmpeg found, so video is limited to about 720p)", 4000);
   } catch (e) {
     toast(`Could not start: ${errText(e)}`, 6000);
   }
@@ -415,8 +414,9 @@ function renderChrome() {
   document.documentElement.style.setProperty("--space", space().color);
   const t = activeTab();
   $("yt-banner").hidden = !(t && YT_RE.test(t.url));
-  $("yt-text").textContent = videoJob ? "Downloading…" : videoTools.ready ? "Save this video" : "Download videos from YouTube";
-  $("yt-video").textContent = videoTools.ready ? "Video" : "Set up";
+  const full = videoTools.ready && videoTools.ffmpeg;
+  $("yt-text").textContent = videoJob ? "Downloading…" : full ? "Save this video" : "Download videos from YouTube";
+  $("yt-video").textContent = full ? "Video" : "Set up";
   $("yt-audio").hidden = !videoTools.ready;
   $("yt-video").disabled = $("yt-audio").disabled = !!videoJob;
   const storeId = t && (STORE_RE.exec(t.url) || [])[1];
