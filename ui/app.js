@@ -190,29 +190,19 @@ function toggleBookmark() {
 
 // ---- screenshots ----
 
-let lastShot = null;
-
-function afterShot(r) {
-  lastShot = r.path;
-  toast(`Screenshot ${r.copied ? "saved and copied" : "saved"}`, 7000, [
-    { label: "Show", fn: () => call("reveal", { path: r.path }) },
-    { label: "Save as…", fn: async () => {
-      const saved = await call("save_screenshot_as", { path: r.path });
-      if (saved) toast("Saved a copy", 2500, [{ label: "Show", fn: () => call("reveal", { path: saved }) }]);
-    } },
-  ]);
-}
-
 async function shoot(mode) {
   const t = activeTab();
   if (!t || !opened.has(t.id)) return toast("Nothing to capture");
   try {
-    if (mode === "region") await invoke("screenshot_region", { id: t.id }); // result arrives as "screenshot-done"
-    else afterShot(await invoke("screenshot", { id: t.id, mode }));
+    // The capture opens its own preview popup (save as / copy / discard).
+    await invoke(mode === "region" ? "screenshot_region" : "screenshot", { id: t.id, mode });
   } catch {
     toast("Screenshot failed");
   }
 }
+
+listen("screenshot-saved", ({ payload }) =>
+  toast("Screenshot saved", 6000, [{ label: "Show", fn: () => call("reveal", { path: payload.path }) }]));
 
 function screenshotMenu() {
   const rect = $("screenshot").getBoundingClientRect();
@@ -346,9 +336,23 @@ function render() {
   renderChrome();
 }
 
+const STORE_RE = /^https:\/\/(?:chromewebstore\.google\.com\/detail|chrome\.google\.com\/webstore\/detail)\/(?:[^/?#]*\/)?([a-p]{32})(?:[/?#]|$)/;
+let installedFolders = new Set(); // folder names of installed extensions (the store ID for store installs)
+const refreshExtensions = () => call("list_extensions").then(l => {
+  installedFolders = new Set((l || []).map(x => x.folder));
+  renderChrome();
+});
+
 function renderChrome() {
   document.documentElement.style.setProperty("--space", space().color);
   const t = activeTab();
+  const storeId = t && (STORE_RE.exec(t.url) || [])[1];
+  $("store-banner").hidden = !storeId || installedFolders.has(storeId);
+  if (storeId) {
+    const name = (t.title || "this extension").replace(/\s*[-–]\s*Chrome Web Store\s*$/, "") || "this extension";
+    $("store-text").textContent = `Add ${name} to Alcove`;
+    $("store-text").title = name;
+  }
   const count = (t && blocked.get(t.id)) || 0;
   $("shield").classList.toggle("off", !adblock);
   $("shield-count").textContent = adblock && count ? String(count) : "";
@@ -462,6 +466,7 @@ async function renderExtensions() {
     [{ label: "×", title: "Remove", fn: async () => {
       if (!confirm(`Remove "${x.name}"?`)) return;
       await call("remove_extension", { id: x.id });
+      refreshExtensions();
       renderExtensions();
     } }]));
   $("panel-body").replaceChildren(...(rows.length ? rows : [Object.assign(document.createElement("div"),
@@ -473,7 +478,8 @@ async function installExtension(input) {
   try {
     const x = await invoke("install_extension", { input });
     $("panel-search").value = "";
-    toast(`Installed ${x.name}. Reload open pages to apply it.`, 4000);
+    toast(`Added ${x.name}. Reload open pages to apply it.`, 4000);
+    refreshExtensions();
   } catch (e) {
     toast(`Install failed: ${String(e.message || e).replace(/^Error invoking remote method 'invoke': Error: /, "")}`, 5000);
   }
@@ -655,7 +661,6 @@ $("new-space").addEventListener("click", newSpace);
 for (const a of ["back", "forward", "reload"]) $(a).addEventListener("click", () => navAction(a));
 $("star").addEventListener("click", toggleBookmark);
 $("screenshot").addEventListener("click", e => { e.stopPropagation(); screenshotMenu(); });
-listen("screenshot-done", ({ payload }) => afterShot(payload));
 
 // Window controls and drag handle (the window has no native title bar).
 for (const b of document.querySelectorAll(".dot")) {
@@ -684,6 +689,7 @@ $("open-bookmarks").addEventListener("click", () => openPanel("bookmarks"));
 $("open-history").addEventListener("click", () => openPanel("history"));
 $("open-downloads").addEventListener("click", () => openPanel("downloads"));
 $("open-extensions").addEventListener("click", () => openPanel("extensions"));
+$("store-add").addEventListener("click", () => { const t = activeTab(); if (t) installExtension(t.url); });
 $("panel-close").addEventListener("click", () => { panel = null; renderPanel(); });
 $("panel-search").addEventListener("input", () => { if (panel !== "extensions") renderPanel(); });
 $("panel-search").addEventListener("keydown", e => {
@@ -726,6 +732,7 @@ call("get_settings").then(s => {
   renderChrome();
 });
 loadProfiles();
+refreshExtensions();
 
 // Restore: reopen the active tab of the current space; other tabs open lazily.
 renderPanel();

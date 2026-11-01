@@ -1,5 +1,5 @@
 const {
-  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net,
+  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net, nativeImage,
 } = require("electron");
 const AdmZip = require("adm-zip");
 const path = require("path");
@@ -69,6 +69,7 @@ function layout() {
   for (const v of tabs.values()) {
     v.setBounds({ x: left, y: 0, width: Math.max(width - left, 1), height });
   }
+  placeShotPopup();
 }
 
 const raiseUi = () => win.contentView.addChildView(ui); // re-adding moves a view to the top
@@ -318,36 +319,68 @@ async function screenshot(id, mode) {
   } else {
     png = (await wc.capturePage()).toPNG();
   }
-  return saveShot(png);
+  return showShotPopup(png);
 }
 
-const shotsDir = () => path.join(app.getPath("pictures"), "Alcove Screenshots");
+// Every capture is held in memory and shown in a small popup; nothing is written until the user saves.
+let shotView = null;
+let pendingPng = null;
 
-async function saveShot(png) {
+function placeShotPopup() {
+  if (!shotView) return;
+  const { width, height } = win.getContentBounds();
+  shotView.setBounds({ x: width - 356, y: height - 306, width: 340, height: 290 });
+}
+
+function closeShotPopup() {
+  if (!shotView) return;
+  win.contentView.removeChildView(shotView);
+  shotView.webContents.close();
+  shotView = null;
+  pendingPng = null;
+}
+
+async function showShotPopup(png) {
   if (!png.length) throw new Error("empty capture");
-  fs.mkdirSync(shotsDir(), { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
-  const dest = uniquePath(path.join(shotsDir(), `Alcove ${stamp}.png`));
-  fs.writeFileSync(dest, png);
-  let copied = true;
-  try {
-    await clipboard.write([new ClipboardItem({ "image/png": new Blob([png], { type: "image/png" }) })]);
-  } catch (e) {
-    copied = false; // the file is still saved
-    console.error("screenshot clipboard:", e.message);
-  }
-  return { path: dest, copied };
+  closeShotPopup();
+  pendingPng = png;
+  const img = nativeImage.createFromBuffer(png);
+  const size = img.getSize();
+  shotView = new WebContentsView({
+    webPreferences: {
+      preload: PRELOAD, contextIsolation: true, sandbox: true,
+      partition: uiPartition(config.activeProfile),
+    },
+  });
+  placeShotPopup();
+  win.contentView.addChildView(shotView);
+  await shotView.webContents.loadFile(uiFile("shot.html"));
+  shotView.webContents.send("event", "shot-image", {
+    dataUrl: img.resize({ width: Math.min(size.width, 680) }).toDataURL(),
+    width: size.width,
+    height: size.height,
+  });
+  shotView.webContents.focus();
+  return { shown: true };
 }
 
-// "Save as…" for a screenshot already in the screenshots folder.
-async function saveShotAs(file) {
-  if (path.dirname(path.resolve(file)) !== shotsDir()) throw new Error("not a screenshot");
+async function copyShot() {
+  if (!pendingPng) return false;
+  await clipboard.write([new ClipboardItem({ "image/png": new Blob([pendingPng], { type: "image/png" }) })]);
+  return true;
+}
+
+async function saveShotAs() {
+  if (!pendingPng) return null;
+  const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
-    defaultPath: path.join(app.getPath("downloads"), path.basename(file)),
+    defaultPath: path.join(app.getPath("downloads"), `Alcove ${stamp}.png`),
     filters: [{ name: "PNG image", extensions: ["png"] }],
   });
-  if (canceled || !filePath) return null;
-  fs.copyFileSync(file, filePath);
+  if (canceled || !filePath) return null; // popup stays open so the user can retry or copy instead
+  fs.writeFileSync(filePath, pendingPng);
+  closeShotPopup();
+  send("screenshot-saved", { path: filePath });
   return filePath;
 }
 
@@ -400,7 +433,7 @@ async function finishRegion(rect) {
   };
   const png = regionImage.crop(crop).toPNG();
   closeRegion();
-  send("screenshot-done", await saveShot(png));
+  await showShotPopup(png);
 }
 
 // ---- extensions ----
@@ -435,6 +468,7 @@ function summarize(ext) {
     version: ext.version,
     description: m.description && !m.description.startsWith("__MSG_") ? m.description : "",
     popup: !!(m.action?.default_popup || m.browser_action?.default_popup),
+    folder: path.basename(ext.path), // the Web Store ID for store installs
   };
 }
 
@@ -590,6 +624,7 @@ function switchProfile(id) {
   if (id === config.activeProfile || !config.profiles.some(p => p.id === id)) return;
   hidePalette();
   closeRegion();
+  closeShotPopup();
   closeExtPopup();
   for (const tabId of [...tabs.keys()]) closeTab(tabId);
   const old = ui;
@@ -660,7 +695,9 @@ const commands = {
   screenshot_region: ({ id }) => startRegion(id),
   region_done: ({ rect }) => finishRegion(rect),
   region_cancel: () => closeRegion(),
-  save_screenshot_as: ({ path: p }) => saveShotAs(p),
+  shot_save_as: () => saveShotAs(),
+  shot_copy: () => copyShot(),
+  shot_discard: () => closeShotPopup(),
 
   list_extensions: () => activeWebSession().extensions.getAllExtensions().map(summarize),
   install_extension: ({ input }) => installFromStore(input),
@@ -686,7 +723,7 @@ const commands = {
 };
 
 const fromOurPages = e =>
-  [ui, palette, region].some(v => v && e.sender === v.webContents);
+  [ui, palette, region, shotView].some(v => v && e.sender === v.webContents);
 
 ipcMain.handle("invoke", (e, cmd, args) => {
   if (!fromOurPages(e)) throw new Error("forbidden");

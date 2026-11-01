@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Screenshot</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    html, body { padding: 10px; gap: 10px; background: var(--surface); border: 1px solid var(--border); }
+    body { background-image: none; border-radius: 14px; animation: fade-up .22s cubic-bezier(.2, .8, .2, 1); }
+    .thumb { flex: 1; min-height: 0; border-radius: 10px; overflow: hidden; background: var(--bg); border: 1px solid var(--border); }
+    .thumb img { width: 100%; display: block; }
+    .meta { color: var(--muted); font-size: 11px; display: flex; justify-content: space-between; align-items: center; }
+    .actions { display: flex; gap: 6px; }
+    .actions button { flex: 1; padding: 7px 10px; border: 1px solid var(--border); }
+    .actions button.primary { background: var(--accent); border-color: transparent; color: #fff; font-weight: 600; }
+    .actions button.primary:hover { filter: brightness(1.08); background: var(--accent); }
+    .x { padding: 2px 6px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="thumb"><img id="img" alt="Screenshot preview"></div>
+  <div class="meta"><span id="dim">Screenshot</span><span id="note"></span><button class="x" id="discard" title="Discard (Esc)">✕</button></div>
+  <div class="actions">
+    <button class="primary" id="save">Save as…</button>
+    <button id="copy">Copy</button>
+    <button id="close">Discard</button>
+  </div>
+  <script>
+    const { invoke } = window.__TAURI__.core;
+    const { listen } = window.__TAURI__.event;
+    const $ = id => document.getElementById(id);
+    const say = msg => { $("note").textContent = msg; };
+
+    listen("shot-image", ({ payload }) => {
+      $("img").src = payload.dataUrl;
+      $("dim").textContent = `${payload.width} × ${payload.height}`;
+    });
+
+    $("save").addEventListener("click", async () => {
+      const saved = await invoke("shot_save_as").catch(() => null);
+      if (!saved) say("Not saved");
+    });
+    $("copy").addEventListener("click", async () => {
+      say((await invoke("shot_copy").catch(() => false)) ? "Copied ✓" : "Copy failed");
+    });
+    for (const id of ["close", "discard"]) $(id).addEventListener("click", () => invoke("shot_discard"));
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape") invoke("shot_discard");
+      else if (e.key === "Enter") $("save").click();
+    });
+  </script>
+</body>
+</html>

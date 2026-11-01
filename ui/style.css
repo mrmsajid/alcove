@@ -187,3 +187,12 @@ body { transition: border-color .2s ease; }
 
 .toast button { padding: 2px 8px; border-radius: 6px; color: var(--accent); font-weight: 600; }
 .ext-row .badge { color: var(--muted); font-size: 11px; }
+
+.banner {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface)); border: 1px solid var(--border);
+  animation: drop-in .2s cubic-bezier(.2, .8, .2, 1);
+}
+.banner span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.banner button { background: var(--accent); color: #fff; font-weight: 600; padding: 4px 10px; flex: none; }
+.banner button:hover { background: var(--accent); filter: brightness(1.08); }
