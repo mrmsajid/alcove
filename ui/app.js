@@ -44,12 +44,12 @@ function normalize(input) {
 }
 
 let toastTimer;
-function toast(msg) {
+function toast(msg, ms = 1600) {
   const el = $("toast");
   el.textContent = msg;
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, 1600);
+  toastTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
 
 // ---- tabs ----
@@ -179,6 +179,22 @@ function toggleBookmark() {
   write(BM_KEY, b);
   render();
   if (panel === "bookmarks") renderPanel();
+}
+
+// ---- screenshots ----
+
+let lastShot = null;
+
+async function shoot(mode) {
+  const t = activeTab();
+  if (!t || !opened.has(t.id)) return toast("Nothing to capture");
+  try {
+    const r = await invoke("screenshot", { id: t.id, mode });
+    lastShot = r.path;
+    toast(`Screenshot ${r.copied ? "saved and copied" : "saved"} · click to show`, 4000);
+  } catch {
+    toast("Screenshot failed");
+  }
 }
 
 // ---- find / zoom ----
@@ -482,6 +498,8 @@ const actions = {
   "focus-address": focusAddr,
   "bookmark": toggleBookmark,
   "find": openFind,
+  "screenshot": () => shoot("visible"),
+  "screenshot-full": () => shoot("full"),
   "reload": () => navAction("reload"),
   "back": () => navAction("back"),
   "forward": () => navAction("forward"),
@@ -562,6 +580,8 @@ $("new-tab").addEventListener("click", () => newTab());
 $("new-space").addEventListener("click", newSpace);
 for (const a of ["back", "forward", "reload"]) $(a).addEventListener("click", () => navAction(a));
 $("star").addEventListener("click", toggleBookmark);
+$("screenshot").addEventListener("click", e => shoot(e.shiftKey ? "full" : "visible"));
+$("toast").addEventListener("click", () => { if (lastShot) call("reveal", { path: lastShot }); });
 
 // Window controls and drag handle (the window has no native title bar).
 for (const b of document.querySelectorAll(".dot")) {

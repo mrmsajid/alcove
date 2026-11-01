@@ -1,5 +1,5 @@
 const {
-  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme,
+  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem,
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -288,6 +288,46 @@ function closeTab(id) {
   blocked.delete(id);
 }
 
+// ---- screenshots ----
+
+// "full" captures the whole scrollable page through the DevTools protocol (capped for huge pages).
+async function screenshot(id, mode) {
+  const wc = wcOf(id);
+  if (!wc) throw new Error("tab not open");
+  let png;
+  if (mode === "full") {
+    wc.debugger.attach("1.3");
+    try {
+      const metrics = await wc.debugger.sendCommand("Page.getLayoutMetrics");
+      const size = metrics.cssContentSize || metrics.contentSize;
+      const shot = await wc.debugger.sendCommand("Page.captureScreenshot", {
+        format: "png",
+        captureBeyondViewport: true,
+        clip: { x: 0, y: 0, width: Math.ceil(size.width), height: Math.min(Math.ceil(size.height), 16000), scale: 1 },
+      });
+      png = Buffer.from(shot.data, "base64");
+    } finally {
+      wc.debugger.detach();
+    }
+  } else {
+    png = (await wc.capturePage()).toPNG();
+  }
+  if (!png.length) throw new Error("empty capture");
+  const dir = path.join(app.getPath("pictures"), "Alcove Screenshots");
+  fs.mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+  const dest = uniquePath(path.join(dir, `Alcove ${stamp}.png`));
+  fs.writeFileSync(dest, png);
+  let copied = true;
+  try {
+    await clipboard.write([new ClipboardItem({ "image/png": new Blob([png], { type: "image/png" }) })]);
+  } catch (e) {
+    copied = false; // the file is still saved
+    console.error("screenshot clipboard:", e.message);
+  }
+  return { path: dest, copied };
+}
+
 // ---- command palette ----
 
 function hidePalette() {
@@ -409,6 +449,7 @@ const commands = {
   show_palette: showPalette,
   hide_palette: () => setImmediate(hidePalette),
   reveal: ({ path: p }) => shell.showItemInFolder(p),
+  screenshot: ({ id, mode }) => screenshot(id, mode),
 
   toggle_sidebar: toggleSidebar,
   window_action: ({ action }) => windowAction(action),
@@ -456,6 +497,8 @@ function buildMenu() {
       item("palette", "Command Palette", "CmdOrCtrl+K"),
       item("focus-address", "Open Location", "CmdOrCtrl+L"),
       item("bookmark", "Bookmark This Page", "CmdOrCtrl+D"),
+      item("screenshot", "Take Screenshot", "CmdOrCtrl+Shift+S"),
+      item("screenshot-full", "Screenshot Full Page", "CmdOrCtrl+Alt+Shift+S"),
       ...(mac ? [] : [{ type: "separator" }, { role: "quit" }]),
     ] },
     { label: "Edit", submenu: [
