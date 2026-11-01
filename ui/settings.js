@@ -89,7 +89,13 @@ const SECTIONS = [
       h("div", { class: "swatches" }, ...["#76767f", "#7c8cff", "#5fd6a0", "#ff7c9c", "#ffb86b", "#c27cff", "#6cc7ff"].map(c =>
         h("button", { class: "swatch" + (S.accent === c ? " on" : ""), style: `background:${c}`, title: c, on: { click: () => set("accent", c) } })))),
     row("Glass sidebar", "See-through, frosted sidebar and window frame (macOS vibrancy, Windows 11 acrylic).", toggle(S.glass, v => set("glass", v))),
-    S.glass ? row("Frost", "How much the glass is tinted: clear shows more of what's behind the window.", frostSlider()) : null,
+    S.glass ? row("Glass style", MAC ? "Frosted blurs what's behind the window. Clear shows it as it is (applies after a restart)."
+      : "Frosted (acrylic). Clear glass isn't available on Windows, which can't resize fully transparent windows.",
+      seg(S.glassStyle, MAC ? [["frosted", "Frosted"], ["clear", "Clear"]] : [["frosted", "Frosted"]], async v => { await set("glassStyle", v); await refreshInfo(); })) : null,
+    S.glass && info.restartNeeded ? row("Restart to apply", "The window needs to reopen to switch glass style. Your tabs are kept.",
+      h("button", { class: "btn primary", on: { click: () => invoke("relaunch") } }, "Restart now")) : null,
+    S.glass ? row(S.glassStyle === "clear" && MAC ? "Tint" : "Frost", S.glassStyle === "clear" && MAC ? "0 is completely transparent; higher adds a tint for readability." : "How much the glass is tinted: lower shows more of what's behind the window.", rangeSlider("frost", "Clear", "Solid")) : null,
+    S.glass ? row("Shine", "Specular edges and a faint color fringe on glass controls, like Liquid Glass.", rangeSlider("shine", "Off", "Strong")) : null,
     row("Sidebar text size", null, seg(S.textSize, [["small", "Small"], ["default", "Default"], ["large", "Large"]], v => set("textSize", v))),
     row("Page zoom", "Default zoom for new pages. ⌘+ / ⌘− still change one tab.",
       h("select", { on: { change: e => set("defaultZoom", parseFloat(e.target.value)) } },
@@ -176,17 +182,19 @@ const SECTIONS = [
   )]],
 ];
 
-// Live while dragging (throttled), saved when released.
-function frostSlider() {
-  const out = h("span", { class: "path", style: "direction:ltr;min-width:34px;text-align:right" }, `${S.frost}%`);
-  const input = h("input", { type: "range", min: "0", max: "100", step: "1", value: String(S.frost), style: "width:200px;padding:0;accent-color:var(--accent)" });
+// 0–100 slider for a setting: live while dragging (throttled), saved when released.
+function rangeSlider(key, low, high) {
+  const out = h("span", { class: "path", style: "direction:ltr;min-width:34px;text-align:right" }, `${S[key]}%`);
+  const input = h("input", { type: "range", min: "0", max: "100", step: "1", value: String(S[key]), style: "width:180px;padding:0;accent-color:var(--accent)" });
   let last = 0;
+  const save = () => invoke("set_app_setting", { key, value: Number(input.value) }).then(s => { S = s; });
   input.addEventListener("input", () => {
     out.textContent = `${input.value}%`;
-    if (Date.now() - last > 80) { last = Date.now(); invoke("set_app_setting", { key: "frost", value: Number(input.value) }).then(s => { S = s; }); }
+    if (Date.now() - last > 80) { last = Date.now(); save(); }
   });
-  input.addEventListener("change", () => invoke("set_app_setting", { key: "frost", value: Number(input.value) }).then(s => { S = s; }));
-  return h("span", { style: "display:flex;align-items:center;gap:10px" }, h("span", { class: "d", style: "color:var(--muted);font-size:12px" }, "Clear"), input, h("span", { class: "d", style: "color:var(--muted);font-size:12px" }, "Frosted"), out);
+  input.addEventListener("change", save);
+  const label = t => h("span", { class: "d", style: "color:var(--muted);font-size:12px" }, t);
+  return h("span", { style: "display:flex;align-items:center;gap:10px" }, label(low), input, label(high), out);
 }
 
 function clearDataCard() {

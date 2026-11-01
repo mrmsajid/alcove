@@ -46,6 +46,8 @@ const DEFAULT_SETTINGS = {
   downloadDir: "", askDownload: false,
   theme: "system", accent: "#76767f", textSize: "default", defaultZoom: 1, compact: false,
   glass: true, frost: 55,                   // frosted see-through sidebar and frame; frost 0 = clear, 100 = solid
+  glassStyle: "frosted",                    // frosted (blurred) | clear (see-through, macOS; applies after restart)
+  shine: 40,                                // specular edges and color fringe on glass controls (0 = off)
   dnt: true, httpsOnly: false, spellcheck: true,
 };
 const SETTING_RULES = {
@@ -67,7 +69,13 @@ const SETTING_RULES = {
   spellcheck: v => typeof v === "boolean",
   glass: v => typeof v === "boolean",
   frost: v => typeof v === "number" && v >= 0 && v <= 100,
+  glassStyle: v => ["frosted", "clear"].includes(v),
+  shine: v => typeof v === "number" && v >= 0 && v <= 100,
 };
+// Clear glass needs a transparent window, which can only be chosen when the window is created
+// (and macOS drops the window shadow on transparent windows), so switching styles takes a restart.
+let windowIsClear = false;
+const wantsClear = () => process.platform === "darwin" && S().glass && S().glassStyle === "clear";
 const S = () => config.settings;
 const configPath = () => path.join(app.getPath("userData"), "config.json");
 
@@ -779,14 +787,14 @@ function closeSettings() {
 // page is transparent and the window color carries the frost tint, so sidebar and frame match.
 function applyGlass() {
   if (!win || win.isDestroyed()) return;
-  if (process.platform === "darwin") win.setVibrancy(S().glass ? "sidebar" : null);
+  if (process.platform === "darwin") win.setVibrancy(S().glass && !(windowIsClear && wantsClear()) ? "sidebar" : null);
   if (process.platform === "win32" && typeof win.setBackgroundMaterial === "function") {
     try { win.setBackgroundMaterial(S().glass ? "acrylic" : "none"); } catch {}
   }
 }
 
 function applySetting(key) {
-  if (key === "glass") applyGlass();
+  if (key === "glass" || key === "glassStyle") applyGlass();
   if (key === "theme") nativeTheme.themeSource = S().theme;
   if (key === "compact") {
     for (const v of tabs.values()) if (typeof v.setBorderRadius === "function") v.setBorderRadius(cardRadius());
@@ -1688,8 +1696,11 @@ const commands = {
   get_app_info: () => ({
     version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome,
     platform: process.platform, packaged: app.isPackaged, isDefault: app.isDefaultProtocolClient("https"),
+    restartNeeded: process.platform === "darwin" && wantsClear() !== windowIsClear,
+    clearActive: windowIsClear && wantsClear(),
     downloadDir: downloadsFolder(), adblock: config.adblock, sponsorBlock: config.sponsorBlock,
   }),
+  relaunch: () => { app.relaunch(); app.quit(); },
   set_default_browser: () => {
     if (!app.isPackaged) return { ok: false, reason: "Only the installed app can become the default browser." };
     const ok = app.setAsDefaultProtocolClient("http") && app.setAsDefaultProtocolClient("https");
@@ -1982,7 +1993,8 @@ app.whenReady().then(() => {
     width: 1280, height: 800, minWidth: 640, minHeight: 400,
     title: p.id === "default" ? "Alcove" : `Alcove — ${p.name}`,
     backgroundColor: S().glass ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#1d1d20" : "#ececef",
-    ...(process.platform === "darwin" && S().glass ? { vibrancy: "sidebar", visualEffectState: "active" } : {}),
+    ...(wantsClear() ? { transparent: true }
+      : process.platform === "darwin" && S().glass ? { vibrancy: "sidebar", visualEffectState: "active" } : {}),
     autoHideMenuBar: true,
     // No title bar: window controls live in the sidebar (native lights on macOS, drawn ones elsewhere).
     ...(process.platform === "darwin"
@@ -1990,6 +2002,7 @@ app.whenReady().then(() => {
       : { frame: false }),
   });
   perf("window created");
+  windowIsClear = wantsClear();
   if (process.platform === "win32") applyGlass();
   createUi();
   createStrip();

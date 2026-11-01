@@ -838,6 +838,8 @@ const hexRgb = h => {
 };
 const mixHex = (a, b, t) => "#" + hexRgb(a).map((x, i) => Math.round(x * t + hexRgb(b)[i] * (1 - t)).toString(16).padStart(2, "0")).join("");
 let sentChrome = null;
+let clearGlass = false; // the window was created see-through (Clear glass style, macOS)
+call("get_app_info").then(i => { if (i) { clearGlass = !!i.clearActive; renderChrome(); } });
 
 // When the address bar isn't being edited it shows the site in bold and the path dimmed.
 function renderAddr(t) {
@@ -864,8 +866,14 @@ function renderChrome() {
   document.body.classList.toggle("theme-dark", space().theme === "dark");
   const solid = mixHex("#000000", getComputedStyle(document.body).getPropertyValue("--bg"), 0);
   const glass = appSettings.glass !== false && /Mac|Windows/.test(navigator.userAgent);
+  const clear = glass && clearGlass;
   const frost = Number.isFinite(appSettings.frost) ? appSettings.frost : 55;
-  const alpha = Math.round((0.15 + 0.85 * frost / 100) * 100) / 100; // 0 → mostly clear glass, 100 → solid
+  // Frosted: 0 → mostly clear blur, 100 → solid. Clear glass: 0 → fully see-through, 100 → solid.
+  const alpha = Math.round((clear ? frost / 100 : 0.15 + 0.85 * frost / 100) * 100) / 100;
+  const shine = Number.isFinite(appSettings.shine) ? appSettings.shine : 40;
+  document.body.classList.toggle("glass-clear", clear);
+  document.body.classList.toggle("liquid", glass && shine > 0);
+  document.documentElement.style.setProperty("--shine", String(shine / 100));
   const [r, g, b] = hexRgb(solid);
   const chrome = glass ? `rgba(${r}, ${g}, ${b}, ${alpha})` : solid;
   document.body.classList.toggle("glass", glass);
