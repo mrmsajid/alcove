@@ -733,7 +733,9 @@ function openTab(id, url) {
     else send("new-tab-request", { url: u, from: id });
     return { action: "deny" };
   });
-  wc.on("context-menu", (_e, p) => pageMenu(id, wc, p).popup());
+  wc.on("context-menu", (_e, p) => { const menu = pageMenu(id, wc, p); if (menu.items.length) menu.popup(); });
+  wc.on("devtools-opened", () => { if (isOwnPage(wc.getURL())) wc.closeDevTools(); });
+  wc.on("will-navigate", (e, u) => { if (isOwnSource(u)) e.preventDefault(); });
   wc.on("audio-state-changed", e => send("tab-audio", { id, audible: typeof e.audible === "boolean" ? e.audible : wc.isCurrentlyAudible(), muted: wc.isAudioMuted() }));
   wc.on("focus", () => send("tab-focused", { id })); // tells the sidebar which split pane is active
   showOnly(id);
@@ -742,7 +744,7 @@ function openTab(id, url) {
   wc.once("did-finish-load", () => perf(`tab ${id}: did-finish-load`));
   Promise.race([blockerReady, sleep(3000)]).then(() => {
     perf(`tab ${id}: loadURL`);
-    if (!wc.isDestroyed()) wc.loadURL(url).catch(() => {}); // aborted loads (redirects) reject
+    if (!wc.isDestroyed() && !isOwnSource(url)) wc.loadURL(url).catch(() => {}); // aborted loads (redirects) reject
   });
 }
 
@@ -992,6 +994,7 @@ function pictureInPicture(wc) {
 // ---- page right-click menu ----
 
 function pageMenu(tabId, wc, p) {
+  const own = isOwnPage(wc.getURL());
   const items = [];
   const sep = () => { if (items.length && items[items.length - 1].type !== "separator") items.push({ type: "separator" }); };
   if (p.linkURL && /^https?:/i.test(p.linkURL)) {
@@ -1037,10 +1040,10 @@ function pageMenu(tabId, wc, p) {
     );
     sep();
     if (tabId) items.push({ label: "Take Screenshot…", click: () => send("shortcut", "screenshot-region") });
-    items.push({ label: "View Page Source", click: () => send("new-tab-request", { url: `view-source:${wc.getURL()}` }) });
+    if (!own) items.push({ label: "View Page Source", click: () => send("new-tab-request", { url: `view-source:${wc.getURL()}` }) });
   }
   sep();
-  items.push({ label: "Inspect", click: () => { wc.openDevTools({ mode: "detach" }); wc.inspectElement(p.x, p.y); } });
+  if (!own) items.push({ label: "Inspect", click: () => { wc.openDevTools({ mode: "detach" }); wc.inspectElement(p.x, p.y); } });
   return Menu.buildFromTemplate(items);
 }
 
@@ -1061,6 +1064,12 @@ function closeTab(id) {
 // The editor is a normal tab showing ui/markdown.html. The session preload gives that one page a file
 // bridge (see yt-preload.js); it can only read and write Markdown or text files.
 const MD_PAGE = pathToFileURL(uiFile("markdown.html")).href;
+
+// Alcove's own pages (the Markdown editor, the focus-mode page…) are tools, not websites: they don't offer
+// "View Page Source" or "Inspect", and their developer tools can't be opened.
+const UI_PREFIX = pathToFileURL(path.join(__dirname, "ui") + path.sep).href;
+const isOwnPage = u => String(u).startsWith(UI_PREFIX);
+const isOwnSource = u => /^view-source:/i.test(String(u)) && isOwnPage(String(u).replace(/^view-source:/i, ""));
 const MD_EXT = /\.(md|markdown|mdown|mkd|txt)$/i;
 const MD_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown", "mdown", "mkd", "txt"] }];
 const MD_MAX = 5 * 1024 * 1024;
@@ -2176,7 +2185,7 @@ const commands = {
   open_tab: ({ id, url }) => openTab(id, url),
   switch_tab: ({ id }) => showOnly(id),
   close_tab: ({ id }) => closeTab(id),
-  navigate: ({ id, url }) => { wcOf(id)?.loadURL(url).catch(() => {}); },
+  navigate: ({ id, url }) => { if (!isOwnSource(url)) wcOf(id)?.loadURL(url).catch(() => {}); },
   nav_action: ({ id, action }) => {
     const wc = wcOf(id);
     if (!wc) return;
@@ -2205,6 +2214,14 @@ const commands = {
   debug_page_menu: ({ id, params }) => process.env.ALCOVE_TEST === "1" && wcOf(id)
     ? pageMenu(id, wcOf(id), { mediaType: "none", selectionText: "", isEditable: false, linkURL: "", srcURL: "", x: 0, y: 0, ...params }).items.map(i => i.type === "separator" ? "—" : i.label || i.role)
     : null,
+  debug_open_devtools: async ({ id }) => { // test hook: try to open the developer tools on a tab and say whether they stayed open
+    if (process.env.ALCOVE_TEST !== "1" || !wcOf(id)) return null;
+    wcOf(id).openDevTools({ mode: "detach" });
+    await sleep(900);
+    const open = wcOf(id).isDevToolsOpened();
+    if (open) wcOf(id).closeDevTools();
+    return { open };
+  },
   peek_close: () => { setImmediate(closePeek); },
   peek_open_tab: () => { setImmediate(peekToTab); },
   pip: ({ id }) => pictureInPicture(wcOf(id)),
