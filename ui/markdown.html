@@ -51,8 +51,33 @@
     #sidetabs { display: flex; align-items: center; gap: 2px; padding: 8px 8px 6px; flex: none; }
     #sidetabs button[data-t] { padding: 3px 10px; font-size: 12.5px; color: var(--muted); }
     #sidetabs button[data-t].on { background: var(--surface); color: var(--text); }
-    #files, #outline { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-    #files[hidden], #outline[hidden] { display: none; }
+    #files, #outline, #search { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    #files[hidden], #outline[hidden], #search[hidden] { display: none; }
+    /* search: text or #tags across the loaded folders */
+    .shead { padding: 2px 10px 8px; display: flex; flex-direction: column; gap: 7px; flex: none; }
+    #sq { width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 6px 10px; font: inherit; outline: none; user-select: text; }
+    #sq:focus { border-color: var(--accent); }
+    .sopts { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+    .sopts label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+    .sopts input { accent-color: var(--accent); margin: 0; }
+    .sopts select { margin-left: auto; max-width: 120px; padding: 2px 6px; font-size: 12px; background: var(--surface); }
+    #sstat { padding: 0 12px 6px; font-size: 12px; color: var(--muted); flex: none; min-height: 1.4em; }
+    #sresults { flex: 1; overflow: auto; padding: 0 6px 12px; font-size: 13px; }
+    .sfile { margin-top: 6px; }
+    #sresults .sfile > button { display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left; padding: 3px 8px; font-weight: 600; }
+    .sfile .rel { color: var(--muted); font-weight: 400; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .sfile .n { margin-left: auto; color: var(--muted); font-weight: 400; font-size: 11.5px; flex: none; }
+    #sresults .smatch { display: flex; gap: 8px; width: 100%; text-align: left; padding: 2px 8px 2px 12px; color: var(--muted); font-size: 12.5px; }
+    #sresults .smatch:hover { color: var(--text); }
+    .smatch .ln { flex: none; width: 30px; text-align: right; opacity: .65; font-variant-numeric: tabular-nums; }
+    .smatch .tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sfile .stags { display: flex; flex-wrap: wrap; gap: 4px; padding: 1px 10px 2px; }
+    .sfile .stags span { padding: 0 8px; border-radius: 999px; background: var(--tag); font-size: 11.5px; }
+    mark { background: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--text); border-radius: 3px; padding: 0 1px; }
+    .tagcloud { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 10px 10px; }
+    #sresults .tagcloud button { width: auto; padding: 2px 10px; border-radius: 999px; background: var(--tag); font-size: 12.5px; display: inline-flex; }
+    .tagcloud button span { color: var(--muted); margin-left: 5px; }
+    .shint { padding: 4px 12px 8px; color: var(--muted); font-size: 12px; }
     .filehead { display: flex; align-items: center; gap: 1px; padding: 2px 8px 6px; flex: none; }
     .filehead .fname { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 4px; }
     .filehead button { padding: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
@@ -204,7 +229,7 @@
     <button id="edge" title="Show or hide the files and outline panel">‹</button>
     <aside id="side" hidden>
       <div id="sidetabs">
-        <button data-t="files">Files</button><button data-t="outline">Outline</button>
+        <button data-t="files">Files</button><button data-t="search" title="Find text or #tags in your folders (⌘⇧F)">Search</button><button data-t="outline">Outline</button>
       </div>
       <div id="files">
         <div class="filehead">
@@ -216,6 +241,18 @@
           <button id="f-open" title="Load another folder…"></button>
         </div>
         <div id="tree"></div>
+      </div>
+      <div id="search" hidden>
+        <div class="shead">
+          <input id="sq" type="search" placeholder="Search text, or #tag" spellcheck="false" autocomplete="off">
+          <div class="sopts">
+            <label title="Match upper and lower case"><input type="checkbox" id="s-case"> Aa</label>
+            <label title="Treat the search as a regular expression"><input type="checkbox" id="s-re"> .*</label>
+            <select id="s-scope" title="Where to look" hidden></select>
+          </div>
+        </div>
+        <div id="sstat"></div>
+        <div id="sresults"></div>
       </div>
       <div id="outline" hidden><div id="outlinelist"></div></div>
     </aside>
@@ -927,6 +964,10 @@
     vis.addEventListener("change", e => { // ticking a to-do
       if (e.target.matches && e.target.matches("input[type=checkbox]")) { const li = e.target.closest("li"); if (li) li.classList.toggle("done", e.target.checked); syncSoon(); }
     });
+    vis.addEventListener("click", e => {
+      const chip = e.target.closest && e.target.closest("span.tag");
+      if (chip) return searchFor(chip.textContent.trim()); // a tag chip finds the notes with that tag
+    });
     vis.addEventListener("click", e => { // links open with ⌘/Ctrl-click
       const a = e.target.closest && e.target.closest("a[href]");
       if (a && (e.metaKey || e.ctrlKey)) { e.preventDefault(); window.open(a.href, "_blank"); }
@@ -1245,8 +1286,9 @@
       for (const b of document.querySelectorAll("#sidetabs [data-t]")) b.classList.toggle("on", b.dataset.t === side.tab);
       $("files").hidden = side.tab !== "files";
       $("outline").hidden = side.tab !== "outline";
+      $("search").hidden = side.tab !== "search";
       try { localStorage.setItem(SIDE, JSON.stringify(side)); } catch {}
-      if (side.open) { paintOutline(); renderTree(); }
+      if (side.open) { paintOutline(); renderTree(); if (side.tab === "search") runSearch(); }
     }
 
     function headings() {
@@ -1290,7 +1332,14 @@
     const persistFolders = () => { try { localStorage.setItem(FOLDERS, JSON.stringify(folders.map(f => f.root))); } catch {} };
     const under = (p, dir) => p === dir || p.startsWith(dir + "/") || p.startsWith(dir + "\\");
 
+    function fillScope() {
+      const sel = $("s-scope"), keep = sel.value;
+      sel.hidden = folders.length < 2;
+      sel.replaceChildren(new Option("All folders", ""), ...folders.map(f => new Option(f.name, f.root)));
+      sel.value = folders.some(f => f.root === keep) ? keep : "";
+    }
     function renderTree() {
+      fillScope();
       const box = $("tree");
       box.replaceChildren();
       $("fname").textContent = folders.length ? (folders.length === 1 ? "1 folder" : `${folders.length} folders`) : "No folder open";
@@ -1419,6 +1468,131 @@
       renderTree();
       if (kind === "file") openFile(made.path, true, true);
     }
+
+    // ---- search: text or #tags across every loaded folder ----
+    let searchRun = 0, searchTimer = 0;
+    const markIn = (parent, text, at, len) => { // text with the match highlighted
+      parent.append(text.slice(0, at), Object.assign(document.createElement("mark"), { textContent: text.slice(at, at + len) }), text.slice(at + len));
+    };
+
+    function searchFor(q) { // from a tag chip: look for that tag
+      $("sq").value = q;
+      setSide(true, "search");
+      runSearch();
+    }
+
+    async function runSearch() {
+      const id = ++searchRun, q = $("sq").value.trim(), box = $("sresults"), stat = $("sstat");
+      if (!folders.length) {
+        stat.textContent = "";
+        const e = Object.assign(document.createElement("div"), { className: "side-empty", textContent: "Load a folder to search the notes in it." });
+        const b = Object.assign(document.createElement("button"), { textContent: "Load folder…" });
+        b.onclick = chooseFolder;
+        e.append(document.createElement("br"), b);
+        return box.replaceChildren(e);
+      }
+      if (!bridge) { stat.textContent = "Open this page in Alcove to search folders."; return box.replaceChildren(); }
+      stat.textContent = q ? "Searching…" : "";
+      const roots = $("s-scope").value ? [$("s-scope").value] : folders.map(f => f.root);
+      const r = await bridge.search({ roots, q, matchCase: $("s-case").checked, regex: $("s-re").checked });
+      if (id !== searchRun) return; // a newer search has started
+      if (r.error) { stat.textContent = r.error; return box.replaceChildren(); }
+      if (!q) { // nothing typed: offer the tags in use
+        stat.textContent = r.tags.length ? `${r.tags.length} tags in ${r.files} notes` : `${r.files} notes, none tagged yet`;
+        const cloud = Object.assign(document.createElement("div"), { className: "tagcloud" });
+        for (const [tag, n] of r.tags) {
+          const b = document.createElement("button");
+          b.append("#" + tag, Object.assign(document.createElement("span"), { textContent: n }));
+          b.onclick = () => searchFor("#" + tag);
+          cloud.append(b);
+        }
+        const hint = Object.assign(document.createElement("div"), { className: "shint", textContent: "Type to search note text. Start with # to find a tag." });
+        return box.replaceChildren(hint, cloud);
+      }
+      const notes = r.results.length;
+      stat.textContent = notes ? `${r.total || notes} ${r.tagMode ? "tagged" : "match" + (r.total === 1 ? "" : "es")} in ${notes} note${notes === 1 ? "" : "s"}${r.truncated ? " (showing the first ones)" : ""}` : `Nothing found in ${r.files} notes`;
+      const multi = folders.length > 1;
+      box.replaceChildren(...r.results.map(res => {
+        const wrap = Object.assign(document.createElement("div"), { className: "sfile" });
+        const head = document.createElement("button");
+        head.title = res.path;
+        const dir = res.rel.includes("/") ? res.rel.slice(0, res.rel.lastIndexOf("/")) : "";
+        head.append(res.name.replace(/\.(md|markdown|mdown|mkd)$/i, ""), Object.assign(document.createElement("span"), { className: "rel", textContent: (multi ? base(res.root) + (dir ? "/" : "") : "") + dir }));
+        head.append(Object.assign(document.createElement("span"), { className: "n", textContent: res.matches.length ? String(res.matches.length) : "name" }));
+        head.onclick = () => openAt(res, null);
+        wrap.append(head);
+        if (res.tags.length) wrap.append(Object.assign(document.createElement("div"), { className: "stags" }, ...[]));
+        if (res.tags.length) wrap.lastChild.append(...res.tags.map(t => Object.assign(document.createElement("span"), { textContent: "#" + t })));
+        const show = (list, parent) => {
+          for (const m of list) {
+            const b = document.createElement("button");
+            b.className = "smatch";
+            b.title = `Line ${m.line}`;
+            const tx = document.createElement("span");
+            tx.className = "tx";
+            markIn(tx, m.text, m.at, m.len);
+            b.append(Object.assign(document.createElement("span"), { className: "ln", textContent: m.line }), tx);
+            b.onclick = () => openAt(res, m);
+            parent.append(b);
+          }
+        };
+        show(res.matches.slice(0, 6), wrap);
+        if (res.matches.length > 6) {
+          const more = Object.assign(document.createElement("button"), { className: "smatch", textContent: `${res.matches.length - 6} more in this note…` });
+          more.onclick = () => { more.remove(); show(res.matches.slice(6), wrap); };
+          wrap.append(more);
+        }
+        return wrap;
+      }));
+    }
+
+    // Open the note and put the cursor on the match
+    async function openAt(res, m) {
+      if (file.path !== res.path) {
+        await openFile(res.path, true);
+        if (file.path !== res.path) return; // cancelled, or couldn't be read
+      }
+      if (m) { if (mode === "visual") jumpVisual(m); else jumpCode(m); }
+    }
+    function jumpCode(m) {
+      const lines = ta.value.split("\n");
+      const pos = lines.slice(0, m.line - 1).reduce((n, l) => n + l.length + 1, 0) + m.col;
+      ta.focus();
+      ta.setSelectionRange(pos, pos + m.len);
+      ta.scrollTop = Math.max(0, (m.line - 4) * parseFloat(getComputedStyle(ta).lineHeight));
+    }
+    function jumpVisual(m) { // the nth time that text appears on the page; if it isn't visible text (a link address, front matter), show the source
+      const want = (m.found || ta.value.split("\n")[m.line - 1].slice(m.col, m.col + m.len)), exact = $("s-case").checked && !$("s-re").checked;
+      const walker = document.createTreeWalker(vis, NodeFilter.SHOW_TEXT);
+      let seen = 0;
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        const hay = exact ? n.nodeValue : n.nodeValue.toLowerCase(), needle = exact ? want : want.toLowerCase();
+        for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + 1)) {
+          if (seen++ < m.nth) continue;
+          const r = document.createRange(), sel = getSelection();
+          r.setStart(n, i);
+          r.setEnd(n, i + want.length);
+          vis.focus();
+          sel.removeAllRanges();
+          sel.addRange(r);
+          n.parentElement.scrollIntoView({ block: "center", behavior: "smooth" });
+          return;
+        }
+      }
+      setMode("code");
+      jumpCode(m);
+      say("That match is in the Markdown itself, so the Code view is showing it.", 4000);
+    }
+
+    $("sq").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 250); });
+    $("sq").addEventListener("keydown", e => {
+      if (e.key === "Enter") { clearTimeout(searchTimer); runSearch(); }
+      else if (e.key === "Escape") { e.target.value = ""; runSearch(); }
+    });
+    for (const id of ["s-case", "s-re", "s-scope"]) $(id).addEventListener("change", runSearch);
+    document.addEventListener("keydown", e => { // ⌘/Ctrl+Shift+F
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); setSide(true, "search"); $("sq").focus(); $("sq").select(); }
+    });
 
     // ---- graph view: notes are nodes, links between notes are lines ----
     const G = { raw: null, only: "", data: null, nodes: [], links: [], pos: new Map(), view: { x: 0, y: 0, k: 1 }, alpha: 0, hover: null, drag: null, pan: null, raf: 0,
@@ -1736,6 +1910,9 @@
         x.title = "Remove tag";
         x.onclick = () => setTags(front.filter(y => y !== t));
         c.append(x);
+        c.style.cursor = "pointer";
+        c.title = "Find notes with this tag";
+        c.onclick = e => { if (e.target !== x) searchFor("#" + t); };
         bar.append(c);
       }
       for (const t of [...new Set(soft)]) {
@@ -1848,7 +2025,7 @@
     $("sidebtn").innerHTML = ICON.panel;
     $("sidebtn").onclick = () => setSide(!side.open);
     $("edge").onclick = () => setSide(!side.open);
-    $("sidetabs").onclick = e => { if (e.target.dataset.t) setSide(true, e.target.dataset.t); };
+    $("sidetabs").onclick = e => { if (e.target.dataset.t) { setSide(true, e.target.dataset.t); if (e.target.dataset.t === "search") $("sq").focus(); } };
     $("f-note").innerHTML = ICON.filePlus;
     $("f-dir").innerHTML = ICON.folderPlus;
     $("f-refresh").innerHTML = ICON.refresh;
@@ -1883,6 +2060,8 @@
       if (!file.path) { try { localStorage.setItem(DRAFT, ta.value); } catch {} } // untitled drafts survive closing the tab
     }
     ta.addEventListener("input", docChanged);
+
+    $("doc").addEventListener("click", e => { const chip = e.target.closest && e.target.closest("span.tag"); if (chip) searchFor(chip.textContent.trim()); });
 
     // Ticking a to-do in the preview edits the matching line in the text
     $("doc").addEventListener("change", e => {

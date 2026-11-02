@@ -134,6 +134,7 @@ if (window === window.top && location.protocol === "file:" && /\/ui\/markdown\.h
     newFile: (dir, name) => md("newFile", dir, name),
     newFolder: (dir, name) => md("newFolder", dir, name),
     graph: p => md("graph", p),
+    search: o => md("search", o),
   });
   // A file dropped on the page opens in the editor (the page gets the path, never the File object).
   const hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
