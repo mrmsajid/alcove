@@ -318,7 +318,8 @@
       const sites = Object.entries(t.sites || {}).sort((a, b) => b[1] - a[1]);
       const tasks = ((st.log && st.log[day]) || []).map(x => ({ ...x }));
       if (st.task) { // the task being timed right now counts while it runs
-        const sec = (Date.now() - st.task.start) / 1000, same = tasks.find(x => x.name === st.task.name);
+        const midnight = new Date(); midnight.setHours(0, 0, 0, 0); // a task running since yesterday counts only since midnight
+        const sec = (Date.now() - Math.max(st.task.start, midnight.getTime())) / 1000, same = tasks.find(x => x.name === st.task.name);
         if (same) same.sec += sec; else tasks.push({ name: st.task.name, sec });
       }
       tasks.sort((a, b) => b.sec - a.sec);

@@ -440,6 +440,21 @@ Tools page <------------- storage event (alcove-tools-v1 changed) -----------+
   page; the Tools page closes first so the picker can see the tab), download all images (`page_images`,
   `save_images`), clean link, Amazon ASIN links (Keepa, CamelCamelCamel, Seller Central).
 
+**Behaviours worth knowing (Tools).**
+
+- *Redraws wait for typing.* The Tools page is rebuilt from scratch when the engine's state changes, which would clear a half-filled
+  alarm form, a to-do or a note, so `renderSoon()` holds the redraw while any field has the focus and applies it on `focusout`.
+  Time tracking is written every few seconds but only redraws the Track tab. Notes save 300 ms after the last keystroke and at
+  once on Escape, close, `pagehide` and any redraw (`flushNotes`); a failed write toasts, and a note is capped at 200,000 characters.
+- *Alarms ring up to ten minutes late* (`CATCH_UP_MS`, `checkAlarms`), so a sleeping machine or a busy app doesn't lose them; today's
+  and yesterday's time are both considered (an alarm due just before midnight), `last` stamps stop a second ring, and an alarm
+  gets `made` when created or switched on, so one set after its time today waits for tomorrow. A time that doesn't exist (spring
+  forward) rings when it lands; a repeated one (fall back) rings once. The limit is 50 alarms (finished one-offs make room) and 30 places.
+- *A Pomodoro that ended more than two minutes ago* (the machine slept) is dropped, not counted and not followed by a break.
+  A task that runs past midnight is split between the days (`stopTask`); the start page counts only the part since midnight.
+- *World clock*: `CITY_ALIAS` maps cities that are listed under another name (Kolkata is `Asia/Calcutta`, Kyiv is `Europe/Kiev`); offsets read
+  "+5h 30m", "+45m".
+
 ### 6.6 The Markdown editor (`ui/markdown.html`)
 
 A normal **tab** showing a single self-contained file. It is opened with `newTab(<md_url>)`. A `.md` file opened

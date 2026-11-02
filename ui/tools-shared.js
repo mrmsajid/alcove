@@ -72,19 +72,20 @@ const ToolsShared = (() => {
     return Math.round((Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(d.getTime() / 1000) * 1000) / 60000);
   }
   const validZone = tz => { try { new Intl.DateTimeFormat([], { timeZone: tz }); return true; } catch { return false; } };
+  const offsetText = min => (min >= 60 ? `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ""}` : `${min}m`); // 5h 30m, 45m, 2h
   function zoneInfo(tz) {
     const d = new Date();
     const time = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit", timeZone: tz }).format(d);
     const offset = offsetMin(tz, d);
     const local = -d.getTimezoneOffset();
-    const diff = (offset - local) / 60;
+    const diffMin = offset - local;
     const shifted = new Date(d.getTime() + (offset - local) * 60000); // the zone's wall clock, read in local terms
     const dayDiff = Math.round((new Date(shifted.getFullYear(), shifted.getMonth(), shifted.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
     const hour = shifted.getHours();
     return {
       time,
       day: dayDiff === 0 ? "Today" : dayDiff > 0 ? "Tomorrow" : "Yesterday",
-      rel: diff === 0 ? "Same time" : `${diff > 0 ? "+" : "−"}${Math.abs(diff)}h`,
+      rel: diffMin === 0 ? "Same time" : `${diffMin > 0 ? "+" : "−"}${offsetText(Math.abs(diffMin))}`,
       open: hour >= 9 && hour < 18,
     };
   }

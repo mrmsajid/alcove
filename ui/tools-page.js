@@ -326,6 +326,12 @@ function trackView() {
 
 // ---- world clock ----
 
+const CITY_ALIAS = {
+  kolkata: "Asia/Calcutta", bengaluru: "Asia/Calcutta", bangalore: "Asia/Calcutta", mumbai: "Asia/Calcutta", delhi: "Asia/Calcutta",
+  kathmandu: "Asia/Katmandu", kyiv: "Europe/Kiev", "ho chi minh": "Asia/Saigon", "ho chi minh city": "Asia/Saigon", yangon: "Asia/Rangoon",
+  islamabad: "Asia/Karachi", lahore: "Asia/Karachi", michigan: "America/Detroit", "new york": "America/New_York", "los angeles": "America/Los_Angeles",
+};
+
 function clocksView() {
   const row = (tz, label, removable) => {
     const time = el("div", { class: "z-time" }), sub = el("div", { class: "z-sub" }), dot = el("i", { class: "z-dot" });
@@ -347,10 +353,14 @@ function clocksView() {
   const form = el("form", { class: "t-row", on: { submit: e => {
     e.preventDefault();
     const q = input.value.trim().replace(/ /g, "_");
-    const tz = validZone(q) ? q : all.find(z => z.toLowerCase().endsWith("/" + q.toLowerCase()) || z.toLowerCase() === q.toLowerCase());
+    // Some cities are listed under an older name (Kolkata is Asia/Calcutta, Kyiv is Europe/Kiev) or aren't zones themselves.
+    const named = CITY_ALIAS[q.replace(/_/g, " ").toLowerCase()];
+    const tz = named || (validZone(q) ? q : all.find(z => z.toLowerCase().endsWith("/" + q.toLowerCase()) || z.toLowerCase() === q.toLowerCase()));
     if (!tz) return toast("Unknown place. Try a city like London or Karachi");
     if (st.zones.some(z => z[0] === tz)) return toast("Already added");
-    op("zones", [...st.zones, [tz, tz.split("/").pop().replace(/_/g, " ")]]);
+    if (st.zones.length >= 30) return toast("You can keep up to 30 places");
+    const label = named ? q.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : tz.split("/").pop().replace(/_/g, " ");
+    op("zones", [...st.zones, [tz, label]]);
   } } }, input, list, el("button", { class: "t-btn", type: "submit" }, "Add"));
   return [card("World clock",
     el("div", { class: "z-list" }, row(Intl.DateTimeFormat().resolvedOptions().timeZone, "You", false), ...st.zones.map(([tz, label]) => row(tz, label, true))),
@@ -425,12 +435,29 @@ function todoCard() {
 
 // ---- notes (one scratchpad per space) ----
 
+// Notes are saved a moment after the last keystroke, and straight away when the page closes or redraws, so closing the Tools
+// page (or Escape) never loses the last words. A save that fails (the storage is full) says so instead of showing "Saved".
+const NOTES_MAX = 200000;
+let notesTimer = null, notesPending = null;
+function flushNotes() {
+  clearTimeout(notesTimer);
+  const save = notesPending;
+  notesPending = null;
+  if (save) save();
+}
 function notesView() {
   const id = ctx.space.id || "default";
-  let timer;
-  const area = el("textarea", { class: "t-notes", spellcheck: "true", placeholder: `Notes for ${ctx.space.name || "this space"}…`, on: { input: e => {
-    clearTimeout(timer);
-    timer = setTimeout(() => { const n = read(NOTES_KEY, {}); if (e.target.value) n[id] = e.target.value; else delete n[id]; localStorage.setItem(NOTES_KEY, JSON.stringify(n)); }, 300);
+  const area = el("textarea", { class: "t-notes", spellcheck: "true", maxlength: String(NOTES_MAX), placeholder: `Notes for ${ctx.space.name || "this space"}…`, on: { input: e => {
+    const text = e.target.value;
+    notesPending = () => {
+      try {
+        const n = read(NOTES_KEY, {});
+        if (text) n[id] = text.slice(0, NOTES_MAX); else delete n[id];
+        localStorage.setItem(NOTES_KEY, JSON.stringify(n));
+      } catch { toast("Couldn't save the notes: this device's storage is full", 5000); }
+    };
+    clearTimeout(notesTimer);
+    notesTimer = setTimeout(flushNotes, 300);
   } } }, read(NOTES_KEY, {})[id] || "");
   return [todoCard(), card(`Notes · ${ctx.space.name || "this space"}`, area,
     el("div", { class: "t-btns" },
@@ -529,20 +556,26 @@ function render() {
 setInterval(() => { for (const f of live) f(); }, 1000);
 (function frame() { for (const f of fast) f(); requestAnimationFrame(frame); })(); // pauses by itself while the page is hidden
 
-// The engine writes the state; redraw when it changes (but never under someone typing a note).
+// The engine writes the state; redraw when it changes. A redraw rebuilds the whole page, which would clear whatever is being
+// typed (an alarm being set up, a to-do, a note, a place), so it waits while a field has the focus and happens when the focus
+// leaves it. Time tracking is written every few seconds but only the Track tab shows it.
+const typing = () => { const a = document.activeElement; return !!a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName); };
+let renderPending = false;
+const renderSoon = () => { if (typing()) renderPending = true; else render(); };
+document.addEventListener("focusout", () => setTimeout(() => { if (renderPending && !typing()) { renderPending = false; render(); } }, 60));
 addEventListener("storage", e => {
   if (e.key === KEY) st = loadState();
   else if (e.key === CTX_KEY) ctx = read(CTX_KEY, ctx);
-  else if (e.key !== TIME_KEY) return;
-  const a = document.activeElement;
-  if (a && a.tagName === "TEXTAREA" && view === "notes") return;
-  if (e.key === CTX_KEY && a && a.tagName === "INPUT" && a.value) return; // a half-typed entry
-  render();
+  else if (e.key === TIME_KEY) { if (view !== "track") return; }
+  else return;
+  renderSoon();
 });
 
-$("close").addEventListener("click", () => invoke("close_tools"));
-document.addEventListener("keydown", e => { if (e.key === "Escape") invoke("close_tools"); });
-window.addEventListener("focus", () => { st = loadState(); ctx = read(CTX_KEY, ctx); render(); });
+const closeTools = () => { flushNotes(); invoke("close_tools"); };
+$("close").addEventListener("click", closeTools);
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeTools(); });
+window.addEventListener("pagehide", flushNotes);
+window.addEventListener("focus", () => { st = loadState(); ctx = read(CTX_KEY, ctx); renderSoon(); });
 
 invoke("get_app_settings").then(s => { if (s && s.accent) document.documentElement.style.setProperty("--accent", s.accent); }).catch(() => {});
 listen("settings-changed", ({ payload }) => { if (payload && payload.accent) document.documentElement.style.setProperty("--accent", payload.accent); });

@@ -51,12 +51,27 @@
 
   // ---- alarms ----
 
+  // An alarm rings when its time comes, and if the machine was asleep or the app busy at that moment it still rings when it can,
+  // up to ten minutes late (today's and yesterday's time are both looked at, for one that came due just before midnight). One that
+  // was set after its time today, or switched back on, doesn't ring for a moment that had already passed.
+  const CATCH_UP_MS = 10 * 60000;
+  const dayKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   function checkAlarms() {
-    const d = new Date(), hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`, stamp = `${today()} ${hhmm}`;
+    const t = now(), d = new Date(t);
     for (const a of st.alarms) {
-      if (!a.on || a.time !== hhmm || a.last === stamp) continue;
-      if (!alarmDue(a, d)) continue;
-      a.last = stamp;
+      if (!a.on) continue;
+      const [h, m] = String(a.time).split(":").map(Number);
+      let hit = null;
+      for (const off of [0, -1]) {
+        const day = new Date(d.getFullYear(), d.getMonth(), d.getDate() + off);
+        const due = new Date(day.getFullYear(), day.getMonth(), day.getDate(), h, m).getTime(); // a time that doesn't exist (spring forward) lands an hour later
+        const stamp = `${dayKey(day)} ${a.time}`;
+        if (t < due || t - due > CATCH_UP_MS || a.last === stamp || due < (a.made || 0) || !alarmDue(a, day)) continue;
+        hit = stamp;
+        break;
+      }
+      if (!hit) continue;
+      a.last = hit;
       if (repeatKind(a) === "once") a.on = false; // a one-off alarm switches itself off
       st.ringing = { id: a.id, label: a.label || "Alarm", time: a.time, at: now() };
       if (a.snooze) st.alarms = st.alarms.filter(x => x !== a);
@@ -114,7 +129,13 @@
       save();
       notify("Timer finished");
     }
-    if (st.pomo.end && t >= st.pomo.end) pomoFinished();
+    if (st.pomo.end && t >= st.pomo.end) {
+      if (t - st.pomo.end > 2 * 60000) { // it ended long ago (the machine was asleep): not counted, no break started from now
+        st.pomo = { phase: "", end: 0, left: 0, total: 0 };
+        save();
+        notify("Pomodoro ended", "It finished while the computer was asleep");
+      } else pomoFinished();
+    }
     if (st.focusUntil && t >= st.focusUntil) {
       st.focusUntil = 0;
       save();
@@ -185,10 +206,14 @@
 
   function stopTask() {
     if (!st.task) return;
-    const sec = Math.round((now() - st.task.start) / 1000);
-    const log = (st.log[today()] ||= []);
-    const same = log.find(x => x.name === st.task.name);
-    if (same) same.sec += sec; else log.push({ name: st.task.name, sec });
+    // Each calendar day gets its own share of a task that ran across midnight.
+    for (let from = st.task.start, to = now(); from < to;) {
+      const d = new Date(from), end = Math.min(to, new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime());
+      const log = (st.log[dayKey(d)] ||= []);
+      const same = log.find(x => x.name === st.task.name), sec = Math.round((end - from) / 1000);
+      if (same) same.sec += sec; else log.push({ name: st.task.name, sec });
+      from = end;
+    }
     st.task = null;
     for (const k of Object.keys(st.log).sort().slice(0, -35)) delete st.log[k];
   }
@@ -228,9 +253,11 @@
       if (repeat !== "weekly") days = [];
       else if (!days.length) days = [new Date().getDay()];
       const dom = repeat === "monthly" ? (a.dom === "last" ? "last" : Math.min(31, Math.max(1, Math.round(Number(a.dom)) || new Date().getDate()))) : null;
-      st.alarms = [...st.alarms, { id: newId(), time, label: String((a && a.label) || "").slice(0, 60), repeat, days, dom, on: true, last: "" }].slice(0, 50);
+      if (st.alarms.length >= 50) st.alarms = st.alarms.filter(x => x.on || repeatKind(x) !== "once"); // one-offs that already rang make room
+      if (st.alarms.length >= 50) return toast("You have 50 alarms: delete one to add another");
+      st.alarms = [...st.alarms, { id: newId(), time, label: String((a && a.label) || "").slice(0, 60), repeat, days, dom, on: true, last: "", made: now() }];
     },
-    "alarm-toggle": id => { const a = st.alarms.find(x => x.id === id); if (a) { a.on = !a.on; a.last = ""; } },
+    "alarm-toggle": id => { const a = st.alarms.find(x => x.id === id); if (a) { a.on = !a.on; a.last = ""; if (a.on) a.made = now(); } },
     "alarm-delete": id => { st.alarms = st.alarms.filter(x => x.id !== id); },
     "alarm-dismiss": () => { st.ringing = null; stopRinging(); },
     "alarm-snooze": m => {
@@ -239,7 +266,7 @@
       stopRinging();
       if (!r) return;
       const d = new Date(now() + (Number(m) || 5) * 60000);
-      st.alarms = [...st.alarms, { id: newId(), time: `${pad(d.getHours())}:${pad(d.getMinutes())}`, label: r.label, repeat: "once", days: [], on: true, last: "", snooze: true }];
+      st.alarms = [...st.alarms, { id: newId(), time: `${pad(d.getHours())}:${pad(d.getMinutes())}`, label: r.label, repeat: "once", days: [], on: true, last: "", snooze: true, made: now() }];
     },
     "sound-toggle": () => { st.sound = !st.sound; },
     "sound-test": () => chime("alarm"),
@@ -258,7 +285,11 @@
     "task-start": name => { stopTask(); st.task = { name: String(name).slice(0, 80), start: now() }; },
     "task-stop": () => stopTask(),
     "task-clear-log": () => { st.log[today()] = []; },
-    zones: list => { st.zones = (Array.isArray(list) ? list : []).filter(z => Array.isArray(z) && z.length === 2).slice(0, 30); },
+    zones: list => {
+      const ok = (Array.isArray(list) ? list : []).filter(z => Array.isArray(z) && z.length === 2);
+      if (ok.length > 30) toast("You can keep up to 30 places");
+      st.zones = ok.slice(0, 30);
+    },
     refresh: (id, ms) => setRefresh(String(id), Number(ms) || 0),
     "open-url": url => { if (/^https?:\/\//i.test(String(url))) openUrl(String(url), true); },
     "new-tab": url => { if (/^(https?:|file:)/i.test(String(url))) newTab(String(url)); },
