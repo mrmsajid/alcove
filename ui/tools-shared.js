@@ -6,7 +6,7 @@ const ToolsShared = (() => {
   const NOTES_KEY = "alcove-notes-v1"; // { spaceId: text }, written by the Tools page
   const CTX_KEY = "alcove-tools-ctx";  // what the sidebar currently shows: space, active tab, auto-refreshing tabs
   const POMO = { work: 25, short: 5, long: 15 };
-  const DEFAULT_ZONES = [["Asia/Karachi", "Islamabad"], ["Asia/Manila", "Manila"], ["America/Detroit", "Michigan"]];
+  const DEFAULT_ZONES = [["America/New_York", "New York"], ["Europe/London", "London"], ["Asia/Tokyo", "Tokyo"]];
   const DEFAULT_FOCUS = ["youtube.com", "facebook.com", "instagram.com", "x.com", "twitter.com", "tiktok.com", "reddit.com", "netflix.com"];
 
   const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };

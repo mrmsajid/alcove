@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Alcove: a productivity and privacy focused browser",
   "author": "X UP Brands",
+  "license": "MIT",
   "main": "main.js",
   "scripts": {
     "sync-ui": "node scripts/sync-ui.js",

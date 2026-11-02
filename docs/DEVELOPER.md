@@ -101,6 +101,7 @@ alcove/
 │  ├─ peek.html, divider.html, strip.html, region.html, shot.html   small overlay views
 │  ├─ engines.js                        search engines, shared by sidebar, palette, settings and main
 │  └─ vendor/qrcode.js                  qrcode-generator (MIT), for "QR code for this page"
+├─ README.md, LICENSE        what Alcove is, install and build steps, privacy and code signing policy; the MIT license
 ├─ docs/DEVELOPER.md         this file
 └─ .github/workflows/        CI
 ```
@@ -673,9 +674,15 @@ Windows. Verify in this order:
 
 - **Windows** is untested (above).
 - **No automated tests.** The CDP scripts in 8.2 are the starting point for a regression suite.
-- **No `LICENSE` file** in the repo yet. Provenance note: the sidebar design was influenced by the Nook browser
-  (GPL-3.0, macOS-only). Alcove contains none of its code and uses a different name and icon because of Nook's
-  trademark policy. Decide the licence before distributing.
+- **Licence: MIT** (`LICENSE`, `"license"` in `electron/package.json`). Provenance note: the sidebar design was
+  influenced by the Nook browser (GPL-3.0, macOS-only). Alcove contains none of its code and uses a different name
+  and icon because of Nook's trademark policy. Dependencies keep their own licences (README lists them); keep the
+  notice at the top of `ui/vendor/qrcode.js`.
+- **Code signing.** Installers are unsigned, so Chrome and SmartScreen warn on Windows. The plan is free signing from
+  the SignPath Foundation, which needs a public repository, a public release, a "Code signing policy" section
+  naming the team roles (the README has a placeholder), two-factor authentication on GitHub and SignPath, and a
+  build signed from CI with a manual approval per release. The signed release workflow is written after approval,
+  because SignPath dictates its steps.
 - Markdown editor: no rename or delete in the file tree, search ignores unsaved edits, the Visual view normalises
   the file the first time you edit it (blank lines between blocks, `*` bullets become `-`).
 - Glass could not be checked pixel-for-pixel from automated tests (native vibrancy is not capturable); judge by eye.
