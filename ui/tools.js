@@ -200,7 +200,7 @@
     cleanLink: () => { const t = activeTab(); if (t) call("copy_text", { text: cleanLink(t.url) }).then(() => toast("Clean link copied")); },
     markdown: async (what = "new") => {
       const url = await call("md_url");
-      if (url) newTab(what === "open" ? `${url}#open` : url);
+      if (url) newTab(what === "open" ? `${url}#open` : what === "folder" ? `${url}#folder` : url);
     },
   };
 })();

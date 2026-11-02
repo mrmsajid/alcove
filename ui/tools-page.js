@@ -254,25 +254,30 @@ function notesView() {
 
 // ---- Markdown files: opened in an editor tab (ui/markdown.html) ----
 
+// what: "open" (file picker), "folder" (folder picker), "new", "dir:<path>" (a folder from the recent list)
+// or the path of a file.
 async function openMarkdown(what) {
   const url = await call("md_url");
   if (!url) return;
-  op("new-tab", what === "open" ? `${url}#open` : what === "new" ? url : `${url}?file=${encodeURIComponent(what)}`);
+  op("new-tab", what === "open" ? `${url}#open` : what === "folder" ? `${url}#folder` : what === "new" ? url
+    : what.startsWith("dir:") ? `${url}?folder=${encodeURIComponent(what.slice(4))}` : `${url}?file=${encodeURIComponent(what)}`);
 }
 
-function markdownCard(recent) {
+function markdownCard(files, folders) {
+  const recent = (title, list, what) => list && list.length ? [el("div", { class: "t-sub" }, title),
+    el("div", { class: "md-recent" }, ...list.map(p => el("button", { class: "t-btn", title: p, on: { click: () => openMarkdown(what(p)) } },
+      el("span", {}, p.split(/[\\/]/).pop()), el("span", { class: "d" }, p))))] : null;
   return card("Markdown",
-    note("Read and edit .md files. Open one from your computer, or start a new document. You can also drag a .md file onto any Alcove tab to read it."),
-    el("div", { class: "t-btns wrap" }, btn("Open file…", () => openMarkdown("open"), "primary"), btn("New document", () => openMarkdown("new"))),
-    recent && recent.length ? [el("div", { class: "t-sub" }, "Recent"),
-      el("div", { class: "md-recent" }, ...recent.map(p => el("button", { class: "t-btn", title: p, on: { click: () => openMarkdown(p) } },
-        el("span", {}, p.split(/[\\/]/).pop()), el("span", { class: "d" }, p))))] : null);
+    note("Read and edit .md files, or open a whole folder and browse it in the editor's side panel. You can also drag a .md file onto any Alcove tab to read it."),
+    el("div", { class: "t-btns wrap" }, btn("Open folder…", () => openMarkdown("folder"), "primary"), btn("Open file…", () => openMarkdown("open")), btn("New document", () => openMarkdown("new"))),
+    recent("Recent folders", folders, p => "dir:" + p),
+    recent("Recent files", files, p => p));
 }
 
 function markdownView() {
-  const out = [markdownCard([])];
-  call("md_recent").then(list => {
-    if (view === "markdown" && list && list.length) { out[0].replaceWith(markdownCard(list)); }
+  const out = [markdownCard([], [])];
+  Promise.all([call("md_recent"), call("md_recent_folders")]).then(([files, folders]) => {
+    if (view === "markdown" && ((files && files.length) || (folders && folders.length))) out[0].replaceWith(markdownCard(files, folders));
   });
   return out;
 }

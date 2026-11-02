@@ -1283,6 +1283,7 @@ const actions = {
   "notes": () => call("open_tools", { tab: "notes" }),
   "markdown-open": () => window.Tools.markdown("open"),
   "markdown-new": () => window.Tools.markdown("new"),
+  "markdown-folder": () => window.Tools.markdown("folder"),
   "pomodoro": () => window.Tools.pomodoro(),
   "focus-mode": () => window.Tools.focus(25),
   "end-focus": () => window.Tools.stopFocus(),

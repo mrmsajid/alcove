@@ -1066,6 +1066,36 @@ const MD_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown", "mdown", 
 const MD_MAX = 5 * 1024 * 1024;
 const mdAllowed = new Set(); // files this session opened or saved: the only ones the editor may write
 
+// Folders: the editor shows a file tree for a folder the user picked (or one picked before, from the recent
+// list). It can only list inside those folders, and only shows folders and Markdown or text files.
+const mdRoots = new Set();
+const MD_SKIP = /^(\.|node_modules$|__pycache__$)/;
+const mdInside = p => [...mdRoots].some(r => p === r || p.startsWith(r + path.sep));
+const mdName = (s, ext) => {
+  const n = String(s || "").replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").replace(/^\.+/, "").trim().slice(0, 100);
+  return n ? (ext && !MD_EXT.test(n) ? n + ext : n) : "";
+};
+
+function mdList(dir) {
+  dir = path.resolve(String(dir || ""));
+  if (!mdInside(dir)) return { error: "That folder isn't open." };
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(d => !MD_SKIP.test(d.name) && (d.isDirectory() || (d.isFile() && MD_EXT.test(d.name)))) // links are skipped, so a tree can't leave its folder
+      .map(d => ({ name: d.name, path: path.join(dir, d.name), dir: d.isDirectory() }))
+      .sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+    return { dir, entries: entries.slice(0, 2000) };
+  } catch { return { error: "Couldn't read this folder." }; }
+}
+
+function mdAdoptRoot(p) {
+  const rootDir = path.resolve(p);
+  mdRoots.add(rootDir);
+  config.recentMdFolders = [rootDir, ...(config.recentMdFolders || []).filter(x => x !== rootDir)].slice(0, 8);
+  saveConfig();
+  return { root: rootDir, ...mdList(rootDir) };
+}
+
 const mdRemember = p => {
   config.recentMd = [p, ...(config.recentMd || []).filter(x => x !== p)].slice(0, 8);
   saveConfig();
@@ -1102,6 +1132,28 @@ function mdWrite(p, text) {
 ipcMain.handle("alcove-md", async (e, op, a, b) => {
   if (!e.senderFrame || e.senderFrame.url.split(/[?#]/)[0] !== MD_PAGE) throw new Error("forbidden");
   if (op === "read") return mdRead(a);
+  if (op === "openFolder") {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"], defaultPath: app.getPath("documents") });
+    return canceled || !filePaths[0] ? null : mdAdoptRoot(filePaths[0]);
+  }
+  if (op === "folder") { // reopening a folder chosen earlier
+    const p = path.resolve(String(a || ""));
+    return (config.recentMdFolders || []).includes(p) && fs.existsSync(p) ? mdAdoptRoot(p) : { error: "Choose the folder again." };
+  }
+  if (op === "list") return mdList(a);
+  if (op === "newFile" || op === "newFolder") {
+    const dir = path.resolve(String(a || ""));
+    if (!mdInside(dir)) return { error: "That folder isn't open." };
+    const name = mdName(b || "Untitled", op === "newFile" ? ".md" : "");
+    if (!name) return { error: "Give it a name." };
+    const target = path.join(dir, name);
+    try {
+      if (fs.existsSync(target)) return { error: `“${name}” already exists.` };
+      if (op === "newFile") { fs.writeFileSync(target, "", { flag: "wx" }); mdAllowed.add(target); mdRemember(target); }
+      else fs.mkdirSync(target);
+      return { path: target };
+    } catch { return { error: "Couldn't create that. Check that the folder is writable." }; }
+  }
   if (op === "open") {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: MD_FILTERS, defaultPath: app.getPath("documents") });
     return canceled || !filePaths[0] ? null : mdRead(filePaths[0]);
@@ -1955,6 +2007,7 @@ const commands = {
   // Tools panel
   md_url: () => MD_PAGE,
   md_recent: () => (config.recentMd || []).filter(p => fs.existsSync(p)),
+  md_recent_folders: () => (config.recentMdFolders || []).filter(p => fs.existsSync(p)),
   notify: ({ title, body }) => {
     if (Notification.isSupported()) new Notification({ title: String(title || "").slice(0, 80), body: String(body || "").slice(0, 200) }).show();
   },

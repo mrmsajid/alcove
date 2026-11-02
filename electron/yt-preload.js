@@ -127,6 +127,11 @@ if (window === window.top && location.protocol === "file:" && /\/ui\/markdown\.h
     read: p => md("read", p),
     save: (p, text) => md("save", p, text),
     saveAs: (name, text) => md("saveAs", name, text),
+    openFolder: () => md("openFolder"),
+    folder: p => md("folder", p),
+    list: p => md("list", p),
+    newFile: (dir, name) => md("newFile", dir, name),
+    newFolder: (dir, name) => md("newFolder", dir, name),
   });
   // A file dropped on the page opens in the editor (the page gets the path, never the File object).
   window.addEventListener("dragover", e => e.preventDefault(), true);

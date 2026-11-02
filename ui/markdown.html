@@ -5,13 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Markdown</title>
   <style>
-    :root { color-scheme: dark light; --bg: #1d1d20; --surface: #26262a; --text: #ededf0; --muted: #8e8e97; --line: #ffffff17; --accent: #76767f; --code: #ffffff0f; --link: #8ab4ff; }
-    @media (prefers-color-scheme: light) { :root { --bg: #fbfbfc; --surface: #f1f1f4; --text: #1c1c1f; --muted: #6e6e78; --line: #0000001a; --code: #0000000a; --link: #1a5fd0; } }
+    :root { color-scheme: dark light; --bg: #1d1d20; --surface: #26262a; --text: #ededf0; --muted: #8e8e97; --line: #ffffff17; --accent: #76767f; --code: #ffffff0f; --link: #8ab4ff; --hover: #ffffff10; --tag: #ffffff14; }
+    @media (prefers-color-scheme: light) { :root { --bg: #fbfbfc; --surface: #f1f1f4; --text: #1c1c1f; --muted: #6e6e78; --line: #0000001a; --code: #0000000a; --link: #1a5fd0; --hover: #0000000a; --tag: #0000000d; } }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
-    body { display: flex; flex-direction: column; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; }
-    button { font: inherit; color: inherit; background: transparent; border: 0; border-radius: 8px; padding: 5px 11px; cursor: pointer; }
-    button:hover { background: var(--surface); }
+    body { display: flex; flex-direction: column; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      --doc-size: 15px; --doc-font: -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; --ed-size: 13.5px; }
+    button, select { font: inherit; color: inherit; background: transparent; border: 0; border-radius: 8px; padding: 5px 11px; cursor: pointer; }
+    button:hover, select:hover { background: var(--hover); }
+    button:disabled { opacity: .4; cursor: default; }
+    svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
     header { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex: none; }
     header .name { font-weight: 600; margin: 0 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     header .name i { color: var(--muted); font-style: normal; font-weight: 400; }
@@ -21,15 +25,59 @@
     .seg button.on { background: var(--bg); color: var(--text); box-shadow: 0 1px 2px #0003; }
     .primary { background: var(--accent); color: #fff; }
     .primary:hover { background: var(--accent); filter: brightness(1.1); }
-    main { flex: 1; display: flex; min-height: 0; }
+
+    /* formatting toolbar */
+    #fmt { display: flex; align-items: center; gap: 2px; padding: 5px 12px; border-bottom: 1px solid var(--line); flex: none; overflow-x: auto; scrollbar-width: none; }
+    #fmt button { flex: none; min-width: 30px; height: 28px; padding: 0 7px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+    #fmt button:hover, #fmt button.on { color: var(--text); }
+    #fmt button.on { background: var(--hover); }
+    #fmt .g { font-weight: 700; font-size: 13.5px; } #fmt .gi { font-style: italic; font-weight: 600; font-family: Georgia, serif; } #fmt .gs { text-decoration: line-through; font-weight: 600; }
+    #fmt .gm { font: 12px ui-monospace, Menlo, Consolas, monospace; } #fmt .gt { font-size: 12.5px; }
+    #fmt .bar { flex: none; width: 1px; height: 18px; margin: 0 5px; background: var(--line); }
+    #fmt select { height: 28px; padding: 0 8px; margin-right: 2px; color: var(--text); background: var(--surface); }
+    #tagbar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 14px; border-bottom: 1px solid var(--line); flex: none; font-size: 12.5px; }
+    #tagbar:empty { display: none; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 9px; border-radius: 999px; background: var(--tag); color: var(--text); }
+    .chip.soft { color: var(--muted); padding-right: 9px; }
+    .chip button { padding: 0 5px; border-radius: 50%; color: var(--muted); line-height: 1.3; }
+    .addtag { color: var(--muted); border: 1px dashed var(--line); border-radius: 999px; padding: 1px 10px; }
+    body.view #fmt, body.view .addtag { display: none; }
+
+    main { flex: 1; display: flex; min-height: 0; position: relative; }
+    /* right side panel: files of an opened folder, and the outline of this document */
+    #edge { flex: none; width: 14px; padding: 0; border-radius: 0; color: var(--muted); border-left: 1px solid var(--line); font-size: 13px; line-height: 1; }
+    #edge:hover { background: var(--hover); color: var(--text); }
+    #side { width: 270px; flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); }
+    #sidetabs { display: flex; align-items: center; gap: 2px; padding: 8px 8px 6px; flex: none; }
+    #sidetabs button[data-t] { padding: 3px 10px; font-size: 12.5px; color: var(--muted); }
+    #sidetabs button[data-t].on { background: var(--surface); color: var(--text); }
+    #files, #outline { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    #files[hidden], #outline[hidden] { display: none; }
+    .filehead { display: flex; align-items: center; gap: 1px; padding: 2px 8px 6px; flex: none; }
+    .filehead .fname { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 4px; }
+    .filehead button { padding: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+    .filehead button:hover { color: var(--text); }
+    .filehead button svg { width: 16px; height: 16px; }
+    #tree, #outlinelist { flex: 1; overflow: auto; padding: 0 6px 12px; font-size: 13px; }
+    #tree button, #outlinelist button { display: flex; align-items: center; gap: 5px; width: 100%; text-align: left; padding: 3px 8px; border-radius: 6px; overflow: hidden; white-space: nowrap; color: var(--text); }
+    #tree button span, #outlinelist button span { overflow: hidden; text-overflow: ellipsis; }
+    #tree button.on { background: var(--surface); font-weight: 600; }
+    #tree .chev { flex: none; width: 10px; color: var(--muted); font-size: 10px; }
+    #tree .dim { color: var(--muted); }
+    #tree .pick { outline: 1px dashed var(--line); }
+    #outlinelist button { color: var(--muted); }
+    #outlinelist button:hover { color: var(--text); }
+    .side-empty { padding: 10px 12px; color: var(--muted); font-size: 12.5px; }
+    .side-empty button { margin-top: 10px; border: 1px solid var(--line); }
     #edit { flex: 1; min-width: 0; border: 0; outline: 0; resize: none; padding: 20px 24px; background: var(--bg); color: var(--text);
-      font: 13.5px/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace; tab-size: 2; }
+      font: var(--ed-size)/1.65 ui-monospace, "SF Mono", Menlo, Consolas, monospace; tab-size: 2; }
     #view { flex: 1; min-width: 0; overflow: auto; padding: 20px 28px 60px; }
     body.edit #view, body.view #edit { display: none; }
     body.split #edit { border-right: 1px solid var(--line); }
     footer { display: flex; gap: 14px; padding: 5px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; flex: none; }
     #msg { margin-left: auto; }
-    .doc { max-width: 760px; margin: 0 auto; }
+
+    .doc { max-width: 760px; margin: 0 auto; font-family: var(--doc-font); font-size: var(--doc-size); line-height: 1.65; }
     .doc > :first-child { margin-top: 0; }
     .doc h1, .doc h2, .doc h3, .doc h4, .doc h5, .doc h6 { line-height: 1.25; margin: 1.5em 0 .5em; }
     .doc h1 { font-size: 1.9em; padding-bottom: .3em; border-bottom: 1px solid var(--line); }
@@ -46,15 +94,31 @@
     .doc img { max-width: 100%; border-radius: 6px; }
     .doc ul, .doc ol { padding-left: 1.6em; }
     .doc li.task { list-style: none; margin-left: -1.3em; }
-    .doc li.task input { margin-right: .5em; }
+    .doc li.task input { margin-right: .5em; accent-color: var(--accent); cursor: pointer; }
+    .doc li.task input:disabled { cursor: default; }
+    .doc li.done { color: var(--muted); text-decoration: line-through; }
     .doc table { border-collapse: collapse; display: block; overflow: auto; }
     .doc th, .doc td { border: 1px solid var(--line); padding: 6px 12px; }
     .doc th { background: var(--code); }
+    .doc .tag { background: var(--tag); padding: .05em .55em; border-radius: 999px; font-size: .88em; white-space: nowrap; }
+    .doc .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 1.2em; }
     .empty { margin: 14vh auto 0; text-align: center; color: var(--muted); max-width: 360px; }
     .empty h2 { color: var(--text); font-weight: 600; margin: 0 0 6px; }
     .empty p { margin: 0 0 18px; }
-    .empty .row { display: flex; gap: 8px; justify-content: center; }
-    .empty button { border: 1px solid var(--line); }
+
+    .pop, .menu { position: fixed; z-index: 10; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px #0005; padding: 10px; }
+    .pop { display: flex; flex-direction: column; gap: 8px; min-width: 260px; }
+    .pop h4 { margin: 0; font-size: 12px; color: var(--muted); font-weight: 600; }
+    .pop label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+    .pop input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font: inherit; outline: none; user-select: text; }
+    .pop input:focus { border-color: var(--accent); }
+    .pop .row { display: flex; gap: 6px; justify-content: flex-end; }
+    .menu { padding: 5px; min-width: 200px; }
+    .menu button { display: flex; width: 100%; justify-content: space-between; gap: 18px; text-align: left; padding: 6px 10px; }
+    .menu .sep { height: 1px; margin: 4px 6px; background: var(--line); }
+    .menu .head { padding: 5px 10px 2px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .menu button.on::after { content: "✓"; color: var(--muted); }
+    .menu kbd { color: var(--muted); font: 11px -apple-system, system-ui, sans-serif; }
     #drop { display: none; position: fixed; inset: 8px; border: 2px dashed var(--accent); border-radius: 14px; background: #0000001a; place-items: center; font-size: 16px; pointer-events: none; }
     body.dragging #drop { display: grid; }
   </style>
@@ -62,18 +126,39 @@
 <body class="split">
   <header>
     <button id="open" title="Open a Markdown file (⌘O)">Open…</button>
+    <button id="openfolder" title="Open a whole folder">Open folder…</button>
     <button id="new" title="New document">New</button>
     <span class="name" id="name"></span>
     <span class="sp"></span>
     <div class="seg" id="modes">
       <button data-mode="edit">Edit</button><button data-mode="split">Split</button><button data-mode="view">View</button>
     </div>
+    <button id="sidebtn" title="Files and outline"></button>
     <button id="save" class="primary" title="Save (⌘S)">Save</button>
     <button id="saveas" title="Save a copy">Save as…</button>
   </header>
+  <div id="fmt"></div>
+  <div id="tagbar"></div>
   <main>
     <textarea id="edit" spellcheck="true" placeholder="Start writing in Markdown…"></textarea>
     <div id="view"><div class="doc" id="doc"></div></div>
+    <button id="edge" title="Show or hide the files and outline panel">‹</button>
+    <aside id="side" hidden>
+      <div id="sidetabs">
+        <button data-t="files">Files</button><button data-t="outline">Outline</button>
+      </div>
+      <div id="files">
+        <div class="filehead">
+          <span class="fname" id="fname"></span>
+          <button id="f-note" title="New note"></button>
+          <button id="f-dir" title="New folder"></button>
+          <button id="f-refresh" title="Refresh"></button>
+          <button id="f-open" title="Open a folder…"></button>
+        </div>
+        <div id="tree"></div>
+      </div>
+      <div id="outline" hidden><div id="outlinelist"></div></div>
+    </aside>
   </main>
   <footer><span id="count"></span><span id="path"></span><span id="msg"></span></footer>
   <div id="drop">Drop a Markdown file to open it</div>
@@ -96,6 +181,8 @@
       t = t.replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, "<strong>$1</strong>").replace(/(^|\W)__(?=\S)(.+?)(?<=\S)__(?!\w)/g, "$1<strong>$2</strong>");
       t = t.replace(/(^|[^*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?!\*)/g, "$1<em>$2</em>").replace(/(^|\W)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)/g, "$1<em>$2</em>");
       t = t.replace(/~~(?=\S)(.+?)(?<=\S)~~/g, "<del>$1</del>");
+      // #tags in running text (never inside a tag's own attributes)
+      t = t.split(/(<[^>]*>)/).map(seg => (seg.startsWith("<") ? seg : seg.replace(/(^|[\s(])#([A-Za-z][\w/-]{0,39})(?![\w/-])/g, '$1<span class="tag">#$2</span>'))).join("");
       t = t.replace(/ {2,}\n/g, "<br>");
       return t.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${esc(codes[i])}</code>`);
     }
@@ -116,9 +203,12 @@
           if (it.indent > indent) { html = html.replace(/<\/li>$/, "") + build(it.indent) + "</li>"; continue; }
           pos++;
           const task = it.text.match(/^\[([ xX])\]\s+(.*)$/);
-          html += task
-            ? `<li class="task"><input type="checkbox" disabled${task[1] === " " ? "" : " checked"}>${inline(task[2])}</li>`
-            : `<li>${inline(it.text)}</li>`;
+          if (task) {
+            const checked = task[1] !== " ";
+            // clickable when the line is known (top-level lists); clicking edits the source, see the #doc handler
+            const box = it.line >= 0 ? `<input type="checkbox" data-line="${it.line}"${checked ? " checked" : ""}>` : `<input type="checkbox" disabled${checked ? " checked" : ""}>`;
+            html += `<li class="task${checked ? " done" : ""}">${box}${inline(task[2])}</li>`;
+          } else html += `<li>${inline(it.text)}</li>`;
         }
         return html + `</${tag}>`;
       };
@@ -127,7 +217,7 @@
       return out;
     }
 
-    function render(md) {
+    function render(md, top = true) {
       const lines = md.replace(/\r\n?/g, "\n").split("\n");
       const out = [];
       let i = 0;
@@ -148,7 +238,7 @@
         if (/^\s*>/.test(line)) {
           const buf = [];
           while (i < lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ""));
-          out.push(`<blockquote>${render(buf.join("\n"))}</blockquote>`);
+          out.push(`<blockquote>${render(buf.join("\n"), false)}</blockquote>`);
           continue;
         }
         if (line.includes("|") && i + 1 < lines.length && TABLE_SEP(lines[i + 1])) {
@@ -167,7 +257,7 @@
           const items = [];
           while (i < lines.length) {
             const li = lines[i].match(LIST_ITEM);
-            if (li) { items.push({ indent: li[1].replace(/\t/g, "    ").length, ordered: /\d/.test(li[2]), text: li[3] }); i++; }
+            if (li) { items.push({ indent: li[1].replace(/\t/g, "    ").length, ordered: /\d/.test(li[2]), text: li[3], line: top ? i : -1 }); i++; }
             else if (items.length && /^\s{2,}\S/.test(lines[i])) { items[items.length - 1].text += " " + lines[i].trim(); i++; }
             else if (!lines[i].trim() && i + 1 < lines.length && LIST_ITEM.test(lines[i + 1])) i++;
             else break;
@@ -183,64 +273,581 @@
       return out.join("\n");
     }
 
+    // ---- front matter and tags: `tags: [a, b]` at the top of the file, plus #tags in the text ----
+    const splitFront = t => { const m = t.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/); return m ? { front: m[1], len: m[0].length } : null; };
+    const cleanTag = s => s.trim().replace(/^["']|["']$/g, "").replace(/^#+/, "").replace(/\s+/g, "-");
+    function frontTags(front) {
+      const out = [], lines = front.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const m = lines[i].match(/^tags\s*:\s*(.*)$/i);
+        if (!m) continue;
+        const v = m[1].trim();
+        if (v.startsWith("[")) out.push(...v.replace(/^\[|\]\s*$/g, "").split(","));
+        else if (v) out.push(...v.split(/[,\s]+/));
+        else for (let j = i + 1; j < lines.length && /^\s*-\s+/.test(lines[j]); j++) out.push(lines[j].replace(/^\s*-\s+/, ""));
+      }
+      return out.map(cleanTag).filter(Boolean);
+    }
+    function inlineTags(text) {
+      const found = [];
+      let fenced = false;
+      for (const line of text.split("\n")) {
+        if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+        if (fenced) continue;
+        for (const m of line.replace(/`[^`]*`/g, "").matchAll(/(^|[\s(])#([A-Za-z][\w/-]{0,39})(?![\w/-])/g)) found.push(m[2]);
+      }
+      return found;
+    }
+
     // ---- editor ----
     const $ = id => document.getElementById(id);
+    const ta = $("edit");
     const bridge = window.alcoveMd; // only present inside Alcove
-    const DRAFT = "alcove-md-draft";
+    const DRAFT = "alcove-md-draft", PREFS = "alcove-md-prefs";
     let file = { path: "", name: "Untitled.md" };
     let saved = "";
     let mode = "split";
     let msgTimer;
+    let bodyLines = 0; // lines taken by front matter, so preview checkboxes map back to source lines
 
-    const dirty = () => $("edit").value !== saved;
+    const dirty = () => ta.value !== saved;
     const say = (t, ms = 2500) => { $("msg").textContent = t; clearTimeout(msgTimer); msgTimer = setTimeout(() => { $("msg").textContent = ""; }, ms); };
 
-    function setMode(m) {
-      mode = m;
-      document.body.className = m;
-      for (const b of document.querySelectorAll("#modes button")) b.classList.toggle("on", b.dataset.mode === m);
-      if (m !== "view") $("edit").focus();
+    // Edits go through execCommand so the browser's own undo/redo keeps working; if that isn't available the
+    // text is set directly (verified below).
+    function replaceRange(start, end, text, selStart, selEnd) {
+      const before = ta.value, want = before.slice(0, start) + text + before.slice(end);
+      ta.focus();
+      ta.setSelectionRange(start, end);
+      let ok = false;
+      try { ok = text === "" ? (start === end || document.execCommand("delete")) : document.execCommand("insertText", false, text); } catch {}
+      if (ta.value !== want) { ta.value = want; ta.dispatchEvent(new Event("input")); }
+      const s = selStart ?? start + text.length;
+      ta.setSelectionRange(s, selEnd ?? s);
+    }
+
+    // ---- toolbar actions ----
+    function lineRange() {
+      const v = ta.value, s = ta.selectionStart;
+      let e = ta.selectionEnd;
+      const a = v.lastIndexOf("\n", s - 1) + 1;
+      if (e > s && v[e - 1] === "\n") e--;
+      let b = v.indexOf("\n", e);
+      if (b < 0) b = v.length;
+      return [a, b];
+    }
+    function mapLines(fn) {
+      const [a, b] = lineRange();
+      const out = ta.value.slice(a, b).split("\n").map(fn).join("\n");
+      replaceRange(a, b, out, a, a + out.length);
+    }
+    const MARK = /^(\s*)(#{1,6}\s+|>\s?|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/;
+    const stripMark = l => l.replace(MARK, "$1");
+
+    function wrap(before, after = before, placeholder = "text") {
+      const v = ta.value, s = ta.selectionStart, e = ta.selectionEnd, sel = v.slice(s, e);
+      if (s >= before.length && v.slice(s - before.length, s) === before && v.slice(e, e + after.length) === after && !(before === "*" && v[s - 2] === "*")) {
+        replaceRange(s - before.length, e + after.length, sel, s - before.length, s - before.length + sel.length); // already wrapped: unwrap
+        return;
+      }
+      const text = sel || placeholder;
+      replaceRange(s, e, before + text + after, s + before.length, s + before.length + text.length);
+    }
+
+    function currentBlock() {
+      const v = ta.value, s = ta.selectionStart;
+      const a = v.lastIndexOf("\n", s - 1) + 1;
+      let b = v.indexOf("\n", s);
+      if (b < 0) b = v.length;
+      const line = v.slice(a, b);
+      let fences = 0;
+      for (const l of v.slice(0, a).split("\n")) if (/^\s*(```|~~~)/.test(l)) fences++;
+      if (fences % 2 === 1 || /^\s*(```|~~~)/.test(line)) return "code";
+      const h = line.match(/^(#{1,6})\s/);
+      if (h) return "h" + h[1].length;
+      if (/^\s*>/.test(line)) return "quote";
+      if (/^\s*[-*+]\s+\[[ xX]\]\s/.test(line)) return "todo";
+      if (/^\s*[-*+]\s/.test(line)) return "ul";
+      if (/^\s*\d+[.)]\s/.test(line)) return "ol";
+      return "p";
+    }
+
+    function setBlock(kind) {
+      if (kind === "code") {
+        const [a, b] = lineRange();
+        const text = ta.value.slice(a, b);
+        if (text.trim()) replaceRange(a, b, "```\n" + text + "\n```");
+        else replaceRange(a, b, "```\n\n```", a + 4);
+        return;
+      }
+      const cur = currentBlock();
+      if (kind === cur && kind !== "p") kind = "p"; // choosing the same style again turns it off
+      let n = 0;
+      mapLines(l => {
+        if (!l.trim()) return l;
+        const plain = stripMark(l);
+        if (kind === "p") return plain;
+        const indent = plain.match(/^\s*/)[0], rest = plain.slice(indent.length);
+        if (/^h[1-6]$/.test(kind)) return "#".repeat(+kind[1]) + " " + rest;
+        if (kind === "quote") return "> " + rest;
+        if (kind === "ul") return `${indent}- ${rest}`;
+        if (kind === "ol") return `${indent}${++n}. ${rest}`;
+        if (kind === "todo") return `${indent}- [ ] ${rest}`;
+        return l;
+      });
+    }
+
+    function insertBlock(text, sel) {
+      const v = ta.value, s = ta.selectionStart, e = ta.selectionEnd;
+      const before = v.slice(0, s), after = v.slice(e);
+      const pre = !before || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+      const post = !after || after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n";
+      replaceRange(s, e, pre + text + post, s + pre.length + (sel ? sel[0] : text.length), s + pre.length + (sel ? sel[1] : text.length));
+    }
+
+    // Small form shown under the toolbar (this page can't use prompt())
+    function ask(title, fields, anchor) {
+      const sel = [ta.selectionStart, ta.selectionEnd];
+      return new Promise(resolve => {
+        const pop = document.createElement("form");
+        pop.className = "pop";
+        pop.innerHTML = `<h4>${esc(title)}</h4>` + fields.map((f, k) => `<label>${esc(f.label)}<input name="f${k}" type="${f.type || "text"}" value="${esc(f.value || "")}" placeholder="${esc(f.placeholder || "")}" autocomplete="off" spellcheck="false"${f.min ? ` min="${f.min}" max="${f.max}"` : ""}></label>`).join("")
+          + `<div class="row"><button type="button" data-x>Cancel</button><button class="primary" type="submit">OK</button></div>`;
+        const r = anchor.getBoundingClientRect();
+        pop.style.top = `${r.bottom + 6}px`;
+        pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 290))}px`;
+        const done = values => { pop.remove(); document.removeEventListener("mousedown", away, true); ta.focus(); ta.setSelectionRange(sel[0], sel[1]); resolve(values); };
+        const away = e => { if (!pop.contains(e.target)) done(null); };
+        pop.addEventListener("submit", e => { e.preventDefault(); done(fields.map((_, k) => pop.elements[`f${k}`].value.trim())); });
+        pop.addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); done(null); } });
+        pop.querySelector("[data-x]").onclick = () => done(null);
+        document.body.append(pop);
+        setTimeout(() => document.addEventListener("mousedown", away, true), 0);
+        const first = pop.querySelector("input");
+        first.focus();
+        first.select();
+      });
+    }
+
+    function menu(items, anchor) {
+      document.querySelector(".menu")?.remove();
+      const m = document.createElement("div");
+      m.className = "menu";
+      for (const it of items) {
+        if (it === "-") { m.append(Object.assign(document.createElement("div"), { className: "sep" })); continue; }
+        if (it.head) { m.append(Object.assign(document.createElement("div"), { className: "head", textContent: it.head })); continue; }
+        const b = document.createElement("button");
+        b.className = it.on ? "on" : "";
+        b.append(it.label);
+        if (it.keys) b.append(Object.assign(document.createElement("kbd"), { textContent: it.keys }));
+        b.onclick = () => { m.remove(); it.run(); };
+        m.append(b);
+      }
+      const r = anchor.getBoundingClientRect();
+      m.style.top = `${r.bottom + 6}px`;
+      m.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 230))}px`;
+      document.body.append(m);
+      const away = e => { if (!m.contains(e.target)) { m.remove(); document.removeEventListener("mousedown", away, true); } };
+      setTimeout(() => document.addEventListener("mousedown", away, true), 0);
+    }
+
+    const copyText = (text, msg) => {
+      const t = document.createElement("textarea");
+      t.value = text;
+      document.body.append(t);
+      t.select();
+      document.execCommand("copy");
+      t.remove();
+      ta.focus();
+      say(msg);
+    };
+
+    // ---- tags ----
+    function setTags(tags) {
+      const t = ta.value, fm = splitFront(t), s0 = ta.selectionStart;
+      const lines = [], src = fm ? fm.front.split(/\r?\n/) : [];
+      for (let i = 0; i < src.length; i++) {
+        if (/^tags\s*:/i.test(src[i])) {
+          if (!src[i].replace(/^tags\s*:/i, "").trim()) while (i + 1 < src.length && /^\s*-\s+/.test(src[i + 1])) i++;
+          continue;
+        }
+        lines.push(src[i]);
+      }
+      if (tags.length) lines.push(`tags: [${tags.join(", ")}]`);
+      const block = lines.length ? `---\n${lines.join("\n")}\n---\n${fm ? "" : "\n"}` : "";
+      let old = fm ? fm.len : 0;
+      if (fm && !block && t.slice(old).startsWith("\n")) old++; // dropping the whole block: also drop the blank line after it
+      replaceRange(0, old, block, Math.max(0, s0 + block.length - old));
+    }
+    async function addTag(anchor) {
+      const r = await ask("Add tags", [{ label: "Tags, separated by commas", placeholder: "weekly, amazon, ideas" }], anchor);
+      if (!r || !r[0]) return;
+      const fm = splitFront(ta.value);
+      const have = fm ? frontTags(fm.front) : [];
+      const add = r[0].split(",").map(cleanTag).filter(Boolean);
+      setTags([...new Set([...have, ...add])]);
+    }
+
+    // ---- preferences: text size and font ----
+    const prefs = (() => { try { return { size: "m", font: "sans", ...JSON.parse(localStorage.getItem(PREFS) || "{}") }; } catch { return { size: "m", font: "sans" }; } })();
+    function applyPrefs() {
+      const size = { s: 14, m: 15, l: 17, xl: 19 }[prefs.size] || 15;
+      const font = { sans: '-apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif', serif: 'Georgia, "Iowan Old Style", "Times New Roman", serif', mono: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace' }[prefs.font];
+      document.body.style.setProperty("--doc-size", size + "px");
+      document.body.style.setProperty("--doc-font", font);
+      document.body.style.setProperty("--ed-size", (size - 1.5) + "px");
+      try { localStorage.setItem(PREFS, JSON.stringify(prefs)); } catch {}
+    }
+
+    // ---- toolbar ----
+    const I = d => `<svg viewBox="0 0 24 24">${d}</svg>`;
+    const ICON = {
+      link: I('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>'),
+      image: I('<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4 3 2.5 3-3 5 4"/>'),
+      ul: I('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" fill="currentColor"/><circle cx="4.5" cy="12" r="1" fill="currentColor"/><circle cx="4.5" cy="18" r="1" fill="currentColor"/>'),
+      ol: I('<path d="M10 6h10M10 12h10M10 18h10"/><path d="M4 4.5l1.6-1v5M3.6 14.6c.2-1 2.8-1.2 2.8.3 0 1-1.6 1.7-2.8 2.8h2.9M3.6 19.8h2.6l-1.3 1.6c1 0 1.5.5 1.5 1.1"/>'),
+      todo: I('<rect x="3.5" y="4.5" width="6" height="6" rx="1.2"/><path d="M5 7.5l1.5 1.5 2-2.5"/><rect x="3.5" y="13.5" width="6" height="6" rx="1.2"/><path d="M13 7.5h8M13 16.5h8"/>'),
+      quote: I('<path d="M5.5 5v14"/><path d="M10.5 8h9M10.5 12h9M10.5 16h6"/>'),
+      code: I('<path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/>'),
+      hr: I('<path d="M3 12h4M10 12h4M17 12h4"/>'),
+      table: I('<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M3.5 10h17M3.5 14.5h17M10 5v14M15.5 5v14"/>'),
+      undo: I('<path d="M9 7L5 11l4 4"/><path d="M5 11h9a4.5 4.5 0 0 1 0 9h-2"/>'),
+      redo: I('<path d="M15 7l4 4-4 4"/><path d="M19 11h-9a4.5 4.5 0 0 0 0 9h2"/>'),
+      outline: I('<path d="M4 6h16M8 12h12M12 18h8"/>'),
+      panel: I('<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M15 4.5v15"/>'),
+      filePlus: I('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/>'),
+      folderPlus: I('<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
+      folder: I('<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'),
+      refresh: I('<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/>'),
+    };
+    const BLOCKS = [["p", "Paragraph"], ["h1", "Heading 1"], ["h2", "Heading 2"], ["h3", "Heading 3"], ["h4", "Heading 4"], ["h5", "Heading 5"], ["h6", "Heading 6"],
+      ["quote", "Quote"], ["ul", "Bulleted list"], ["ol", "Numbered list"], ["todo", "To-do list"], ["code", "Code block"]];
+    const mod = /Mac/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
+
+    const TEMPLATES = {
+      "Meeting notes": d => `# Meeting notes: ${d}\n\n**Attendees:** \n**Goal:** \n\n## Agenda\n- \n\n## Notes\n- \n\n## Decisions\n- \n\n## Action items\n- [ ] Owner: task (due )\n`,
+      "Weekly plan": d => `# Weekly plan: week of ${d}\n\n## Top 3 priorities\n- [ ] \n- [ ] \n- [ ] \n\n## This week\n- [ ] \n\n## Waiting on\n- \n\n## Review\n**Went well:** \n**To improve:** \n`,
+      "Listing checklist": () => `# Listing checklist\n\n- [ ] Title: brand, product and key benefit\n- [ ] Five bullet points\n- [ ] Description / A+ content\n- [ ] Main image on white, 7+ images\n- [ ] Backend keywords\n- [ ] Price, coupon and promotions\n- [ ] Inventory and FBA shipment\n- [ ] Reviews and Q&A checked\n`,
+    };
+    const todayStr = () => new Date().toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+
+    async function askLink(anchor) {
+      const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+      const r = await ask("Insert link", [{ label: "Text", value: sel }, { label: "Address", placeholder: "https://" }], anchor);
+      if (r && r[1]) replaceRange(ta.selectionStart, ta.selectionEnd, `[${r[0] || r[1]}](${r[1]})`);
+    }
+    async function askImage(anchor) {
+      const r = await ask("Insert image", [{ label: "Description", value: ta.value.slice(ta.selectionStart, ta.selectionEnd) }, { label: "Image address", placeholder: "https://…/photo.jpg" }], anchor);
+      if (r && r[1]) replaceRange(ta.selectionStart, ta.selectionEnd, `![${r[0]}](${r[1]})`);
+    }
+    async function askTable(anchor) {
+      const r = await ask("Insert table", [{ label: "Columns", type: "number", value: "3", min: 1, max: 12 }, { label: "Rows", type: "number", value: "3", min: 1, max: 50 }], anchor);
+      if (!r) return;
+      const cols = Math.min(12, Math.max(1, +r[0] || 3)), rows = Math.min(50, Math.max(1, +r[1] || 3));
+      const row = fill => "| " + Array.from({ length: cols }, (_, k) => fill(k)).join(" | ") + " |";
+      const head = row(k => `Column ${k + 1}`);
+      insertBlock([head, row(() => "---"), ...Array.from({ length: rows }, () => row(() => " "))].join("\n"), [2, 10]);
+    }
+
+    const TOOLS = [
+      { type: "select" },
+      { bar: 1 },
+      { cls: "g", html: "B", tip: `Bold (${mod}B)`, run: () => wrap("**") },
+      { cls: "gi", html: "I", tip: `Italic (${mod}I)`, run: () => wrap("*") },
+      { cls: "gs", html: "S", tip: `Strikethrough (${mod}⇧X)`, run: () => wrap("~~") },
+      { cls: "gm", html: "&lt;/&gt;", tip: `Inline code (${mod}E)`, run: () => wrap("`") },
+      { bar: 1 },
+      { html: ICON.link, tip: "Link", run: b => askLink(b) },
+      { html: ICON.image, tip: "Image", run: b => askImage(b) },
+      { bar: 1 },
+      { html: ICON.ul, tip: `Bulleted list (${mod}⇧8)`, run: () => setBlock("ul") },
+      { html: ICON.ol, tip: `Numbered list (${mod}⇧7)`, run: () => setBlock("ol") },
+      { html: ICON.todo, tip: `To-do list (${mod}⇧9)`, run: () => setBlock("todo") },
+      { bar: 1 },
+      { html: ICON.quote, tip: "Quote", run: () => setBlock("quote") },
+      { html: ICON.code, tip: "Code block", run: () => setBlock("code") },
+      { html: ICON.hr, tip: "Divider", run: () => insertBlock("---") },
+      { html: ICON.table, tip: "Table", run: b => askTable(b) },
+      { bar: 1 },
+      { cls: "gt", html: "# Tag", tip: "Add tags", run: b => addTag(b) },
+      { html: ICON.undo, tip: `Undo (${mod}Z)`, run: () => { ta.focus(); document.execCommand("undo"); } },
+      { html: ICON.redo, tip: `Redo (${mod}⇧Z)`, run: () => { ta.focus(); document.execCommand("redo"); } },
+      { bar: 1 },
+      { cls: "gt", html: "Aa", tip: "Text size and font", run: b => menu([
+        { head: "Text size" }, ...[["s", "Small"], ["m", "Medium"], ["l", "Large"], ["xl", "Extra large"]].map(([k, l]) => ({ label: l, on: prefs.size === k, run: () => { prefs.size = k; applyPrefs(); } })),
+        "-", { head: "Font" }, ...[["sans", "Sans"], ["serif", "Serif"], ["mono", "Mono"]].map(([k, l]) => ({ label: l, on: prefs.font === k, run: () => { prefs.font = k; applyPrefs(); } })),
+      ], b) },
+      { cls: "gt", html: "More ▾", tip: "More options", run: b => menu([
+        { label: "Insert today's date", run: () => replaceRange(ta.selectionStart, ta.selectionEnd, todayStr()) },
+        "-", { head: "Insert template" }, ...Object.entries(TEMPLATES).map(([k, f]) => ({ label: k, run: () => insertBlock(f(todayStr())) })),
+        "-", { label: "Copy as HTML", run: () => copyText($("doc").innerHTML, "HTML copied") },
+        { label: "Copy Markdown", run: () => copyText(ta.value, "Markdown copied") },
+        { label: "Select all", keys: `${mod}A`, run: () => { ta.focus(); ta.select(); } },
+      ], b) },
+    ];
+
+    function buildToolbar() {
+      const bar = $("fmt");
+      for (const t of TOOLS) {
+        if (t.bar) { bar.append(Object.assign(document.createElement("span"), { className: "bar" })); continue; }
+        if (t.type === "select") {
+          const s = document.createElement("select");
+          s.id = "block";
+          s.title = "Paragraph style";
+          s.innerHTML = BLOCKS.map(([k, l]) => `<option value="${k}">${l}</option>`).join("");
+          s.onchange = () => { setBlock(s.value); ta.focus(); };
+          bar.append(s);
+          continue;
+        }
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = t.cls || "";
+        if (t.id) b.id = t.id;
+        b.title = t.tip;
+        b.innerHTML = t.html;
+        b.onclick = () => t.run(b);
+        bar.append(b);
+      }
+      bar.addEventListener("mousedown", e => { if (e.target.closest("button")) e.preventDefault(); }); // keep the text selection
+    }
+
+    // ---- side panel: the files of an opened folder, and the outline of this document ----
+    const SIDE = "alcove-md-side", FOLDER = "alcove-md-folder";
+    let side = (() => { try { return { open: false, tab: "files", ...JSON.parse(localStorage.getItem(SIDE) || "{}") }; } catch { return { open: false, tab: "files" }; } })();
+    let folder = null;          // { root, name } while a folder is open
+    const dirCache = new Map(); // directory path -> its folders and files
+    const expanded = new Set(); // folders shown open
+    let pickedDir = "";         // where "New note" goes: the folder last clicked
+
+    function setSide(open, tab) {
+      if (tab) side.tab = tab;
+      if (open !== undefined) side.open = open;
+      $("side").hidden = !side.open;
+      $("edge").textContent = side.open ? "›" : "‹";
+      $("sidebtn").classList.toggle("on", side.open);
+      for (const b of document.querySelectorAll("#sidetabs [data-t]")) b.classList.toggle("on", b.dataset.t === side.tab);
+      $("files").hidden = side.tab !== "files";
+      $("outline").hidden = side.tab !== "outline";
+      try { localStorage.setItem(SIDE, JSON.stringify(side)); } catch {}
+      if (side.open) { paintOutline(); renderTree(); }
+    }
+
+    function headings() {
+      const out = [];
+      let fenced = false;
+      ta.value.split("\n").forEach((l, i) => {
+        if (/^\s*(```|~~~)/.test(l)) { fenced = !fenced; return; }
+        const m = !fenced && l.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/);
+        if (m) out.push({ level: m[1].length, text: m[2], line: i });
+      });
+      return out;
+    }
+    function paintOutline() {
+      if (!side.open || side.tab !== "outline") return;
+      const hs = headings(), box = $("outlinelist");
+      box.replaceChildren();
+      if (!hs.length) { box.append(Object.assign(document.createElement("div"), { className: "side-empty", textContent: "Headings show up here." })); return; }
+      hs.forEach((h, k) => {
+        const b = document.createElement("button");
+        b.style.paddingLeft = `${8 + (h.level - 1) * 12}px`;
+        b.append(Object.assign(document.createElement("span"), { textContent: h.text }));
+        b.onclick = () => {
+          const pos = ta.value.split("\n").slice(0, h.line).reduce((n, l) => n + l.length + 1, 0);
+          if (mode !== "view") { ta.focus(); ta.setSelectionRange(pos, pos); ta.scrollTop = Math.max(0, (h.line - 2) * parseFloat(getComputedStyle(ta).lineHeight)); }
+          $("doc").querySelectorAll("h1,h2,h3,h4,h5,h6")[k]?.scrollIntoView({ block: "start", behavior: "smooth" });
+        };
+        box.append(b);
+      });
+    }
+
+    async function loadDir(dir, force) {
+      if (!force && dirCache.has(dir)) return dirCache.get(dir);
+      const r = await bridge.list(dir);
+      if (r && r.error) say(r.error, 4000);
+      const entries = r && !r.error ? r.entries : [];
+      dirCache.set(dir, entries);
+      return entries;
+    }
+
+    function renderTree() {
+      const box = $("tree");
+      box.replaceChildren();
+      $("fname").textContent = folder ? folder.name : "No folder open";
+      $("fname").title = folder ? folder.root : "";
+      for (const id of ["f-note", "f-dir", "f-refresh"]) $(id).disabled = !folder;
+      if (!folder) {
+        const e = document.createElement("div");
+        e.className = "side-empty";
+        e.append("Open a folder to browse and edit all the Markdown files in it.", document.createElement("br"));
+        const b = Object.assign(document.createElement("button"), { textContent: "Open folder…" });
+        b.onclick = chooseFolder;
+        e.append(b);
+        box.append(e);
+        return;
+      }
+      const walk = (dir, depth) => {
+        for (const en of dirCache.get(dir) || []) {
+          const b = document.createElement("button");
+          b.style.paddingLeft = `${8 + depth * 14}px`;
+          b.title = en.path;
+          const label = Object.assign(document.createElement("span"), { textContent: en.name });
+          if (en.dir) {
+            b.append(Object.assign(document.createElement("span"), { className: "chev", textContent: expanded.has(en.path) ? "▾" : "▸" }), label);
+            if (pickedDir === en.path) b.classList.add("pick");
+            b.onclick = async () => {
+              pickedDir = en.path;
+              if (expanded.has(en.path)) expanded.delete(en.path);
+              else { expanded.add(en.path); await loadDir(en.path); }
+              renderTree();
+            };
+          } else {
+            b.append(Object.assign(document.createElement("span"), { className: "chev" }), label);
+            if (file.path === en.path) b.classList.add("on");
+            b.onclick = () => openFile(en.path, true);
+          }
+          box.append(b);
+          if (en.dir && expanded.has(en.path)) walk(en.path, depth + 1);
+        }
+      };
+      walk(folder.root, 0);
+      if (!(dirCache.get(folder.root) || []).length) box.append(Object.assign(document.createElement("div"), { className: "side-empty", textContent: "No Markdown files here yet. Use New note to start one." }));
+    }
+
+    function adoptFolder(r) { // r: { root, entries }
+      folder = { root: r.root, name: base(r.root) };
+      dirCache.clear();
+      expanded.clear();
+      dirCache.set(r.root, r.entries || []);
+      expanded.add(r.root);
+      pickedDir = r.root;
+      try { localStorage.setItem(FOLDER, r.root); } catch {}
+      setSide(true, "files");
+    }
+    async function chooseFolder() {
+      if (!bridge) return say("Open this page in Alcove to use folders.");
+      const r = await bridge.openFolder();
+      if (!r) return;
+      if (r.error) return say(r.error, 5000);
+      adoptFolder(r);
+    }
+    async function restoreFolder(path) {
+      const r = bridge && await bridge.folder(path);
+      if (r && !r.error) adoptFolder(r);
+      else { try { localStorage.removeItem(FOLDER); } catch {} }
+    }
+    async function refreshTree() {
+      if (!folder) return;
+      const shown = [folder.root, ...expanded];
+      dirCache.clear();
+      for (const d of shown) await loadDir(d, true);
+      renderTree();
+    }
+    async function newInFolder(kind, anchor) {
+      if (!folder || !confirmDiscard()) return; // the new note replaces what's open
+      const dir = pickedDir || folder.root;
+      const r = await ask(kind === "file" ? "New note" : "New folder", [{ label: `In ${base(dir)}`, placeholder: kind === "file" ? "Untitled" : "Folder name" }], anchor);
+      if (!r || !r[0]) return;
+      const made = await (kind === "file" ? bridge.newFile(dir, r[0]) : bridge.newFolder(dir, r[0]));
+      if (made.error) return say(made.error, 5000);
+      expanded.add(dir);
+      await loadDir(dir, true);
+      renderTree();
+      if (kind === "file") openFile(made.path, true, true);
+    }
+
+    // ---- painting ----
+    function paintTags(front, inl) {
+      const bar = $("tagbar");
+      bar.replaceChildren();
+      const soft = inl.filter(t => !front.includes(t));
+      if (!front.length && !soft.length && mode === "view") return;
+      for (const t of front) {
+        const c = document.createElement("span");
+        c.className = "chip";
+        c.append(`#${t}`);
+        const x = document.createElement("button");
+        x.textContent = "×";
+        x.title = "Remove tag";
+        x.onclick = () => setTags(front.filter(y => y !== t));
+        if (mode !== "view") c.append(x); else c.style.paddingRight = "9px";
+        bar.append(c);
+      }
+      for (const t of [...new Set(soft)]) bar.append(Object.assign(document.createElement("span"), { className: "chip soft", textContent: `#${t}`, title: "Found in the text" }));
+      const add = document.createElement("button");
+      add.className = "addtag";
+      add.textContent = "+ Tag";
+      add.onclick = () => addTag(add);
+      bar.append(add);
     }
 
     function paint() {
-      const t = $("edit").value;
-      $("doc").innerHTML = t.trim() ? render(t) : `<div class="empty"><h2>Nothing to show yet</h2><p>Write something on the left, or open a Markdown file.</p></div>`;
-      const words = (t.match(/\S+/g) || []).length;
+      const t = ta.value;
+      const fm = splitFront(t);
+      const body = fm ? t.slice(fm.len) : t;
+      bodyLines = fm ? (t.slice(0, fm.len).match(/\n/g) || []).length : 0;
+      const front = fm ? frontTags(fm.front) : [];
+      const inl = inlineTags(body);
+      const chips = [...front, ...inl.filter(x => !front.includes(x))];
+      $("doc").innerHTML = body.trim() || front.length
+        ? (chips.length ? `<div class="tags">${[...new Set(chips)].map(x => `<span class="tag">#${esc(x)}</span>`).join("")}</div>` : "") + render(body)
+        : `<div class="empty"><h2>Nothing to show yet</h2><p>Write something on the left, or open a Markdown file.</p></div>`;
+      const words = (body.match(/\S+/g) || []).length;
       $("count").textContent = `${words} ${words === 1 ? "word" : "words"} · ${t ? t.split("\n").length : 0} lines`;
       $("path").textContent = file.path;
       $("name").innerHTML = "";
       $("name").append(file.name, dirty() ? Object.assign(document.createElement("i"), { textContent: " — edited" }) : "");
       document.title = `${dirty() ? "• " : ""}${file.name}`;
       $("save").disabled = !!file.path && !dirty();
+      paintTags(front, inl);
+      paintOutline();
+      syncBlock();
     }
     let paintTimer;
     const paintSoon = () => { clearTimeout(paintTimer); paintTimer = setTimeout(paint, 100); };
 
-    function load(f, text, viewing) {
+    let syncQueued = false;
+    function syncBlock() {
+      if (syncQueued) return;
+      syncQueued = true;
+      requestAnimationFrame(() => { syncQueued = false; const s = $("block"); if (s && document.activeElement === ta) s.value = currentBlock(); });
+    }
+    document.addEventListener("selectionchange", syncBlock);
+
+    function setMode(m) {
+      mode = m;
+      document.body.className = m;
+      for (const b of document.querySelectorAll("#modes button")) b.classList.toggle("on", b.dataset.mode === m);
+      if (m !== "view") ta.focus();
+      paint();
+    }
+
+    // next: "view" to read, "keep" to stay in the current mode (switching files in a folder), else a writing mode
+    function load(f, text, next) {
       file = f;
-      $("edit").value = text;
+      ta.value = text;
       saved = text;
       history.replaceState(null, "", f.path ? `?file=${encodeURIComponent(f.path)}` : location.pathname);
-      setMode(viewing ? "view" : (innerWidth > 900 ? "split" : "edit"));
-      paint();
+      setMode(next === "view" ? "view" : next === "keep" ? mode : (innerWidth > 900 ? "split" : "edit"));
+      renderTree();
     }
 
     const base = p => p.split(/[\\/]/).pop();
     const confirmDiscard = () => !dirty() || confirm("Discard your unsaved changes?");
 
-    async function openFile(path) {
+    // fromTree: picked in the folder panel, so the mode stays as it is; fresh: a note just created, so write in it
+    async function openFile(path, fromTree, fresh) {
       if (!bridge) return say("Open this page in Alcove to use files.");
-      if (!confirmDiscard()) return;
+      if (!fromTree || !fresh) { if (!confirmDiscard()) return; }
       const r = path ? await bridge.read(path) : await bridge.open();
       if (!r) return;
       if (r.error) return say(r.error, 5000);
-      load({ path: r.path, name: base(r.path) }, r.text, !!path);
+      load({ path: r.path, name: base(r.path) }, r.text, fresh ? "edit" : fromTree ? "keep" : path ? "view" : undefined);
       localStorage.removeItem(DRAFT);
     }
 
     async function save(as) {
       if (!bridge) return say("Open this page in Alcove to save files.");
-      const text = $("edit").value;
+      const text = ta.value;
       const r = !as && file.path ? await bridge.save(file.path, text) : await bridge.saveAs(file.name, text);
       if (!r) return;
       if (r.error) return say(r.error, 5000);
@@ -250,34 +857,94 @@
       localStorage.removeItem(DRAFT);
       paint();
       say("Saved");
+      if (folder) refreshTree(); // a new file may have landed in the folder
     }
 
     $("open").onclick = () => openFile();
     $("new").onclick = () => { if (confirmDiscard()) { load({ path: "", name: "Untitled.md" }, "", false); localStorage.removeItem(DRAFT); } };
     $("save").onclick = () => save(false);
     $("saveas").onclick = () => save(true);
+    $("openfolder").onclick = chooseFolder;
+    $("sidebtn").innerHTML = ICON.panel;
+    $("sidebtn").onclick = () => setSide(!side.open);
+    $("edge").onclick = () => setSide(!side.open);
+    $("sidetabs").onclick = e => { if (e.target.dataset.t) setSide(true, e.target.dataset.t); };
+    $("f-note").innerHTML = ICON.filePlus;
+    $("f-dir").innerHTML = ICON.folderPlus;
+    $("f-refresh").innerHTML = ICON.refresh;
+    $("f-open").innerHTML = ICON.folder;
+    $("f-note").onclick = e => newInFolder("file", e.currentTarget);
+    $("f-dir").onclick = e => newInFolder("dir", e.currentTarget);
+    $("f-refresh").onclick = refreshTree;
+    $("f-open").onclick = chooseFolder;
     $("modes").onclick = e => { if (e.target.dataset.mode) setMode(e.target.dataset.mode); };
-    $("edit").addEventListener("input", () => {
+
+    ta.addEventListener("input", () => {
       paintSoon();
-      if (!file.path) { try { localStorage.setItem(DRAFT, $("edit").value); } catch {} } // untitled drafts survive closing the tab
+      if (!file.path) { try { localStorage.setItem(DRAFT, ta.value); } catch {} } // untitled drafts survive closing the tab
     });
-    $("edit").addEventListener("keydown", e => {
-      const ta = e.target, mod = e.metaKey || e.ctrlKey;
-      if (e.key === "Tab" && !mod) {
-        e.preventDefault();
-        ta.setRangeText("  ", ta.selectionStart, ta.selectionEnd, "end");
-        ta.dispatchEvent(new Event("input"));
-      } else if (mod && (e.key === "b" || e.key === "i")) {
-        e.preventDefault();
-        const mark = e.key === "b" ? "**" : "*", s = ta.selectionStart, en = ta.selectionEnd;
-        ta.setRangeText(mark + ta.value.slice(s, en) + mark, s, en, "end");
-        ta.dispatchEvent(new Event("input"));
+
+    // Ticking a to-do in the preview edits the matching line in the text
+    $("doc").addEventListener("change", e => {
+      const box = e.target;
+      if (!box.matches || !box.matches("input[type=checkbox][data-line]")) return;
+      const lines = ta.value.split("\n"), n = bodyLines + Number(box.dataset.line);
+      if (n >= lines.length) return;
+      const from = lines.slice(0, n).reduce((c, l) => c + l.length + 1, 0);
+      const fixed = lines[n].replace(/\[( |x|X)\]/, box.checked ? "[x]" : "[ ]");
+      const sel = [ta.selectionStart, ta.selectionEnd];
+      replaceRange(from, from + lines[n].length, fixed, sel[0], sel[1]);
+    });
+
+    // ---- typing help: keep lists going, indent, shortcuts, paste a link over selected text ----
+    const BULLET = /^(\s*)(?:([-*+])|(\d+)([.)]))\s+(\[[ xX]\]\s+)?(.*)$/;
+    ta.addEventListener("keydown", e => {
+      const v = ta.value, s = ta.selectionStart, m = e.metaKey || e.ctrlKey;
+      if (e.key === "Enter" && !e.shiftKey && !m && !e.altKey && !e.isComposing && s === ta.selectionEnd) {
+        const a = v.lastIndexOf("\n", s - 1) + 1;
+        const line = v.slice(a, s);
+        const li = line.match(BULLET), q = line.match(/^(\s*>\s?)(.*)$/);
+        if (li && s - a >= line.length - li[6].length) {
+          e.preventDefault();
+          if (!li[6] && !v.slice(s, (v.indexOf("\n", s) < 0 ? v.length : v.indexOf("\n", s))).trim()) { replaceRange(a, s, "", a); return; } // empty item ends the list
+          const marker = li[2] ? li[2] : `${+li[3] + 1}${li[4]}`;
+          replaceRange(s, s, `\n${li[1]}${marker} ${li[5] ? "[ ] " : ""}`);
+          return;
+        }
+        if (q && q[2]) { e.preventDefault(); replaceRange(s, s, `\n${q[1]}`); return; }
+        if (q && !q[2]) { e.preventDefault(); replaceRange(a, s, "", a); return; }
       }
+      if (e.key === "Tab" && !m && !e.altKey) {
+        e.preventDefault();
+        const [a, b] = lineRange();
+        const multi = ta.value.slice(ta.selectionStart, ta.selectionEnd).includes("\n");
+        const inList = BULLET.test(ta.value.slice(a, b));
+        if (e.shiftKey) mapLines(l => l.replace(/^( {1,2}|\t)/, ""));
+        else if (multi || inList) mapLines(l => (l.trim() ? "  " + l : l));
+        else replaceRange(ta.selectionStart, ta.selectionEnd, "  ");
+        return;
+      }
+      if (!m) return;
+      const k = e.key.toLowerCase();
+      if (!e.shiftKey && !e.altKey && k === "b") { e.preventDefault(); wrap("**"); }
+      else if (!e.shiftKey && !e.altKey && k === "i") { e.preventDefault(); wrap("*"); }
+      else if (!e.shiftKey && !e.altKey && k === "e") { e.preventDefault(); wrap("`"); }
+      else if (e.shiftKey && !e.altKey && e.code === "KeyX") { e.preventDefault(); wrap("~~"); }
+      else if (e.altKey && /^Digit[0-6]$/.test(e.code)) { e.preventDefault(); setBlock(e.code === "Digit0" ? "p" : "h" + e.code[5]); }
+      else if (e.shiftKey && !e.altKey && e.code === "Digit8") { e.preventDefault(); setBlock("ul"); }
+      else if (e.shiftKey && !e.altKey && e.code === "Digit7") { e.preventDefault(); setBlock("ol"); }
+      else if (e.shiftKey && !e.altKey && e.code === "Digit9") { e.preventDefault(); setBlock("todo"); }
     });
+    ta.addEventListener("paste", e => {
+      const text = e.clipboardData && e.clipboardData.getData("text/plain").trim();
+      const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+      if (text && sel && !sel.includes("\n") && /^https?:\/\/\S+$/.test(text)) { e.preventDefault(); replaceRange(ta.selectionStart, ta.selectionEnd, `[${sel}](${text})`); }
+    });
+
     document.addEventListener("keydown", e => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); e.stopPropagation(); save(e.shiftKey); }
-      else if (mod && e.key.toLowerCase() === "o") { e.preventDefault(); e.stopPropagation(); openFile(); }
+      const k = e.metaKey || e.ctrlKey;
+      if (k && e.key.toLowerCase() === "s" && !e.altKey) { e.preventDefault(); e.stopPropagation(); save(e.shiftKey); }
+      else if (k && e.key.toLowerCase() === "o") { e.preventDefault(); e.stopPropagation(); openFile(); }
     }, true);
     window.addEventListener("beforeunload", e => { if (dirty() && file.path) { e.preventDefault(); e.returnValue = ""; } });
 
@@ -287,19 +954,30 @@
     window.addEventListener("drop", () => document.body.classList.remove("dragging"), true);
     window.addEventListener("message", e => { if (e.source === window && e.data && e.data.__alcoveMdDrop) openFile(e.data.__alcoveMdDrop); });
 
-    // Start: ?file=… opens that file for reading (use Edit to change it); #open shows the file picker;
-    // otherwise a blank document, or the last untitled draft.
+    // Start: ?file=… opens that file for reading (use Edit to change it); ?folder=… or #folder opens a folder;
+    // #open shows the file picker; otherwise a blank document, or the last untitled draft. The last folder
+    // is reopened unless a particular file was asked for.
+    buildToolbar();
+    applyPrefs();
+    setSide(side.open);
     (async () => {
-      const q = new URLSearchParams(location.search).get("file");
+      const params = new URLSearchParams(location.search);
+      const q = params.get("file"), dir = params.get("folder");
       if (q) {
         const r = bridge ? await bridge.read(q) : { error: "Open this page in Alcove to use files." };
-        if (r.error) { load({ path: "", name: "Untitled.md" }, "", false); say(r.error, 6000); }
-        else load({ path: r.path, name: base(r.path) }, r.text, true);
+        if (r.error) { load({ path: "", name: "Untitled.md" }, "", undefined); say(r.error, 6000); }
+        else load({ path: r.path, name: base(r.path) }, r.text, "view");
       } else {
         let draft = ""; try { draft = localStorage.getItem(DRAFT) || ""; } catch {}
-        load({ path: "", name: "Untitled.md" }, "", false);
-        if (draft) { $("edit").value = draft; paint(); say("Restored your last draft"); }
+        load({ path: "", name: "Untitled.md" }, "", undefined);
+        if (draft) { ta.value = draft; paint(); say("Restored your last draft"); }
         if (location.hash === "#open") { history.replaceState(null, "", location.pathname); openFile(); }
+        else if (location.hash === "#folder") { history.replaceState(null, "", location.pathname); chooseFolder(); }
+      }
+      const last = dir || (!q && !location.hash ? localStorage.getItem(FOLDER) : "");
+      if (last && !folder) {
+        if (dir) setSide(true, "files");
+        await restoreFolder(last);
       }
     })();
   </script>
