@@ -2,7 +2,7 @@
   "name": "alcove",
   "productName": "Alcove",
   "version": "0.1.0",
-  "description": "Alcove: a sidebar-first browser (Electron / Chromium build)",
+  "description": "Alcove: a productivity and privacy focused browser",
   "author": "X UP Brands",
   "main": "main.js",
   "scripts": {

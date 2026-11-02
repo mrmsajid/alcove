@@ -173,7 +173,7 @@ const SECTIONS = [
     h("div", { class: "about", "data-find": "version about" },
       h("b", {}, "Alcove"), h("br"),
       `Version ${info.version || ""} · Chromium ${info.chrome || ""} · Electron ${info.electron || ""}`, h("br"),
-      h("span", { style: "color:var(--muted)" }, "A sidebar-first browser for Mac and Windows, inspired by Nook.")),
+      h("span", { style: "color:var(--muted)" }, "A productivity and privacy focused browser for Mac and Windows.")),
     row("Reset settings", "Put every setting on this page back to its default.", h("button", { class: "btn danger", on: { click: async () => {
       if (!confirm("Reset all settings to their defaults?")) return;
       S = await invoke("reset_settings");

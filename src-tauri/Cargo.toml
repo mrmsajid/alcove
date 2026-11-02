@@ -1,7 +1,7 @@
 [package]
 name = "alcove"
 version = "0.1.0"
-description = "Alcove: a sidebar-first browser"
+description = "Alcove: a productivity and privacy focused browser"
 edition = "2021"
 
 [build-dependencies]

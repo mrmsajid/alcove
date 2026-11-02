@@ -1,8 +1,8 @@
 # Alcove: developer guide
 
-Alcove is a sidebar-first browser for macOS and Windows, built on Electron (Chromium). This guide is for
-developers working on it: how it is put together, how to run, build and test it, where each feature lives,
-and the traps we already fell into.
+Alcove is a productivity and privacy focused browser for macOS and Windows, with a sidebar-first design, built on
+Electron (Chromium). This guide is for developers working on it: how it is put together, how to run, build and
+test it, where each feature lives, and the traps we already fell into.
 
 > **Status (2026-11-02).** Everything below was built and tested on macOS (Apple silicon). The Windows build
 > is produced by CI but **has never been run by hand**. Start there; see [Windows checklist](#11-windows-checklist).
@@ -609,9 +609,9 @@ Windows. Verify in this order:
 
 - **Windows** is untested (above).
 - **No automated tests.** The CDP scripts in 8.2 are the starting point for a regression suite.
-- **No `LICENSE` file** in the repo yet. Alcove is *inspired by* Nook (GPL-3.0, macOS-only) and contains none of its
-  code; it uses a different name and icon because of Nook's trademark policy. Decide the licence before
-  distributing.
+- **No `LICENSE` file** in the repo yet. Provenance note: the sidebar design was influenced by the Nook browser
+  (GPL-3.0, macOS-only). Alcove contains none of its code and uses a different name and icon because of Nook's
+  trademark policy. Decide the licence before distributing.
 - Markdown editor: no rename or delete in the file tree, search ignores unsaved edits, the Visual view normalises
   the file the first time you edit it (blank lines between blocks, `*` bullets become `-`).
 - Glass could not be checked pixel-for-pixel from automated tests (native vibrancy is not capturable); judge by eye.
