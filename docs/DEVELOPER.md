@@ -66,7 +66,7 @@ from the Actions tab.
 | --- | --- |
 | `ALCOVE_USER_DATA` | use this folder as the data folder (throwaway profiles for tests) |
 | `ALCOVE_TEST=1` | enables the `debug_*` commands (see [Testing](#8-testing)) |
-| `ALCOVE_TEST_WIN=1` | lay the window out as it is on Windows (title row, caption buttons) on any OS, to check that layout without a Windows machine |
+| `ALCOVE_TEST_WIN=1` | use the Windows window buttons (the `caption` view, shown on hover) on any OS, to check them without a Windows machine |
 | `ALCOVE_DOWNLOAD_DIR` | where downloads, saved images and the video downloader write |
 | `ALCOVE_PERF=1` | print startup timing marks and main-thread stalls |
 | `ALCOVE_DOM_OBSERVER=1` | turn the ad blocker's DOM observer back on (off by default, for measuring only) |
@@ -123,8 +123,8 @@ is an `<iframe>` and there is no `<webview>`.
 | --- | --- | --- |
 | `ui` | `ui/index.html` | the sidebar. Always alive, even when hidden. It owns the tab list and is the app's UI brain |
 | tab views | websites, plus `ui/markdown.html` and `ui/blocked.html` | one per open tab, in the web session |
-| `strip` | `ui/strip.html` | the margin above the page (the whole title row on Windows): drag handle, double-click to maximize |
-| `caption` | `ui/caption.html` | Windows only: flat Minimize / Maximize-Restore / Close buttons at the top right |
+| `strip` | `ui/strip.html` | the margin above the page: drag handle, double-click to maximize |
+| `caption` | `ui/caption.html` | Windows only: flat Minimize / Maximize-Restore / Close buttons, hidden until the pointer reaches the top right |
 | `palette` | `ui/palette.html` | Cmd+K. Re-created on every open so it is always on top |
 | `settingsView`, `toolsView` | `settings.html`, `tools.html` | full-page overlays that fill the page area (never both at once) |
 | peek + backdrop | `peek.html` | the Shift-click preview |
@@ -153,11 +153,13 @@ The page sits in a rounded "card" with an 8 px margin on every side (`MARGIN`, `
 - Window buttons (macOS) are hidden and shown by `windowButtons()` as the pointer nears the top-left, even when
   Alcove is not the focused window. On macOS the native traffic lights are repositioned with
   `setWindowButtonPosition` when the sidebar floats.
-- **Windows** has a 32 px **title row** across the top (`IS_WIN`, `TITLE_H`): the `strip` view is the drag area, and
-  the `caption` view (`ui/caption.html`) draws Windows-style Minimize, Maximize/Restore and Close buttons at the top
-  right (46 x 32 px each, close turns red on hover). The page card and the floating sidebar start below it
-  (`pageTop()`, `sideTop()`); full screen removes the row. The caption view learns the maximized state from the
-  `window-state` event. Set `ALCOVE_TEST_WIN=1` to see this layout on a Mac.
+- **Windows** has the same layout as the Mac (page card 8 px from the top, no title row). Its window buttons are the
+  `caption` view (`ui/caption.html`): Windows-style Minimize, Maximize/Restore and Close (46 x 32 px each, close turns
+  red on hover) on a small opaque bar over the page's top right corner. Like the Mac's they are hidden until the
+  pointer goes there: `windowButtons()` shows the view when the pointer is in the top 10 px of the window above the
+  buttons (a taller zone would cover a page's own sign-in and menu buttons), keeps it while the pointer stays over
+  it, and hides it 400 ms after the pointer leaves. It is hidden in full screen. The view learns the maximized
+  state from the `window-state` event. Set `ALCOVE_TEST_WIN=1` to see this on a Mac.
 
 ### 3.3 Glass
 
@@ -525,7 +527,7 @@ before launch.
 ### 8.3 Test hooks
 
 With `ALCOVE_TEST=1`: `debug_layout` (where the sidebar, strip, caption buttons and page card are),
-`debug_window_buttons` (runs the macOS hover logic for a point), `debug_page_menu` (returns the
+`debug_window_buttons` (runs the window-button hover logic for a point), `debug_page_menu` (returns the
 labels of a tab's right-click menu), `debug_open_devtools` (tries to open developer tools on a tab).
 
 ### 8.4 What this does not cover
@@ -593,10 +595,11 @@ Windows. Verify in this order:
 
 1. **It builds and starts.** Get the CI artifact (`alcove-electron-windows`), install it, launch. Check the
    console (`ALCOVE_PERF=1`) for errors.
-2. **Window frame.** The window is frameless (`frame: false`) with a 32 px title row: `ui/strip.html` is the drag
-   area and `ui/caption.html` the Minimize / Maximize / Close buttons at the top right (checked on a Mac with
-   `ALCOVE_TEST_WIN=1`, never on Windows). Check that the buttons look and behave like Windows ones, the icon
-   switches to Restore when maximized, dragging (`startDrag()`, cursor polling) and double-click to maximize work,
+2. **Window frame.** The window is frameless (`frame: false`): `ui/strip.html` is the drag area and `ui/caption.html`
+   the Minimize / Maximize / Close buttons, which appear on hover at the top right (checked on a Mac with
+   `ALCOVE_TEST_WIN=1`, never on Windows). Check that they appear when the pointer hits the top edge at the right
+   (including a maximized window, where that edge is the top of the screen), stay while it is over them, hide
+   after it leaves, look and behave like Windows ones, the icon switches to Restore when maximized, dragging (`startDrag()`, cursor polling) and double-click to maximize work,
    and multi-monitor DPI. Known gap: a frameless window gets no Aero Snap or Windows 11 snap-layout flyout; the
    native alternative is `titleBarStyle: "hidden"` with `titleBarOverlay`, which draws real caption buttons.
 3. **Glass.** Windows 11 acrylic via `setBackgroundMaterial("acrylic")`. Check that it renders, that the
