@@ -439,8 +439,8 @@ function markdownCard(files, folders) {
     el("div", { class: "md-recent" }, ...list.map(p => el("button", { class: "t-btn", title: p, on: { click: () => openMarkdown(what(p)) } },
       el("span", {}, p.split(/[\\/]/).pop()), el("span", { class: "d" }, p))))] : null;
   return card("Markdown",
-    note("Read and edit .md files, or open a whole folder and browse it in the editor's side panel. You can also drag a .md file onto any Alcove tab to read it."),
-    el("div", { class: "t-btns wrap" }, btn("Open folder…", () => openMarkdown("folder"), "primary"), btn("Open file…", () => openMarkdown("open")), btn("New document", () => openMarkdown("new"))),
+    note("Read and edit .md files, or mount a folder (or several) like a vault: browse, search and graph all its notes, and unmount it any time. You can also drag a .md file onto any Alcove tab to read it."),
+    el("div", { class: "t-btns wrap" }, btn("Mount folder…", () => openMarkdown("folder"), "primary"), btn("Open file…", () => openMarkdown("open")), btn("New document", () => openMarkdown("new"))),
     recent("Recent folders", folders, p => "dir:" + p),
     recent("Recent files", files, p => p));
 }

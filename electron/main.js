@@ -1327,6 +1327,22 @@ ipcMain.handle("alcove-md", async (e, op, a, b) => {
     return (config.recentMdFolders || []).includes(p) && fs.existsSync(p) ? mdAdoptRoot(p) : { error: "Choose the folder again." };
   }
   if (op === "list") return mdList(a);
+  if (op === "unmount") { // the editor can no longer list this folder; forget: also drop it from the recent list
+    const r = path.resolve(String(a || ""));
+    mdRoots.delete(r);
+    if (b) { config.recentMdFolders = (config.recentMdFolders || []).filter(x => x !== r); saveConfig(); }
+    return true;
+  }
+  if (op === "forget") { // clear the recent list, keeping what's mounted
+    config.recentMdFolders = (config.recentMdFolders || []).filter(x => mdRoots.has(x));
+    saveConfig();
+    return true;
+  }
+  if (op === "reveal") {
+    const r = path.resolve(String(a || ""));
+    if (mdInside(r) && fs.existsSync(r)) shell.showItemInFolder(r);
+    return true;
+  }
   if (op === "recentFolders") return (config.recentMdFolders || []).filter(d => fs.existsSync(d));
   if (op === "graph") return mdGraph(a);
   if (op === "search") return mdSearch(a || {});

@@ -64,7 +64,7 @@ const COMMANDS = [
   ["notes", "Show Notes", "", "scratchpad write"],
   ["markdown-open", "Open Markdown File…", "", "md edit view read document"],
   ["markdown-new", "New Markdown Document", "", "md write edit"],
-  ["markdown-folder", "Open Markdown Folder…", "", "md notes vault directory files"],
+  ["markdown-folder", "Mount Markdown Folder…", "", "md notes vault directory files open load unmount"],
   ["color-picker", "Pick a Color from the Page", "", "eyedropper hex"],
   ["download-images", "Download All Images on This Page", "", "save pictures photos"],
   ["copy-asin", "Copy Amazon ASIN", "", "product amazon keepa"],

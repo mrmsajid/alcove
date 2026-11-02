@@ -95,9 +95,10 @@
     .side-empty { padding: 10px 12px; color: var(--muted); font-size: 12.5px; }
     .rootrow { display: flex; align-items: center; margin-top: 4px; }
     #tree .rootrow .root { flex: 1; font-weight: 600; }
-    #tree .rootrow .unload { flex: none; width: 24px; justify-content: center; padding: 3px 0; color: var(--muted); opacity: 0; }
+    #tree .rootrow .unload { flex: none; width: 26px; justify-content: center; padding: 3px 0; color: var(--muted); opacity: .7; }
+    #tree .rootrow .unload svg { width: 15px; height: 15px; }
     .rootrow:hover .unload { opacity: 1; }
-    #tree .rootrow .unload:hover { color: var(--text); }
+    #tree .rootrow .unload:hover { color: var(--text); background: var(--hover); }
     .side-empty .recents { margin-top: 14px; display: flex; flex-direction: column; gap: 2px; text-align: left; }
     .side-empty .recents h5 { margin: 0 0 2px 8px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
     .side-empty .recents button { border: 0; margin: 0; padding: 3px 8px; color: var(--text); display: block; width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -195,7 +196,7 @@
 <body class="visual">
   <header>
     <button id="open" title="Open a Markdown file (⌘O)">Open…</button>
-    <button id="openfolder" title="Open a whole folder">Open folder…</button>
+    <button id="openfolder" title="Mount a folder: browse, edit and search all its notes. You can mount several.">Mount folder…</button>
     <button id="new" title="New document">New</button>
     <span class="name" id="name"></span>
     <span class="sp"></span>
@@ -221,7 +222,7 @@
         <div class="gpanel"><label><input type="checkbox" id="g-tags"> Tags</label><label><input type="checkbox" id="g-ghost"> Unresolved links</label><label><input type="checkbox" id="g-orph" checked> Orphans</label></div>
         <div class="gpanel"><button id="gfit" title="Fit everything on screen">Fit</button><button id="grefresh" title="Read the folder again">Refresh</button><span id="gstat"></span></div>
       </div>
-      <div id="gempty" hidden><div><h2 style="margin:0 0 6px;color:var(--text);font-weight:600">No folder open</h2><p style="margin:0"></p></div><button id="gopen">Open folder…</button></div>
+      <div id="gempty" hidden><div><h2 style="margin:0 0 6px;color:var(--text);font-weight:600">No folder mounted</h2><p style="margin:0"></p></div><button id="gopen">Mount folder…</button></div>
       <div id="gtip" hidden></div>
     </div>
     <textarea id="edit" spellcheck="true" placeholder="Start writing in Markdown…"></textarea>
@@ -237,8 +238,8 @@
           <button id="f-note" title="New note"></button>
           <button id="f-dir" title="New folder"></button>
           <button id="f-refresh" title="Refresh"></button>
-          <button id="f-recent" title="Reload a recent folder"></button>
-          <button id="f-open" title="Load another folder…"></button>
+          <button id="f-recent" title="Mount a recent folder"></button>
+          <button id="f-open" title="Mount another folder…"></button>
         </div>
         <div id="tree"></div>
       </div>
@@ -1137,6 +1138,7 @@
       folderPlus: I('<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
       folder: I('<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'),
       refresh: I('<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/>'),
+      eject: I('<path d="M12 5l7 8H5z"/><path d="M5.5 18.5h13"/>'),
       clock: I('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
     };
     const BLOCKS = [["p", "Paragraph"], ["h1", "Heading 1"], ["h2", "Heading 2"], ["h3", "Heading 3"], ["h4", "Heading 4"], ["h5", "Heading 5"], ["h6", "Heading 6"],
@@ -1272,7 +1274,7 @@
     // ---- side panel: the files of an opened folder, and the outline of this document ----
     const SIDE = "alcove-md-side", FOLDER = "alcove-md-folder", FOLDERS = "alcove-md-folders"; // FOLDER: the older single-folder key
     let side = (() => { try { return { open: false, tab: "files", ...JSON.parse(localStorage.getItem(SIDE) || "{}") }; } catch { return { open: false, tab: "files" }; } })();
-    const folders = [];         // { root, name } for every folder that's loaded, in the order they were loaded
+    const folders = [];         // { root, name } for every folder that's mounted, in the order they were mounted
     const dirCache = new Map(); // directory path -> its folders and files
     const expanded = new Set(); // folders shown open
     let pickedDir = "";         // where "New note" goes: the folder last clicked
@@ -1329,7 +1331,20 @@
       return entries;
     }
 
-    const persistFolders = () => { try { localStorage.setItem(FOLDERS, JSON.stringify(folders.map(f => f.root))); } catch {} };
+    function sayUndo(text, undo) { // a footer message with an Undo button
+      const m = $("msg");
+      clearTimeout(msgTimer);
+      m.textContent = text;
+      if (undo) {
+        const b = Object.assign(document.createElement("button"), { textContent: "Undo" });
+        b.style.cssText = "color:var(--accent);padding:0 6px;font-size:12px";
+        b.onclick = () => { m.textContent = ""; undo(); };
+        m.append(" ", b);
+      }
+      msgTimer = setTimeout(() => { m.textContent = ""; }, 9000);
+    }
+    let restoring = 0; // while folders are coming back one by one, the shared list is written once at the end, so other tabs never see it half-built
+    const persistFolders = () => { if (restoring) return; try { localStorage.setItem(FOLDERS, JSON.stringify(folders.map(f => f.root))); } catch {} };
     const under = (p, dir) => p === dir || p.startsWith(dir + "/") || p.startsWith(dir + "\\");
 
     function fillScope() {
@@ -1342,14 +1357,14 @@
       fillScope();
       const box = $("tree");
       box.replaceChildren();
-      $("fname").textContent = folders.length ? (folders.length === 1 ? "1 folder" : `${folders.length} folders`) : "No folder open";
-      $("fname").title = "";
+      $("fname").textContent = folders.length ? (folders.length === 1 ? "1 folder" : `${folders.length} folders`) : "No folders";
+      $("fname").title = folders.length ? "Mounted folders" : "";
       for (const id of ["f-note", "f-dir", "f-refresh"]) $(id).disabled = !folders.length;
       if (!folders.length) {
         const e = document.createElement("div");
         e.className = "side-empty";
-        e.append("Load a folder to browse and edit all the Markdown files in it. You can load several at once.", document.createElement("br"));
-        const b = Object.assign(document.createElement("button"), { textContent: "Load folder…" });
+        e.append("Mount a folder to browse, edit and search all the Markdown files in it. You can mount several and unmount them any time.", document.createElement("br"));
+        const b = Object.assign(document.createElement("button"), { textContent: "Mount folder…" });
         b.onclick = chooseFolder;
         e.append(b);
         box.append(e);
@@ -1400,8 +1415,22 @@
           else { expanded.add(f.root); await loadDir(f.root); }
           renderTree();
         };
-        const x = Object.assign(document.createElement("button"), { className: "unload", textContent: "×", title: "Unload this folder. Its files stay where they are." });
-        x.onclick = e => { e.stopPropagation(); unloadFolder(f.root); };
+        const x = Object.assign(document.createElement("button"), { className: "unload", title: "Unmount this folder. Its files stay where they are." });
+        x.innerHTML = ICON.eject;
+        x.onclick = e => { e.stopPropagation(); unmountFolder(f.root); };
+        head.addEventListener("contextmenu", e => {
+          e.preventDefault();
+          menu([
+            { label: "New note here", run: () => { pickedDir = f.root; newInFolder("file", b); } },
+            { label: "New folder here", run: () => { pickedDir = f.root; newInFolder("dir", b); } },
+            { label: "Refresh", run: refreshTree },
+            { label: /Mac/.test(navigator.userAgent) ? "Show in Finder" : "Show in file explorer", run: () => bridge && bridge.reveal(f.root) },
+            { label: "Copy path", run: () => copyText(f.root, "Path copied") },
+            "-",
+            { label: "Unmount", run: () => unmountFolder(f.root) },
+            { label: "Unmount and forget", run: () => unmountFolder(f.root, true) },
+          ], { getBoundingClientRect: () => ({ bottom: e.clientY, left: e.clientX }) });
+        });
         head.append(b, x);
         box.append(head);
         if (open) {
@@ -1421,19 +1450,36 @@
       if (mode === "graph") loadGraph(true);
       if (quiet) renderTree(); else setSide(true, "files");
     }
-    function unloadFolder(dir) {
+    // The page's side of unmounting: forget the folder's listing and refresh what depends on it
+    function dropFolder(dir) {
       const i = folders.findIndex(f => f.root === dir);
       if (i < 0) return;
       folders.splice(i, 1);
-      persistFolders();
       for (const k of [...dirCache.keys()]) if (under(k, dir)) dirCache.delete(k);
       for (const k of [...expanded]) if (under(k, dir)) expanded.delete(k);
       if (under(pickedDir, dir)) pickedDir = folders[0] ? folders[0].root : "";
       G.raw = G.data = null;
       if (mode === "graph") loadGraph(true);
       renderTree();
-      say(`Unloaded ${base(dir)}`);
+      if (side.open && side.tab === "search") runSearch();
     }
+    // A note from the folder that's open stays open (and can still be saved); the folder just stops being listed and searched
+    function unmountFolder(dir, forget) {
+      if (!folders.some(f => f.root === dir)) return;
+      dropFolder(dir);
+      persistFolders();
+      if (bridge) bridge.unmount(dir, !!forget);
+      sayUndo(forget ? `Unmounted and forgot ${base(dir)}` : `Unmounted ${base(dir)}`, forget ? null : () => restoreFolders([dir], false));
+    }
+    // other editor tabs share the mounted set: mounting or unmounting in one shows up in the rest
+    window.addEventListener("storage", e => {
+      if (e.key !== FOLDERS) return;
+      let want = [];
+      try { want = JSON.parse(e.newValue || "[]"); } catch {}
+      for (const f of [...folders]) if (!want.includes(f.root)) dropFolder(f.root);
+      const add = want.filter(d => !folders.some(f => f.root === d));
+      if (add.length) restoreFolders(add, true);
+    });
     async function chooseFolder() {
       if (!bridge) return say("Open this page in Alcove to use folders.");
       const r = await bridge.openFolder();
@@ -1442,10 +1488,13 @@
       adoptFolder(r);
     }
     async function restoreFolders(paths, quiet = true) {
-      for (const path of paths) {
-        const r = bridge && await bridge.folder(path);
-        if (r && !r.error) adoptFolder(r, quiet);
-      }
+      restoring++;
+      try {
+        for (const path of paths) {
+          const r = bridge && await bridge.folder(path);
+          if (r && !r.error) adoptFolder(r, quiet);
+        }
+      } finally { restoring--; }
       persistFolders(); // folders that have gone missing drop out of the list
     }
     async function refreshTree() {
@@ -1485,8 +1534,8 @@
       const id = ++searchRun, q = $("sq").value.trim(), box = $("sresults"), stat = $("sstat");
       if (!folders.length) {
         stat.textContent = "";
-        const e = Object.assign(document.createElement("div"), { className: "side-empty", textContent: "Load a folder to search the notes in it." });
-        const b = Object.assign(document.createElement("button"), { textContent: "Load folder…" });
+        const e = Object.assign(document.createElement("div"), { className: "side-empty", textContent: "Mount a folder to search the notes in it." });
+        const b = Object.assign(document.createElement("button"), { textContent: "Mount folder…" });
         b.onclick = chooseFolder;
         e.append(document.createElement("br"), b);
         return box.replaceChildren(e);
@@ -1637,8 +1686,8 @@
       if (!folders.length) {
         G.raw = G.data = null; G.nodes = []; G.links = [];
         empty.hidden = false;
-        empty.querySelector("h2").textContent = "No folder loaded";
-        empty.querySelector("p").textContent = "Load a folder to see how its notes link to each other.";
+        empty.querySelector("h2").textContent = "No folder mounted";
+        empty.querySelector("p").textContent = "Mount a folder to see how its notes link to each other.";
         $("gfolderbox").hidden = true;
         $("gstat").textContent = "";
         return draw();
@@ -2039,7 +2088,7 @@
       const anchor = e.currentTarget; // gone once the await below finishes
       const list = (bridge && await bridge.recentFolders()) || [];
       const items = list.filter(d => !folders.some(f => f.root === d)).map(d => ({ label: base(d), run: () => restoreFolders([d], false) }));
-      menu(items.length ? [{ head: "Load a recent folder" }, ...items] : [{ head: "No other recent folders" }], anchor);
+      menu(items.length ? [{ head: "Mount a recent folder" }, ...items, "-", { label: "Forget recent folders", run: async () => { if (bridge) await bridge.forget(); say("Recent folders cleared. Mounted folders are kept."); } }] : [{ head: "No other recent folders" }], anchor);
     };
     $("modes").onclick = e => {
       const m = e.target.dataset.mode;
