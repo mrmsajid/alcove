@@ -1,5 +1,5 @@
 const {
-  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net, nativeImage, systemPreferences, Notification, powerMonitor,
+  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net, nativeImage, systemPreferences, Notification, powerMonitor, webContents,
 } = require("electron");
 const AdmZip = require("adm-zip");
 const { spawn, execFileSync } = require("child_process");
@@ -893,9 +893,38 @@ function openTools(tab) {
   win.contentView.addChildView(toolsView);
   if (floating()) raiseUi();
   placeTools();
+  attachInspect(toolsView.webContents);
   toolsView.webContents.loadFile(uiFile("tools.html"), tab ? { hash: String(tab) } : undefined);
   toolsView.webContents.focus();
 }
+
+// ---- developer tools: for the page in front and for Alcove's own views (sidebar, Tools, Settings, palette) ----
+
+const viewByName = which => ({ sidebar: ui, tools: toolsView, settings: settingsView, palette }[which]);
+function devToolsTarget(which) {
+  if (which && which !== "focused") { const v = viewByName(which); return v && !v.webContents.isDestroyed() ? v.webContents : null; }
+  const f = webContents.getFocusedWebContents();
+  if (f && !f.isDestroyed() && !/^devtools:/.test(f.getURL())) return f;
+  // nothing focused (or the developer tools themselves): the Tools or Settings page if one is open, else the page in front
+  const front = tabs.get(shownId);
+  for (const v of [toolsView, settingsView, front, ui]) if (v && !v.webContents.isDestroyed()) return v.webContents;
+  return null;
+}
+function toggleDevTools(which) {
+  const wc = devToolsTarget(which);
+  if (!wc) return false;
+  if (wc.isDevToolsOpened()) wc.closeDevTools(); else wc.openDevTools({ mode: "detach" });
+  return true;
+}
+// Right-click menu for Alcove's own pages: edit commands where they apply, and Inspect
+function inspectMenu(wc, p) {
+  const items = [];
+  if (p.isEditable) items.push({ role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }, { type: "separator" });
+  else if (p.selectionText) items.push({ role: "copy" }, { type: "separator" });
+  items.push({ label: "Inspect", click: () => { wc.openDevTools({ mode: "detach" }); wc.inspectElement(p.x, p.y); } });
+  return Menu.buildFromTemplate(items);
+}
+const attachInspect = wc => wc.on("context-menu", (_e, p) => inspectMenu(wc, p).popup());
 
 function closeTools() {
   if (!toolsView) return;
@@ -914,6 +943,7 @@ function openSettings(section) {
   win.contentView.addChildView(settingsView);
   if (floating()) raiseUi();
   placeSettings();
+  attachInspect(settingsView.webContents);
   settingsView.webContents.loadFile(uiFile("settings.html"), section ? { hash: String(section) } : undefined);
   settingsView.webContents.focus();
   send("settings-open", { open: true });
@@ -2101,6 +2131,7 @@ function createUi() {
   });
   ui.setBackgroundColor("#00000000"); // lets the glass show through when it's on
   ui.webContents.on("will-navigate", e => e.preventDefault());
+  attachInspect(ui.webContents);
   ui.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.contentView.addChildView(ui);
   ui.webContents.once("did-finish-load", () => {
@@ -2205,6 +2236,16 @@ const commands = {
   debug_page_menu: ({ id, params }) => process.env.ALCOVE_TEST === "1" && wcOf(id)
     ? pageMenu(id, wcOf(id), { mediaType: "none", selectionText: "", isEditable: false, linkURL: "", srcURL: "", x: 0, y: 0, ...params }).items.map(i => i.type === "separator" ? "—" : i.label || i.role)
     : null,
+  debug_devtools: ({ which }) => {
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    const ok = toggleDevTools(which);
+    const wc = devToolsTarget(which);
+    return { ok, open: !!wc && wc.isDevToolsOpened() };
+  },
+  debug_inspect_menu: ({ which, params }) => {
+    const v = viewByName(which);
+    return process.env.ALCOVE_TEST === "1" && v ? inspectMenu(v.webContents, { x: 1, y: 1, isEditable: false, selectionText: "", ...params }).items.map(i => i.type === "separator" ? "—" : i.label || i.role) : null;
+  },
   peek_close: () => { setImmediate(closePeek); },
   peek_open_tab: () => { setImmediate(peekToTab); },
   pip: ({ id }) => pictureInPicture(wcOf(id)),
@@ -2501,6 +2542,11 @@ function buildMenu() {
     { label: "View", submenu: [
       { label: "Toggle Sidebar", accelerator: "CmdOrCtrl+S", click: toggleSidebar },
       item("tools", "Show Tools", "CmdOrCtrl+Shift+U"),
+      { type: "separator" },
+      { label: "Developer Tools", accelerator: mac ? "Cmd+Alt+I" : "F12", click: () => toggleDevTools() }, // whichever page has focus
+      ...(mac ? [{ label: "Developer Tools (F12)", accelerator: "F12", visible: false, click: () => toggleDevTools() }]
+        : [{ label: "Developer Tools (Ctrl+Shift+I)", accelerator: "Ctrl+Shift+I", visible: false, click: () => toggleDevTools() }]),
+      { label: "Inspect Sidebar", click: () => toggleDevTools("sidebar") },
       { type: "separator" },
       item("reload", "Reload", "CmdOrCtrl+R"),
       item("back", "Back", "CmdOrCtrl+["),
