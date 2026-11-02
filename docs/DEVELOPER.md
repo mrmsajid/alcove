@@ -284,6 +284,11 @@ bool), `forceDark` (hostnames), `activeProfile`, `profiles` (`{ id, name, color 
 `recentMdFolders` (Markdown editor), `shortcuts` (websites pinned to the start page, `{ name, url }`, at most 24,
 http(s) only) and `settings` (below). Missing keys fall back to defaults in `loadConfig`.
 
+`saveConfig` writes `config.json.tmp` and renames it over the real file (mode 0600), keeping the previous version as
+`config.json.bak`. `loadConfig` sets an unreadable file aside as `config.json.corrupt-<time>`, falls back to the `.bak`,
+and then forces every key into its expected shape (arrays, the `profiles` list with a `default` entry, only settings
+that pass `SETTING_RULES`; `downloadDir` may be any string).
+
 **Settings** (`config.settings`) are defined in two tables near the top of `main.js`: `DEFAULT_SETTINGS` and
 `SETTING_RULES` (a validator per key). To add a setting:
 

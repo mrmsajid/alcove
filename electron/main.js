@@ -91,9 +91,39 @@ const glassMaterial = () => (wantsClear() ? "under-window" : "sidebar");
 const S = () => config.settings;
 const configPath = () => path.join(app.getPath("userData"), "config.json");
 
+const isPlainObject = v => !!v && typeof v === "object" && !Array.isArray(v);
+// A JSON file's content: undefined if it isn't there, null if it can't be read or parsed, else the parsed value.
+function readJsonFile(file) {
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { return e.code === "ENOENT" ? undefined : null; }
+}
+
 function loadConfig() {
-  try { config = { ...config, ...JSON.parse(fs.readFileSync(configPath(), "utf8")) }; } catch {}
-  config.settings = { ...DEFAULT_SETTINGS, ...(config.settings || {}) };
+  const file = configPath();
+  let saved = readJsonFile(file);
+  if (saved !== undefined && !isPlainObject(saved)) {
+    // Damaged (a crash or a full disk mid-write, or a file edited by hand). Never overwrite it blindly: set it aside
+    // and fall back to the last good copy that saveConfig keeps, if there is one.
+    try { fs.renameSync(file, `${file}.corrupt-${Date.now()}`); } catch {}
+    console.error("config.json was unreadable; set aside, using the backup if there is one");
+    const backup = readJsonFile(`${file}.bak`);
+    saved = isPlainObject(backup) ? backup : undefined;
+  }
+  config = { ...config, ...(saved || {}) };
+  // Whatever was saved, the rest of the app can rely on these shapes.
+  for (const k of ["adblockAllow", "forceDark", "shortcuts", "recentMd", "recentMdFolders"]) if (!Array.isArray(config[k])) config[k] = [];
+  if (!isPlainObject(config.sitePermissions)) config.sitePermissions = {};
+  config.profiles = (Array.isArray(config.profiles) ? config.profiles : [])
+    .filter(p => isPlainObject(p) && typeof p.id === "string" && p.id && typeof p.name === "string")
+    .map(p => ({ id: p.id, name: p.name.slice(0, 60), color: typeof p.color === "string" ? p.color : COLORS[0] }));
+  if (!config.profiles.some(p => p.id === "default")) config.profiles.unshift({ id: "default", name: "Default", color: COLORS[0] });
+  // Settings keep only values that pass their rule (a bad zoom or search URL would break every tab or search); the
+  // download folder is chosen in a dialog, so any string is a valid saved value.
+  const given = isPlainObject(config.settings) ? config.settings : {};
+  config.settings = { ...DEFAULT_SETTINGS };
+  for (const [k, v] of Object.entries(given)) {
+    if (!(k in DEFAULT_SETTINGS)) continue;
+    if (k === "downloadDir" ? typeof v === "string" : SETTING_RULES[k] && SETTING_RULES[k](v)) config.settings[k] = v;
+  }
   // v2: the old blue default accent (saved by earlier builds) becomes the new neutral default.
   if ((config.settingsVersion || 1) < 2) {
     if (config.settings.accent === "#7c8cff") config.settings.accent = DEFAULT_SETTINGS.accent;
@@ -107,8 +137,18 @@ function loadConfig() {
   }
   if (!config.profiles.some(p => p.id === config.activeProfile)) config.activeProfile = "default";
 }
+// Written to a temporary file and renamed over the real one, so a crash or a full disk can't leave half a file; the
+// previous version is kept as config.json.bak, which loadConfig falls back to.
 function saveConfig() {
-  try { fs.writeFileSync(configPath(), JSON.stringify(config, null, 2)); } catch {}
+  const file = configPath(), tmp = `${file}.tmp`;
+  const text = JSON.stringify(config, null, 2);
+  try {
+    fs.writeFileSync(tmp, text, { mode: 0o600 });
+    try { fs.copyFileSync(file, `${file}.bak`); } catch {}
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { fs.writeFileSync(file, text, { mode: 0o600 }); } catch { console.error("couldn't save config:", e.message); } // e.g. a locked file on Windows
+  }
 }
 
 // Each profile gets its own cookie jar (web) and its own sidebar storage (ui: tabs, bookmarks, history).
