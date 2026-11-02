@@ -335,7 +335,8 @@ web session (`applyBlocking`).
   (`popupWindow`, `popupCreated`), because sign-in popups ("Sign in with Google", most OAuth flows) report back to
   their opener with `postMessage` and then call `window.close()`. A tab made from just the popup's URL has no opener,
   so the sign-in ended on a blank page. A popup's own links open as tabs.
-- **Palette** (`ui/palette.js`): fuzzy and frecency ranking, site shortcuts (`yt …`), calculator, unit and
+- **Palette** (`ui/palette.js`; its view is a fresh one on every open, positioned by `placePalette()`, which `layout()` calls so it
+  stays centred as the window resizes): fuzzy and frecency ranking, site shortcuts (`yt …`), calculator, unit and
   currency conversion, ASIN links, QR code, page actions. A new command needs a row in `COMMANDS`
   (`palette.js`) and a handler in the sidebar's `actions` table (`app.js`).
 

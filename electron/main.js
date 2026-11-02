@@ -208,6 +208,7 @@ function layout() {
   placeSettings();
   placeTools();
   placeShotPopup();
+  placePalette();
   sendInset(c);
 }
 
@@ -2192,22 +2193,29 @@ function hidePalette() {
   palette = null;
 }
 
-// Re-created on every open so it always sits above the tab views.
-function showPalette() {
-  hidePalette();
+// Near the top, centred over the page area. layout() calls this, so the palette follows the window as it resizes
+// and the docked sidebar as it slides.
+function placePalette() {
+  if (!palette) return;
   const { width, height } = win.getContentBounds();
   const left = dockedLeft();
   const w = Math.min(Math.max(width - left - 40, 300), 580);
   const x = left + Math.max((width - left - w) / 2, 0);
+  palette.setBounds({
+    x: Math.round(x), y: 70, width: Math.round(w), height: Math.max(Math.min(420, height - 90), 200),
+  });
+}
+
+// Re-created on every open so it always sits above the tab views.
+function showPalette() {
+  hidePalette();
   palette = new WebContentsView({
     webPreferences: {
       preload: PRELOAD, contextIsolation: true, sandbox: true,
       partition: uiPartition(config.activeProfile), // same storage as the sidebar
     },
   });
-  palette.setBounds({
-    x: Math.round(x), y: 70, width: Math.round(w), height: Math.max(Math.min(420, height - 90), 200),
-  });
+  placePalette();
   win.contentView.addChildView(palette);
   palette.webContents.loadFile(uiFile("palette.html"));
   palette.webContents.focus();
@@ -2333,7 +2341,7 @@ const commands = {
   debug_layout: () => { // test hook: where the views are
     if (process.env.ALCOVE_TEST !== "1") return null;
     const b = v => (v ? v.getBounds() : null);
-    return { win: win.getContentBounds(), ui: b(ui), strip: b(strip), caption: b(caption), captionVisible: caption ? caption.getVisible() : null, page: contentRect(), tab: b(tabs.get(shownId)), tools: b(toolsView), settings: b(settingsView), maximized: win.isMaximized(), IS_WIN };
+    return { win: win.getContentBounds(), ui: b(ui), strip: b(strip), caption: b(caption), captionVisible: caption ? caption.getVisible() : null, page: contentRect(), tab: b(tabs.get(shownId)), tools: b(toolsView), settings: b(settingsView), palette: b(palette), maximized: win.isMaximized(), IS_WIN };
   },
   debug_resize: ({ w, h }) => { // test hook: set the window's content size
     if (process.env.ALCOVE_TEST !== "1") return null;
