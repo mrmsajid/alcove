@@ -235,7 +235,7 @@ call commands. If you add a new view that needs commands, add it to that list.
 | Markdown | `md_url` `md_recent` `md_recent_folders` (the editor itself uses its own bridge, see 6.6) |
 | Start page | `add_shortcut` (the start page itself uses its own bridge, see 6.7) |
 | Misc | `reveal` |
-| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` |
+| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` `debug_resize` |
 
 ### 4.5 Events sent to the sidebar
 
@@ -499,12 +499,23 @@ It is a normal tab on a `file://` page, self-contained like the Markdown editor,
 - **Tools**: a tile per Tools tab with a live status (timer, Pomodoro and stopwatch countdowns, next alarm, focus
   mode, world clock) and quick-start buttons for 5, 15 and 25 minute timers and a Pomodoro.
 
+**Layout and resizing.** The sidebar floats over every page, so the start page's view spans the whole window and
+its left edge can sit under the sidebar. `layout()` ends with `sendInset`, which tells the page the width of the
+sidebar's right edge (`sideCover`, animated by `animate()` together with `sidebarX` and `contentLeft`, so the number
+follows the slide with no jump; `0` while the sidebar is hidden or docked, and not changed by a hover peek). The page
+sets `--inset` as left padding on `body` and centres its content in the rest. Inside that space it adapts with CSS
+container queries on `main` (a column count that follows `minmax(min(Npx, 100%), 1fr)` grids, a compact search bar
+under 560 px). The window is at least 640 px wide, so the visible part can be about 344 px. The Tools and Settings
+pages are different: they are separate views placed beside the sidebar (`pageRect()`), so their own viewport is the
+available width and they use plain media queries (Tools: under 600 px its tab bar moves to its own row).
+
 **The bridge (`window.alcoveStart`, channel `alcove-start`).** The Tools engine and the to-do list live in the
 *sidebar's* storage, which the tab cannot read, so the page asks `main.js`:
 
 | Call | What it does |
 | --- | --- |
 | `settings` | search engine, custom search URL and accent only |
+| `inset`, `onInset(cb)` | how many pixels of the page's left edge the floating sidebar covers: the value now, then every change (see below) |
 | `toolsData` | the four storage values above as JSON text, read from the sidebar with `executeJavaScript` |
 | `shortcuts`, `setShortcuts` | read and replace the list (validated: http(s), at most 24, names cut to 40) |
 | `openTools(tab)` | opens the Tools page on that tab |
@@ -581,7 +592,9 @@ before launch.
 
 ### 8.3 Test hooks
 
-With `ALCOVE_TEST=1`: `debug_layout` (where the sidebar, strip, caption buttons and page card are),
+With `ALCOVE_TEST=1`: `debug_layout` (where the sidebar, strip, caption buttons, page card, shown tab, Tools and
+Settings views are), `debug_resize` (`{ w, h }`: sets the window's content size, to test responsive layouts; read the
+result with `debug_layout` and scan a page for elements wider than `innerWidth`),
 `debug_window_buttons` (runs the window-button hover logic for a point), `debug_page_menu` (returns the
 labels of a tab's right-click menu), `debug_open_devtools` (tries to open developer tools on a tab).
 

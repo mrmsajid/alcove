@@ -124,6 +124,8 @@ if (window === window.top && location.protocol === "file:" && /\/ui\/newtab\.htm
   const start = (op, a, b) => ipcRenderer.invoke("alcove-start", op, a, b);
   contextBridge.exposeInMainWorld("alcoveStart", {
     settings: () => start("settings"),
+    inset: () => start("inset"),
+    onInset: cb => ipcRenderer.on("alcove-inset", (_e, n) => cb(Number(n) || 0)),
     toolsData: () => start("tools-data"),
     copy: text => start("copy", text),
     shortcuts: () => start("shortcuts"),

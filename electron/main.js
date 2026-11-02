@@ -129,6 +129,8 @@ let peeking = false;
 let sidebarBusy = false;
 let sidebarX = 0;       // x of the sidebar view; negative while hidden
 let contentLeft = SIDEBAR_W; // x where web content starts; animates with the sidebar
+let sideCover = 0;      // x of the right edge of a shown, floating sidebar (0 when hidden); animates with it. The start page lays itself out right of it
+const coverTarget = () => (collapsed ? 0 : SIDEBAR_W + MARGIN);
 let animTimer = null;
 let peekHoldUntil = 0; // keeps the startup peek on screen briefly
 let dragTimer = null;
@@ -206,6 +208,22 @@ function layout() {
   placeSettings();
   placeTools();
   placeShotPopup();
+  sendInset(c);
+}
+
+// The start page lays itself out right of a floating sidebar (the sidebar floats over every page, and its content
+// would otherwise sit partly under it). It is told how many pixels of its left edge are covered, now and as the sidebar
+// slides or the window resizes; docked, the page view already starts beside the sidebar, so the answer is 0.
+const insetSent = new WeakMap(); // webContents -> last value the page has
+const insetFor = c => (floating() ? Math.max(0, Math.round(sideCover) - c.x) : 0);
+function sendInset(c) {
+  const inset = insetFor(c);
+  for (const v of tabs.values()) {
+    const wc = v.webContents;
+    if (wc.isDestroyed() || insetSent.get(wc) === inset || !wc.getURL().startsWith(NEWTAB_PAGE)) continue;
+    insetSent.set(wc, inset);
+    wc.send("alcove-inset", inset);
+  }
 }
 
 // The margin above the page doubles as a title bar: drag to move the window, double-click to zoom.
@@ -270,16 +288,18 @@ async function updateBackdrop() {
 setInterval(updateBackdrop, 250);
 
 // Slides the sidebar and the page edge together so content glides instead of jumping.
-function animate(toX, toLeft, ms = 200) {
+function animate(toX, toLeft, ms = 200, toCover = sideCover) {
   clearInterval(animTimer);
   const fromX = sidebarX;
   const fromLeft = contentLeft;
+  const fromCover = sideCover;
   const start = Date.now();
   animTimer = setInterval(() => {
     const t = Math.min((Date.now() - start) / ms, 1);
     const e = 1 - Math.pow(1 - t, 3); // ease-out cubic
     sidebarX = fromX + (toX - fromX) * e;
     contentLeft = fromLeft + (toLeft - fromLeft) * e;
+    sideCover = fromCover + (toCover - fromCover) * e;
     layout();
     if (t === 1) clearInterval(animTimer);
   }, 16);
@@ -316,7 +336,7 @@ function toggleSidebar() {
   saveConfig();
   peeking = false;
   if (floating()) raiseUi();
-  animate(collapsed ? HIDE_X : 0, dockedLeft(), 240);
+  animate(collapsed ? HIDE_X : 0, dockedLeft(), 240, coverTarget());
   sidebarState();
 }
 
@@ -998,7 +1018,7 @@ function applySetting(key) {
   if (key === "glass" || key === "glassStyle") applyGlass();
   if (key === "sidebarMode" && ui) {
     if (floating()) raiseUi();
-    animate(collapsed ? HIDE_X : 0, dockedLeft(), 220);
+    animate(collapsed ? HIDE_X : 0, dockedLeft(), 220, coverTarget());
     sidebarState();
   }
   if (key === "theme") nativeTheme.themeSource = S().theme;
@@ -1403,6 +1423,7 @@ function addShortcut(url, name) { // false when it isn't a website, is already t
 const START_OPS = { "timer-start": m => [Math.min(600, Math.max(1, Math.round(Number(m)) || 25))], "pomo-start": () => [] };
 ipcMain.handle("alcove-start", async (e, op, a, b) => {
   if (!e.senderFrame || e.senderFrame.url.split(/[?#]/)[0] !== NEWTAB_PAGE) throw new Error("forbidden");
+  if (op === "inset") { const n = insetFor(contentRect()); insetSent.set(e.sender, n); return n; } // current value; later changes are pushed
   if (op === "settings") return { searchEngine: S().searchEngine, customSearch: S().customSearch, accent: S().accent };
   if (op === "tools-data") { // the Tools engine's state, time tracking, to-dos and to-do tallies: JSON text, or null
     if (!ui || ui.webContents.isDestroyed()) return null;
@@ -2223,6 +2244,7 @@ function createUi() {
   sidebarX = collapsed ? HIDE_X : 0;
   uiRadius = -1;
   contentLeft = dockedLeft();
+  sideCover = coverTarget();
   peeking = false;
   layout();
 }
@@ -2311,7 +2333,12 @@ const commands = {
   debug_layout: () => { // test hook: where the views are
     if (process.env.ALCOVE_TEST !== "1") return null;
     const b = v => (v ? v.getBounds() : null);
-    return { win: win.getContentBounds(), ui: b(ui), strip: b(strip), caption: b(caption), captionVisible: caption ? caption.getVisible() : null, page: contentRect(), maximized: win.isMaximized(), IS_WIN };
+    return { win: win.getContentBounds(), ui: b(ui), strip: b(strip), caption: b(caption), captionVisible: caption ? caption.getVisible() : null, page: contentRect(), tab: b(tabs.get(shownId)), tools: b(toolsView), settings: b(settingsView), maximized: win.isMaximized(), IS_WIN };
+  },
+  debug_resize: ({ w, h }) => { // test hook: set the window's content size
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    win.setContentSize(Math.round(w), Math.round(h));
+    return win.getContentBounds();
   },
   debug_open_devtools: async ({ id }) => { // test hook: try to open the developer tools on a tab and say whether they stayed open
     if (process.env.ALCOVE_TEST !== "1" || !wcOf(id)) return null;

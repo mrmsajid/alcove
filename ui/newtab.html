@@ -19,7 +19,10 @@
     [hidden] { display: none !important; }
     html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text);
       font: 14px/1.4 -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
-    main { max-width: 940px; margin: 0 auto; padding: 8vh 28px 64px; }
+    /* The sidebar floats over this page, so main.js says how much of the left edge it covers (--inset, live while it
+       slides). The page is centred in the rest, and sizes itself to that space with container queries. */
+    body { padding-left: var(--inset, 0px); }
+    main { max-width: 940px; margin: 0 auto; padding: clamp(28px, 8vh, 80px) clamp(14px, 3vw, 28px) 64px; container-type: inline-size; }
     svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
     button { font: inherit; color: inherit; }
     section { margin-top: 40px; }
@@ -65,14 +68,14 @@
     .ghost:hover { background: var(--active); color: var(--text); }
 
     /* today */
-    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); gap: 12px; }
     .stat { padding: 14px 16px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .stat .val { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.01em; white-space: nowrap; }
     .stat .lab { font-size: 12.5px; color: var(--muted); }
     .stat .sub { font-size: 12px; color: var(--muted); min-height: 17px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--live); margin-right: 6px; vertical-align: 1px; animation: pulse 1.4s ease-in-out infinite; }
     @keyframes pulse { 50% { opacity: .35; } }
-    .details { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; margin-top: 12px; }
+    .details { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(290px, 100%), 1fr)); gap: 12px; margin-top: 12px; }
     .dcard { padding: 14px 16px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); }
     .dcard h3 { margin: 0 0 10px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
     .row { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: baseline; padding: 4px 0; font-size: 13px; }
@@ -82,7 +85,7 @@
     .row .bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
 
     /* tools */
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 14px; }
     .tile { display: flex; flex-direction: column; gap: 14px; padding: 16px; min-height: 118px; border-radius: 18px; background: var(--surface);
       border: 1px solid var(--border); cursor: pointer; outline: none; transition: transform .15s, border-color .15s, background .15s; }
     .tile:hover, .tile:focus-visible { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
@@ -111,6 +114,19 @@
     dialog .btns { display: flex; justify-content: flex-end; gap: 8px; }
     dialog .btns button { padding: 7px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--active); cursor: pointer; }
     dialog .btns button.primary { background: var(--accent); border-color: transparent; color: #fff; }
+    @container (max-width: 560px) {
+      #search { margin-bottom: 24px; }
+      #q { height: 48px; padding: 0 18px 0 46px; font-size: 15px; border-radius: 24px; }
+      #search > svg { left: 17px; top: 14px; }
+      #engine { display: none; }
+      section { margin-top: 30px; }
+      .sc { width: 78px; }
+      .sc .fav { width: 46px; height: 46px; border-radius: 14px; }
+      .sh { flex-wrap: wrap; row-gap: 6px; }
+      .stat { padding: 12px 14px; }
+      .stat .val { font-size: 22px; }
+      .tile { padding: 14px; gap: 12px; min-height: 0; }
+    }
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
   </style>
 </head>
@@ -247,7 +263,7 @@
       add.title = "Add a shortcut";
       const plus = el("div", "fav");
       plus.append(svg(ICON.plus));
-      add.append(plus, el("div", "label", "Add shortcut"));
+      add.append(plus, el("div", "label", "Add site"));
       add.addEventListener("click", e => { e.preventDefault(); openDialog(-1); });
       add.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDialog(-1); } });
       $("shortcuts").replaceChildren(...tiles, ...(shortcuts.length < 24 ? [add] : []));
@@ -488,6 +504,11 @@
     setInterval(refreshState, 2000);
     setInterval(loadShortcuts, 3000);
     input.focus();
+
+    // The floating sidebar covers the page's left edge: lay out right of it, as it slides in and out and the window resizes.
+    const setInset = n => document.documentElement.style.setProperty("--inset", `${n}px`);
+    if (bridge.onInset) bridge.onInset(setInset);
+    Promise.resolve(bridge.inset && bridge.inset()).then(n => { if (typeof n === "number") setInset(n); }).catch(() => {});
   </script>
 </body>
 </html>
