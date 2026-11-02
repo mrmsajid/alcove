@@ -235,7 +235,7 @@ call commands. If you add a new view that needs commands, add it to that list.
 | Markdown | `md_url` `md_recent` `md_recent_folders` (the editor itself uses its own bridge, see 6.6) |
 | Start page | `add_shortcut` (the start page itself uses its own bridge, see 6.7) |
 | Misc | `reveal` |
-| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` `debug_resize` `debug_leave_answer` `debug_destroy_view` `debug_throw` `debug_windows` `debug_focus_popup` `debug_menu` `debug_review_answer` `debug_describe_extension` |
+| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` `debug_resize` `debug_leave_answer` `debug_destroy_view` `debug_throw` `debug_windows` `debug_focus_popup` `debug_menu` `debug_review_answer` `debug_describe_extension` `debug_quit_answer` `debug_close_window` `debug_quit` `debug_install_unpacked` |
 
 ### 4.5 Events sent to the sidebar
 
@@ -334,12 +334,17 @@ web session (`applyBlocking`).
   and tracks which one is on screen in `shownId`.
 - **Split view** shows two tab views side by side with a draggable `divider` view; `layout()` handles the bounds.
 - **Peek** (Shift-click a link) is a floating preview window with a backdrop.
+- **Quitting or closing the window** with unsaved Markdown edits asks first (`guardClose`, `dirtyNotes`, `confirmQuit`: the
+  editor answers through `window.__alcoveDirty()`, Cancel is the default). The editor also keeps those edits as a draft
+  (6.6), so Quit means "come back to it later", not "lose it".
 - **Closing a tab** goes through `closeTab` in `main.js`, which calls `webContents.close({ waitForBeforeUnload: true })`:
   a page with unsaved work (the Markdown editor, for a saved file with changes) asks "Leave this page?"
   (`will-prevent-unload`, `askLeave`), and if the user stays the call resolves `false` and the sidebar keeps the tab.
   The same question appears when a navigation would leave such a page. Switching profile and deleting a space close
   tabs with `force`. Whoever closes a view (the sidebar, or the page itself with `window.close()`), its `destroyed`
-  event runs `dropTab` and sends `tab-closed`, so the sidebar drops the row. A view whose page is gone has no
+  event runs `dropTab` and sends `tab-closed`, so the sidebar drops the row (not while the app is quitting, `shuttingDown`,
+  or for a force close, `alcoveQuiet`: those pages are destroyed on purpose, and the sidebar must keep its tabs for the next
+  start. Sending it then once made every tab disappear after a restart). A view whose page is gone has no
   `webContents`: use `deadView(v)` before touching one. `uncaughtException` and `unhandledRejection` are logged, not shown.
 - **Links and `window.open`** are routed by `setWindowOpenHandler` in `openTab`: Cmd/Ctrl+click opens a background
   tab, Shift+click opens Peek, and everything else becomes a tab, **except a popup that asks for a size**
@@ -474,6 +479,11 @@ through `setTags`. Clicking any tag chip opens a search for it.
   *Unmount and forget* also removes it from `recentMdFolders`.
 - The tree lists only folders and `md|markdown|mdown|mkd|txt` files, skips hidden entries, `node_modules` and
   symlinks, and loads one directory at a time.
+
+**Drafts.** Unsaved edits to a saved file are kept per path in `alcove-md-drafts` (this page's storage; written 250 ms after
+the last keystroke, on `pagehide` and when the app asks `__alcoveDirty()`; at most five drafts of 400 KB). Opening the file
+again restores the draft with an "Undo" in the footer; saving, or choosing Discard, clears it. Untitled documents keep their
+single draft in `alcove-md-draft`.
 
 **The file bridge (`window.alcoveMd`, channel `alcove-md`).** Operations and their checks, in `main.js`:
 

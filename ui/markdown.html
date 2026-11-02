@@ -423,6 +423,37 @@
     let bodyLines = 0; // lines taken by front matter, so preview checkboxes map back to source lines
 
     const dirty = () => ta.value !== saved;
+
+    // Unsaved edits to a saved file are kept as a draft (per file, in this page's storage), so closing the tab, quitting or a
+    // crash doesn't lose them: the next time the file is opened they come back, with an Undo. Untitled documents have their
+    // own single draft (DRAFT). Drafts are cleared on save and when the user chooses to discard. At most five, each under
+    // 400 KB, so they can't fill the storage that the rest of the app shares.
+    const DRAFTS = "alcove-md-drafts", DRAFT_MAX = 400000, DRAFT_KEEP = 5;
+    const readDrafts = () => { try { const d = JSON.parse(localStorage.getItem(DRAFTS) || "{}"); return d && typeof d === "object" && !Array.isArray(d) ? d : {}; } catch { return {}; } };
+    const writeDrafts = d => {
+      const keep = Object.entries(d).sort((a, b) => b[1].at - a[1].at).slice(0, DRAFT_KEEP);
+      try { localStorage.setItem(DRAFTS, JSON.stringify(Object.fromEntries(keep))); } catch {}
+    };
+    function discardDraft(path) { const d = readDrafts(); if (path in d) { delete d[path]; writeDrafts(d); } }
+    let draftTimer;
+    function flushDraft() {
+      clearTimeout(draftTimer);
+      if (!file.path) return;
+      const d = readDrafts();
+      if (dirty() && ta.value.length <= DRAFT_MAX) d[file.path] = { text: ta.value, at: Date.now() };
+      else delete d[file.path];
+      writeDrafts(d);
+    }
+    // The draft for this file if it differs from what is on disk (a stale one is dropped), else null.
+    function takeDraft(path, disk) {
+      const d = readDrafts(), mine = d[path];
+      if (!mine || typeof mine.text !== "string") return null;
+      if (mine.text === disk) { delete d[path]; writeDrafts(d); return null; }
+      return mine.text;
+    }
+    // Asked by the app before the window closes (see main.js), which also gives the debounced draft its last write.
+    window.__alcoveDirty = () => { flushDraft(); return dirty() ? file.name : ""; };
+    window.addEventListener("pagehide", flushDraft);
     const say = (t, ms = 2500) => { $("msg").textContent = t; clearTimeout(msgTimer); msgTimer = setTimeout(() => { $("msg").textContent = ""; }, ms); };
 
     // Edits go through execCommand so the browser's own undo/redo keeps working; if that isn't available the
@@ -2051,14 +2082,22 @@
       file = f;
       ta.value = text;
       saved = text;
+      const kept = f.path ? takeDraft(f.path, text) : null; // unsaved edits from last time
+      if (kept !== null) ta.value = kept;
       history.replaceState(null, "", f.path ? `?file=${encodeURIComponent(f.path)}` : location.pathname);
       const chosen = prefs.mode === "code" ? (prefs.split && innerWidth > 900 ? "split" : "code") : "visual";
       setMode(next === "keep" && mode !== "graph" ? mode : chosen, true); // opening a note from the graph leaves the graph
       renderTree();
+      if (kept !== null) sayUndo("Restored your unsaved changes", () => { ta.value = saved; discardDraft(f.path); if (visual()) renderVisual(); paint(); });
     }
 
     const base = p => p.split(/[\\/]/).pop();
-    const confirmDiscard = () => !dirty() || confirm("Discard your unsaved changes?");
+    const confirmDiscard = () => {
+      if (!dirty()) return true;
+      if (!confirm("Discard your unsaved changes?")) return false;
+      if (file.path) discardDraft(file.path); // discarded on purpose: not offered again
+      return true;
+    };
 
     // fromTree: picked in the folder panel, so the mode stays as it is; fresh: a note just created, so write in it
     async function openFile(path, fromTree, fresh) {
@@ -2082,6 +2121,7 @@
       saved = text;
       history.replaceState(null, "", `?file=${encodeURIComponent(r.path)}`);
       localStorage.removeItem(DRAFT);
+      discardDraft(r.path);
       paint();
       say("Saved");
       if (folders.length) refreshTree(); // a new file may have landed in a folder
@@ -2128,6 +2168,7 @@
     function docChanged() {
       paintSoon();
       if (!file.path) { try { localStorage.setItem(DRAFT, ta.value); } catch {} } // untitled drafts survive closing the tab
+      else { clearTimeout(draftTimer); draftTimer = setTimeout(flushDraft, 250); }  // so do edits to a saved file
     }
     ta.addEventListener("input", docChanged);
 

@@ -174,6 +174,8 @@ let palette = null;
 const deadView = v => !v || !v.webContents || v.webContents.isDestroyed();
 const tabs = new Map();      // tab id -> WebContentsView
 const wcToTab = new Map();   // webContents id -> tab id
+let shuttingDown = false;    // the app is quitting (its pages are being destroyed on purpose)
+app.on("before-quit", () => { shuttingDown = true; });
 const lastFind = new Map();
 const blocked = new Map();   // tab id -> blocked request count
 const knownSessions = new Set();
@@ -862,7 +864,9 @@ function openTab(id, url) {
   const wc = view.webContents;
   tabs.set(id, view);
   wcToTab.set(wc.id, id);
-  wc.once("destroyed", () => { dropTab(id); send("tab-closed", { id }); });
+  // A page that closes itself (window.close()) is reported to the sidebar so it drops the row. Not while the app is shutting down
+  // or switching profile: then every page is destroyed on purpose, and the sidebar must keep its tabs for the next start.
+  wc.once("destroyed", () => { dropTab(id); if (!shuttingDown && !view.alcoveQuiet) send("tab-closed", { id }); });
   wc.on("will-prevent-unload", e => askLeave(id, view, wc, e));
   win.contentView.addChildView(view);
   if (floating()) raiseUi();
@@ -1247,11 +1251,57 @@ function closeTab(id, force) {
   if (!v) return Promise.resolve(true);
   const wc = v.webContents;
   if (deadView(v)) { dropTab(id); return Promise.resolve(true); }
-  if (force) { wc.close(); return Promise.resolve(true); }
+  if (force) { v.alcoveQuiet = true; wc.close(); return Promise.resolve(true); }
   return new Promise(resolve => {
     v.alcoveClosing = ok => { v.alcoveClosing = null; resolve(ok); };
     wc.once("destroyed", () => v.alcoveClosing && v.alcoveClosing(true));
     wc.close({ waitForBeforeUnload: true });
+  });
+}
+
+// Closing the window (Cmd+Q, the close button) with unsaved Markdown edits asks first. The editor keeps those edits as a
+// draft either way (see ui/markdown.html), so the question is "quit now?", not "lose your work?". Only the editor is asked:
+// it is the page that holds work of the user's own, and it answers through window.__alcoveDirty().
+let testQuit = ""; // tests only (debug_quit_answer): "quit" or "cancel" answers without a dialog
+async function dirtyNotes() {
+  const names = [];
+  for (const v of tabs.values()) {
+    if (deadView(v) || !v.webContents.getURL().startsWith(MD_PAGE)) continue;
+    try {
+      const name = await Promise.race([
+        v.webContents.executeJavaScript('typeof window.__alcoveDirty === "function" ? window.__alcoveDirty() : ""'),
+        new Promise(resolve => setTimeout(() => resolve(""), 1000)), // a page that doesn't answer is not held up for
+      ]);
+      if (name) names.push(String(name).slice(0, 80));
+    } catch {}
+  }
+  return names;
+}
+async function confirmQuit(names) {
+  if (testQuit) return testQuit === "quit";
+  const { response } = await dialog.showMessageBox(win, {
+    type: "question", buttons: ["Cancel", "Quit"], defaultId: 0, cancelId: 0,
+    message: names.length === 1 ? `“${names[0]}” has unsaved changes` : `${names.length} notes have unsaved changes`,
+    detail: "If you quit now they are kept as a draft, and offered again the next time you open the note.",
+  });
+  return response === 1;
+}
+function guardClose() {
+  let asking = false, confirmed = false;
+  win.on("close", e => {
+    if (confirmed) return;
+    e.preventDefault();
+    if (asking) return; // a second click on the close button while the question is up
+    asking = true;
+    (async () => {
+      try {
+        const names = await dirtyNotes();
+        if (names.length && !(await confirmQuit(names))) { shuttingDown = false; return; } // Cmd+Q had set it; the user stayed
+        confirmed = true;
+        shuttingDown = true;
+        win.close();
+      } finally { asking = false; }
+    })();
   });
 }
 
@@ -2589,7 +2639,7 @@ const commands = {
   debug_layout: () => { // test hook: where the views are
     if (process.env.ALCOVE_TEST !== "1") return null;
     const b = v => (v ? v.getBounds() : null);
-    return { win: win.getContentBounds(), ui: b(ui), strip: b(strip), caption: b(caption), captionVisible: caption ? caption.getVisible() : null, page: contentRect(), tab: b(tabs.get(shownId)), tools: b(toolsView), settings: b(settingsView), palette: b(palette), maximized: win.isMaximized(), IS_WIN };
+    return { win: win.getContentBounds(), ui: b(ui), strip: b(strip), caption: b(caption), captionVisible: caption ? caption.getVisible() : null, page: contentRect(), tab: b(tabs.get(shownId)), tools: b(toolsView), settings: b(settingsView), palette: b(palette), extPopup: deadView(extPopup) ? null : b(extPopup), maximized: win.isMaximized(), IS_WIN };
   },
   debug_windows: () => { // test hook: the popup windows (real windows besides the app's own)
     if (process.env.ALCOVE_TEST !== "1") return null;
@@ -2614,6 +2664,13 @@ const commands = {
     if (process.env.ALCOVE_TEST !== "1") return null;
     return describeExtension(crxToZip(fs.readFileSync(file)), "test");
   },
+  debug_install_unpacked: ({ dir }) => { // test hook: load an unpacked extension without the folder dialog
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    return installFromDir(String(dir), `local-test-${path.basename(String(dir)).replace(/[^\w.-]+/g, "_")}`);
+  },
+  debug_quit: () => { if (process.env.ALCOVE_TEST === "1") setImmediate(() => app.quit()); return process.env.ALCOVE_TEST === "1"; }, // test hook: as Cmd+Q would
+  debug_quit_answer: ({ answer }) => { if (process.env.ALCOVE_TEST === "1") testQuit = answer === "quit" || answer === "cancel" ? answer : ""; },
+  debug_close_window: () => { if (process.env.ALCOVE_TEST === "1") win.close(); return process.env.ALCOVE_TEST === "1"; }, // test hook: as the close button would
   debug_leave_answer: ({ answer }) => { if (process.env.ALCOVE_TEST === "1") testLeave = answer === "leave" || answer === "stay" ? answer : ""; },
   debug_destroy_view: ({ what, id }) => { // test hook: a page destroying its own view, as window.close() does
     if (process.env.ALCOVE_TEST !== "1") return null;
@@ -3030,6 +3087,7 @@ app.whenReady().then(() => {
   createStrip();
   if (IS_WIN) createCaption();
   win.on("resize", layout);
+  guardClose();
   watchCursor();
   globalThis.__alcoveStarted = true; // from here on, stray errors are logged instead of ending the app (see onProcessError)
 });
