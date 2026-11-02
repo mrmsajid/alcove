@@ -49,7 +49,7 @@ const DEFAULT_SETTINGS = {
   glass: true, frost: 55,                   // frosted see-through sidebar and frame; frost 0 = clear, 100 = solid
   sidebarMode: "overlay",                   // overlay: sidebar floats over the page | docked: page makes room for it
   blur: 55,                                 // how soft the glass blurs the page behind a floating sidebar
-  glassStyle: "frosted",                    // frosted (blurred) | clear (see-through, macOS; applies after restart)
+  glassStyle: "frosted",                    // frosted (soft tinted blur) | clear (lighter blur, almost no tint; macOS). Applies live
   shine: 40,                                // specular edges and color fringe on glass controls (0 = off)
   dnt: true, httpsOnly: false, spellcheck: true,
 };
