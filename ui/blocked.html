@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Focus mode</title>
+  <style>
+    :root { color-scheme: dark light; --bg: #1d1d20; --text: #ededf0; --muted: #8e8e97; --line: #ffffff1a; }
+    @media (prefers-color-scheme: light) { :root { --bg: #f4f4f6; --text: #1c1c1f; --muted: #6e6e78; --line: #0000001a; } }
+    html, body { height: 100%; margin: 0; }
+    body { display: grid; place-items: center; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; }
+    main { text-align: center; max-width: 380px; padding: 24px; }
+    .ring { width: 64px; height: 64px; margin: 0 auto 20px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; }
+    .ring i { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+    h1 { font-size: 20px; font-weight: 600; margin: 0 0 6px; }
+    p { margin: 0; color: var(--muted); }
+    #left { font-variant-numeric: tabular-nums; margin-top: 14px; }
+    a { display: inline-block; margin-top: 22px; color: var(--muted); font-size: 13px; text-decoration: none; border: 1px solid var(--line); border-radius: 9px; padding: 6px 14px; }
+    a:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="ring"><i></i></div>
+    <h1>Focus mode is on</h1>
+    <p><b id="host"></b> is blocked until <span id="until"></span>.</p>
+    <p id="left"></p>
+    <a id="retry" href="#">Try again</a>
+  </main>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const until = Number(q.get("until")) || 0;
+    document.getElementById("host").textContent = q.get("host") || "This site";
+    document.getElementById("until").textContent = new Date(until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    const target = q.get("url") || "";
+    document.getElementById("retry").href = /^https?:\/\//.test(target) ? target : "#";
+    const tick = () => {
+      const s = Math.max(0, Math.round((until - Date.now()) / 1000));
+      document.getElementById("left").textContent = s ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")} left` : "Focus mode has ended";
+    };
+    tick(); setInterval(tick, 1000);
+  </script>
+</body>
+</html>

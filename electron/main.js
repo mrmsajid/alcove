@@ -1,10 +1,11 @@
 const {
-  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net, nativeImage, systemPreferences,
+  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net, nativeImage, systemPreferences, Notification, powerMonitor,
 } = require("electron");
 const AdmZip = require("adm-zip");
 const { spawn, execFileSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const { pathToFileURL, fileURLToPath } = require("url");
 const { searchUrl } = require(path.join(__dirname, "ui", "engines.js"));
 
 const SIDEBAR_W = 280;
@@ -46,6 +47,8 @@ const DEFAULT_SETTINGS = {
   downloadDir: "", askDownload: false,
   theme: "system", accent: "#76767f", textSize: "default", defaultZoom: 1, compact: false,
   glass: true, frost: 55,                   // frosted see-through sidebar and frame; frost 0 = clear, 100 = solid
+  sidebarMode: "overlay",                   // overlay: sidebar floats over the page | docked: page makes room for it
+  blur: 55,                                 // how soft the glass blurs the page behind a floating sidebar
   glassStyle: "frosted",                    // frosted (blurred) | clear (see-through, macOS; applies after restart)
   shine: 40,                                // specular edges and color fringe on glass controls (0 = off)
   dnt: true, httpsOnly: false, spellcheck: true,
@@ -69,13 +72,16 @@ const SETTING_RULES = {
   spellcheck: v => typeof v === "boolean",
   glass: v => typeof v === "boolean",
   frost: v => typeof v === "number" && v >= 0 && v <= 100,
+  sidebarMode: v => ["overlay", "docked"].includes(v),
+  blur: v => typeof v === "number" && v >= 0 && v <= 100,
   glassStyle: v => ["frosted", "clear"].includes(v),
   shine: v => typeof v === "number" && v >= 0 && v <= 100,
 };
-// Clear glass needs a transparent window, which can only be chosen when the window is created
-// (and macOS drops the window shadow on transparent windows), so switching styles takes a restart.
-let windowIsClear = false;
+// Clear glass is the same blurred glass with a lighter material and almost no tint (the sidebar page sets
+// the tint), so it switches live. A fully transparent window would show the desktop unblurred, which is
+// hard to read, and macOS drops the window shadow on transparent windows.
 const wantsClear = () => process.platform === "darwin" && S().glass && S().glassStyle === "clear";
+const glassMaterial = () => (wantsClear() ? "under-window" : "sidebar");
 const S = () => config.settings;
 const configPath = () => path.join(app.getPath("userData"), "config.json");
 
@@ -132,7 +138,15 @@ const send = (name, payload) => {
 const MARGIN = 8;
 const gap = () => (S().compact ? 0 : MARGIN); // Settings › Appearance › Compact layout removes it
 const HIDE_X = -(SIDEBAR_W + MARGIN + 4); // sidebar x when hidden (fully off screen)
+// The sidebar floats over the page by default and never resizes it. In "docked" mode (Settings) the page
+// makes room for it instead, and only floats when the sidebar is hidden and slides out from the edge.
+const docked = () => S().sidebarMode === "docked";
+const floating = () => collapsed || !docked();
+const dockedLeft = () => (docked() && !collapsed ? SIDEBAR_W : 0); // where the page starts
+// Left edge of the page area that the sidebar doesn't cover (for popups placed beside it).
+const clearLeft = () => (collapsed ? 0 : docked() ? SIDEBAR_W : SIDEBAR_W + MARGIN);
 let uiRadius = -1;
+let lightsFloat = null;
 const CARD_RADIUS = 10;
 const cardRadius = () => (S().compact ? 0 : CARD_RADIUS);
 
@@ -146,12 +160,17 @@ function contentRect() {
 
 function layout() {
   const { height } = win.getContentBounds();
-  // Docked: flush with the window. Sliding out over the page (sidebar collapsed): a floating rounded panel.
-  const floating = collapsed;
-  ui.setBounds(floating
+  // Docked: flush with the window. Otherwise a floating rounded panel over the page.
+  const float = floating();
+  ui.setBounds(float
     ? { x: Math.round(sidebarX) + MARGIN, y: MARGIN, width: SIDEBAR_W, height: height - 2 * MARGIN }
     : { x: Math.round(sidebarX), y: 0, width: SIDEBAR_W, height });
-  const radius = floating ? 14 : 0;
+  // Keep the macOS window buttons level with the sidebar's top row, which sits lower when it floats.
+  if (process.platform === "darwin" && float !== lightsFloat && typeof win.setWindowButtonPosition === "function") {
+    lightsFloat = float;
+    win.setWindowButtonPosition(float ? { x: 18 + MARGIN, y: 15 + MARGIN - 3 } : { x: 18, y: 15 });
+  }
+  const radius = float ? 14 : 0;
   if (radius !== uiRadius && typeof ui.setBorderRadius === "function") { ui.setBorderRadius(radius); uiRadius = radius; }
   const c = contentRect();
   const lw = split ? Math.round((c.w - DIVIDER_W) * split.ratio) : 0;
@@ -173,6 +192,7 @@ function layout() {
   }
   placePeek();
   placeSettings();
+  placeTools();
   placeShotPopup();
 }
 
@@ -193,6 +213,36 @@ function createStrip() {
 
 const raiseUi = () => win.contentView.addChildView(ui); // re-adding moves a view to the top
 
+// Glass over pages. The sidebar floats over the page, and a view can't blur what's behind it, so while it's
+// showing, the part of the page under it is captured a few times a second, shrunk, and sent to the sidebar,
+// which draws it blurred behind its tint (#glass-bg in ui/style.css). Only runs while that's visible.
+let backdropBusy = false;
+let lastBackdrop = "";
+async function updateBackdrop() {
+  if (backdropBusy || !win || win.isDestroyed() || !ui || !S().glass) return;
+  if (!floating() || (collapsed && !peeking) || Math.abs(sidebarX) > 1 || !win.isVisible() || win.isMinimized()) return;
+  const v = tabs.get(shownId);
+  if (!v) return;
+  backdropBusy = true;
+  try {
+    const b = v.getBounds();
+    const x = Math.max(0, MARGIN - b.x), w = Math.min(SIDEBAR_W, b.width - x);
+    if (w < 40) return;
+    const img = await v.webContents.capturePage({ x, y: 0, width: w, height: b.height });
+    if (img.isEmpty()) return;
+    const small = img.resize({ width: Math.max(24, Math.round(w / 4)), quality: "good" });
+    const url = "data:image/jpeg;base64," + small.toJPEG(60).toString("base64");
+    if (url === lastBackdrop) return;
+    lastBackdrop = url;
+    // Average brightness (0-1) so the sidebar can switch between dark text on a light tint and light text on a dark one.
+    const px = small.toBitmap();
+    let sum = 0, n = 0;
+    for (let i = 0; i + 3 < px.length; i += 16) { sum += 0.2126 * px[i + 2] + 0.7152 * px[i + 1] + 0.0722 * px[i]; n++; } // BGRA
+    send("glass-backdrop", { url, lum: n ? sum / n / 255 : 0.5 });
+  } catch {} finally { backdropBusy = false; }
+}
+setInterval(updateBackdrop, 250);
+
 // Slides the sidebar and the page edge together so content glides instead of jumping.
 function animate(toX, toLeft, ms = 200) {
   clearInterval(animTimer);
@@ -209,7 +259,7 @@ function animate(toX, toLeft, ms = 200) {
   }, 16);
 }
 
-const sidebarState = () => send("sidebar-state", { collapsed, peek: peeking });
+const sidebarState = () => send("sidebar-state", { collapsed, peek: peeking, floating: floating() });
 
 function peek(on) {
   if (!collapsed || peeking === on) return;
@@ -239,8 +289,8 @@ function toggleSidebar() {
   config.collapsed = collapsed;
   saveConfig();
   peeking = false;
-  if (collapsed) raiseUi();
-  animate(collapsed ? HIDE_X : 0, collapsed ? 0 : SIDEBAR_W, 240);
+  if (floating()) raiseUi();
+  animate(collapsed ? HIDE_X : 0, dockedLeft(), 240);
   sidebarState();
 }
 
@@ -448,8 +498,19 @@ function installBlockerHooks(ses) {
 // ad blocker decide (unless the site is exempt). Re-installed after the blocker is switched on or off,
 // because the blocker replaces the session's handler.
 const LOCAL_HTTP = /^http:\/\/(localhost|127\.|\[::1\]|10\.|192\.168\.|[^/]*\.local\b|[^/]*\.test\b)/i;
+// Focus mode (Tools panel): while it's on, new page loads for the chosen sites are refused and the tab
+// shows ui/blocked.html instead. Pages that are already open are left alone until they navigate.
+let focus = null; // { until, sites }
+const focusActive = () => { if (focus && Date.now() >= focus.until) focus = null; return focus; };
+const focusBlocks = url => {
+  const f = focusActive();
+  const h = f && hostKey(url);
+  return !!h && f.sites.some(s => h === s || h.endsWith("." + s));
+};
+
 function installRequestFilter(ses) {
   ses.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) => {
+    if (details.resourceType === "mainFrame" && focusBlocks(details.url)) return callback({ cancel: true });
     if (S().httpsOnly && details.resourceType === "mainFrame" && /^http:\/\//i.test(details.url) && !LOCAL_HTTP.test(details.url)) {
       return callback({ redirectURL: details.url.replace(/^http:/i, "https:") });
     }
@@ -634,7 +695,7 @@ function openTab(id, url) {
   tabs.set(id, view);
   wcToTab.set(wc.id, id);
   win.contentView.addChildView(view);
-  if (collapsed) raiseUi();
+  if (floating()) raiseUi();
   layout();
   wc.on("did-start-navigation", d => {
     if (d.isMainFrame && !d.isSameDocument) {
@@ -652,7 +713,16 @@ function openTab(id, url) {
     const message = typeof e.message === "string" ? e.message : legacyMessage;
     if (message === STORE_MARK && STORE_URL.test(wc.getURL())) send("store-install", { id, url: wc.getURL() });
   });
-  wc.on("did-navigate", (_e, u) => send("tab-url", { id, url: u }));
+  wc.on("did-fail-load", (_e, code, _desc, failedUrl, isMainFrame) => {
+    if (isMainFrame && code === -20 /* ERR_BLOCKED_BY_CLIENT */ && focusBlocks(failedUrl)) {
+      wc.loadFile(uiFile("blocked.html"), { query: { host: hostKey(failedUrl), until: String(focus.until), url: failedUrl } }).catch(() => {});
+    }
+  });
+  wc.on("did-navigate", (_e, u) => {
+    const f = mdFileOfUrl(u);
+    if (f) { wc.loadURL(`${MD_PAGE}?file=${encodeURIComponent(f)}`).catch(() => {}); return; }
+    send("tab-url", { id, url: u });
+  });
   wc.on("did-navigate-in-page", (_e, u, isMainFrame) => { if (isMainFrame) send("tab-url", { id, url: u }); });
   wc.on("page-title-updated", (_e, title) => send("tab-title", { id, title }));
   // Cmd/Ctrl+click opens a background tab; Shift+click (a featureless new window) opens Peek.
@@ -676,7 +746,9 @@ function openTab(id, url) {
   });
 }
 
+let shownId = null; // the tab on screen (the left pane in split view)
 function showOnly(id) {
+  shownId = split ? split.left : id;
   for (const [k, v] of tabs) v.setVisible(split ? k === split.left || k === split.right : k === id);
 }
 
@@ -787,19 +859,60 @@ async function applyDark(wc, on) {
 let settingsView = null;
 let startupTaken = false;
 
+// Full-page views (Settings, Tools) fill the page card but start beside the sidebar instead of under it.
+function pageRect() {
+  const c = contentRect();
+  const x = Math.max(c.x, clearLeft());
+  return { x, y: c.y, width: Math.max(c.x + c.w - x, 1), height: c.h };
+}
+
 function placeSettings() {
   if (!settingsView) return;
-  const c = contentRect();
-  settingsView.setBounds({ x: c.x, y: c.y, width: c.w, height: c.h });
+  settingsView.setBounds(pageRect());
+}
+
+// Tools: its own page. The sidebar keeps the timers and tracking running (ui/tools.js); this page is the
+// interface for them.
+let toolsView = null;
+function placeTools() {
+  if (!toolsView) return;
+  toolsView.setBounds(pageRect());
+}
+
+function openTools(tab) {
+  if (toolsView) {
+    if (tab) toolsView.webContents.executeJavaScript(`location.hash = ${JSON.stringify(String(tab))}; location.reload()`).catch(() => {});
+    toolsView.webContents.focus();
+    return;
+  }
+  closeSettings();
+  toolsView = new WebContentsView({
+    webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, partition: uiPartition(config.activeProfile) },
+  });
+  if (typeof toolsView.setBorderRadius === "function") toolsView.setBorderRadius(cardRadius());
+  win.contentView.addChildView(toolsView);
+  if (floating()) raiseUi();
+  placeTools();
+  toolsView.webContents.loadFile(uiFile("tools.html"), tab ? { hash: String(tab) } : undefined);
+  toolsView.webContents.focus();
+}
+
+function closeTools() {
+  if (!toolsView) return;
+  win.contentView.removeChildView(toolsView);
+  toolsView.webContents.close();
+  toolsView = null;
 }
 
 function openSettings(section) {
   if (settingsView) { settingsView.webContents.focus(); return; }
+  closeTools();
   settingsView = new WebContentsView({
     webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, partition: uiPartition(config.activeProfile) },
   });
   if (typeof settingsView.setBorderRadius === "function") settingsView.setBorderRadius(cardRadius());
   win.contentView.addChildView(settingsView);
+  if (floating()) raiseUi();
   placeSettings();
   settingsView.webContents.loadFile(uiFile("settings.html"), section ? { hash: String(section) } : undefined);
   settingsView.webContents.focus();
@@ -818,7 +931,7 @@ function closeSettings() {
 // page is transparent and the window color carries the frost tint, so sidebar and frame match.
 function applyGlass() {
   if (!win || win.isDestroyed()) return;
-  if (process.platform === "darwin") win.setVibrancy(S().glass && !(windowIsClear && wantsClear()) ? "sidebar" : null);
+  if (process.platform === "darwin") win.setVibrancy(S().glass ? glassMaterial() : null);
   if (process.platform === "win32" && typeof win.setBackgroundMaterial === "function") {
     try { win.setBackgroundMaterial(S().glass ? "acrylic" : "none"); } catch {}
   }
@@ -826,10 +939,16 @@ function applyGlass() {
 
 function applySetting(key) {
   if (key === "glass" || key === "glassStyle") applyGlass();
+  if (key === "sidebarMode" && ui) {
+    if (floating()) raiseUi();
+    animate(collapsed ? HIDE_X : 0, dockedLeft(), 220);
+    sidebarState();
+  }
   if (key === "theme") nativeTheme.themeSource = S().theme;
   if (key === "compact") {
     for (const v of tabs.values()) if (typeof v.setBorderRadius === "function") v.setBorderRadius(cardRadius());
     if (settingsView && typeof settingsView.setBorderRadius === "function") settingsView.setBorderRadius(cardRadius());
+    if (toolsView && typeof toolsView.setBorderRadius === "function") toolsView.setBorderRadius(cardRadius());
     layout();
   }
   if (key === "spellcheck") for (const ses of knownSessions) ses.setSpellCheckerEnabled(S().spellcheck);
@@ -840,6 +959,7 @@ function settingChanged(key) {
   if (key) applySetting(key);
   send("settings-changed", S());
   if (settingsView) settingsView.webContents.send("event", "settings-changed", S());
+  if (toolsView) toolsView.webContents.send("event", "settings-changed", S());
 }
 
 // Links opened from other apps once Alcove is the default browser.
@@ -934,6 +1054,130 @@ function closeTab(id) {
   tabs.delete(id);
   lastFind.delete(id);
   blocked.delete(id);
+}
+
+// ---- Markdown viewer / editor (Tools panel) ----
+
+// The editor is a normal tab showing ui/markdown.html. The session preload gives that one page a file
+// bridge (see yt-preload.js); it can only read and write Markdown or text files.
+const MD_PAGE = pathToFileURL(uiFile("markdown.html")).href;
+const MD_EXT = /\.(md|markdown|mdown|mkd|txt)$/i;
+const MD_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown", "mdown", "mkd", "txt"] }];
+const MD_MAX = 5 * 1024 * 1024;
+const mdAllowed = new Set(); // files this session opened or saved: the only ones the editor may write
+
+const mdRemember = p => {
+  config.recentMd = [p, ...(config.recentMd || []).filter(x => x !== p)].slice(0, 8);
+  saveConfig();
+};
+
+function mdRead(p) {
+  p = path.resolve(String(p || ""));
+  if (!MD_EXT.test(p)) return { error: "Only Markdown or text files can be opened here." };
+  try {
+    const st = fs.statSync(p);
+    if (!st.isFile()) return { error: "That isn't a file." };
+    if (st.size > MD_MAX) return { error: "This file is larger than 5 MB." };
+    const text = fs.readFileSync(p, "utf8");
+    mdAllowed.add(p);
+    mdRemember(p);
+    return { path: p, text };
+  } catch (e) {
+    return { error: e.code === "ENOENT" ? "File not found." : "Couldn't read this file." };
+  }
+}
+
+function mdWrite(p, text) {
+  if (typeof text !== "string" || text.length > 2 * MD_MAX) return { error: "Nothing to save, or the document is too large." };
+  try {
+    const tmp = `${p}.alcove-tmp`;
+    fs.writeFileSync(tmp, text, "utf8");
+    fs.renameSync(tmp, p); // never leaves a half-written file behind
+    mdAllowed.add(p);
+    mdRemember(p);
+    return { path: p };
+  } catch { return { error: "Couldn't save the file. Check that the folder is writable." }; }
+}
+
+ipcMain.handle("alcove-md", async (e, op, a, b) => {
+  if (!e.senderFrame || e.senderFrame.url.split(/[?#]/)[0] !== MD_PAGE) throw new Error("forbidden");
+  if (op === "read") return mdRead(a);
+  if (op === "open") {
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: MD_FILTERS, defaultPath: app.getPath("documents") });
+    return canceled || !filePaths[0] ? null : mdRead(filePaths[0]);
+  }
+  if (op === "save") {
+    const p = path.resolve(String(a || ""));
+    return mdAllowed.has(p) && MD_EXT.test(p) ? mdWrite(p, b) : { error: "Use Save As to choose where this goes." };
+  }
+  if (op === "saveAs") {
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      defaultPath: path.join(app.getPath("documents"), String(a || "Untitled.md").replace(/[\\/:*?"<>|]+/g, "-")),
+      filters: MD_FILTERS,
+    });
+    if (canceled || !filePath) return null;
+    return mdWrite(MD_EXT.test(filePath) ? filePath : `${filePath}.md`, b);
+  }
+  throw new Error("unknown operation");
+});
+
+// A .md file opened in a tab (typed, dropped, or from a link) shows in the editor, in view mode.
+const mdFileOfUrl = u => {
+  try {
+    const x = new URL(u);
+    return x.protocol === "file:" && /\.(md|markdown|mdown|mkd)$/i.test(x.pathname) ? fileURLToPath(x) : null;
+  } catch { return null; }
+};
+
+// ---- page helpers (Tools panel) ----
+
+// Images on the page that are big enough to matter (icons and tracking pixels are skipped).
+async function pageImages(id) {
+  const wc = wcOf(id);
+  if (!wc) return [];
+  const list = await wc.executeJavaScript(`(() => {
+    const out = new Map();
+    const add = (u, w, h) => { try { u = new URL(u, location.href).href; } catch { return; } if (/^https?:/.test(u) && !out.has(u)) out.set(u, { url: u, w, h }); };
+    for (const i of document.images) if (i.naturalWidth >= 120 && i.naturalHeight >= 120) add(i.currentSrc || i.src, i.naturalWidth, i.naturalHeight);
+    const og = document.querySelector('meta[property="og:image"]');
+    if (og && og.content) add(og.content, 0, 0);
+    return [...out.values()].slice(0, 300);
+  })()`).catch(() => []);
+  return Array.isArray(list) ? list : [];
+}
+
+const IMAGE_EXT = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif", "image/avif": ".avif", "image/svg+xml": ".svg" };
+
+// Saves every image from pageImages into <downloads>/Alcove images/<site> <time>/.
+async function saveImages(id) {
+  const wc = wcOf(id);
+  const images = await pageImages(id);
+  if (!wc || !images.length) return { saved: 0, total: 0, dir: null };
+  const d = new Date(), p2 = n => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}${p2(d.getMinutes())}`;
+  const dir = path.join(downloadDir(), "Alcove images", `${hostKey(wc.getURL()) || "page"} ${stamp}`);
+  fs.mkdirSync(dir, { recursive: true });
+  const referer = wc.getURL();
+  let saved = 0, next = 0;
+  const worker = async () => {
+    while (next < images.length) {
+      const i = next++;
+      try {
+        const u = new URL(images[i].url);
+        const res = await wc.session.fetch(u.href, { headers: { referer } });
+        if (!res.ok) continue;
+        const type = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+        const ext0 = path.extname(u.pathname).toLowerCase();
+        const ext = IMAGE_EXT[type] || (/^\.(jpe?g|png|webp|gif|avif|svg)$/.test(ext0) ? ext0 : ".jpg");
+        const base = path.basename(u.pathname, path.extname(u.pathname)).replace(/[^\w.-]+/g, "_").slice(0, 60) || "image";
+        fs.writeFileSync(path.join(dir, `${String(i + 1).padStart(2, "0")}-${base}${ext}`), Buffer.from(await res.arrayBuffer()));
+        saved++;
+      } catch {}
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  if (saved) shell.openPath(dir);
+  return { saved, total: images.length, dir };
 }
 
 // ---- screenshots ----
@@ -1379,7 +1623,7 @@ function openExtPopup(id) {
   if (!page) throw new Error("this extension has no popup");
   closeExtPopup();
   const { width, height } = win.getContentBounds();
-  const left = Math.round(contentLeft);
+  const left = clearLeft();
   extPopup = new WebContentsView({
     webPreferences: { partition: webPartition(config.activeProfile), sandbox: true, contextIsolation: true },
   });
@@ -1571,7 +1815,7 @@ function hidePalette() {
 function showPalette() {
   hidePalette();
   const { width, height } = win.getContentBounds();
-  const left = collapsed ? 0 : SIDEBAR_W;
+  const left = dockedLeft();
   const w = Math.min(Math.max(width - left - 40, 300), 580);
   const x = left + Math.max((width - left - w) / 2, 0);
   palette = new WebContentsView({
@@ -1595,6 +1839,7 @@ function createUi() {
     webPreferences: {
       preload: PRELOAD, contextIsolation: true, sandbox: true,
       partition: uiPartition(config.activeProfile),
+      backgroundThrottling: false, // the Tools panel's timers and time tracking keep ticking in the background
     },
   });
   ui.setBackgroundColor("#00000000"); // lets the glass show through when it's on
@@ -1603,6 +1848,7 @@ function createUi() {
   win.contentView.addChildView(ui);
   ui.webContents.once("did-finish-load", () => {
     perf("sidebar: did-finish-load");
+    sidebarState(); // tells the sidebar page whether it floats over the page
     introPeek();
     // Links handed over by the OS before the sidebar was ready.
     setTimeout(() => { for (const u of pendingUrls.splice(0)) send("new-tab-request", { url: u }); }, 800);
@@ -1616,7 +1862,7 @@ function createUi() {
   ui.webContents.loadFile(uiFile("index.html"));
   sidebarX = collapsed ? HIDE_X : 0;
   uiRadius = -1;
-  contentLeft = collapsed ? 0 : SIDEBAR_W;
+  contentLeft = dockedLeft();
   peeking = false;
   layout();
 }
@@ -1706,6 +1952,36 @@ const commands = {
   peek_open_tab: () => { setImmediate(peekToTab); },
   pip: ({ id }) => pictureInPicture(wcOf(id)),
   copy_text: ({ text }) => clipboard.writeText(String(text)),
+  // Tools panel
+  md_url: () => MD_PAGE,
+  md_recent: () => (config.recentMd || []).filter(p => fs.existsSync(p)),
+  notify: ({ title, body }) => {
+    if (Notification.isSupported()) new Notification({ title: String(title || "").slice(0, 80), body: String(body || "").slice(0, 200) }).show();
+  },
+  activity: () => ({ focused: !!win && !win.isDestroyed() && win.isFocused(), idle: powerMonitor.getSystemIdleTime() }),
+  focus_mode: ({ minutes, sites }) => {
+    const m = Number(minutes);
+    if (!(m > 0)) { focus = null; return null; }
+    const list = (Array.isArray(sites) ? sites : [])
+      .map(s => String(s).toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/[\/?#].*$/, ""))
+      .filter(s => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(s));
+    focus = { until: Date.now() + Math.min(m, 480) * 60000, sites: list };
+    return { until: focus.until, sites: list };
+  },
+  focus_state: () => { const f = focusActive(); return f ? { until: f.until, sites: f.sites } : null; },
+  eyedropper: async ({ id }) => {
+    const wc = wcOf(id);
+    if (!wc) return null;
+    closeTools(); // the picker samples the screen, so the Tools page can't be covering the tab
+    send("toast", { text: "Click anywhere to pick a color. Esc cancels.", ms: 4000 });
+    try {
+      const hex = await wc.executeJavaScript("new EyeDropper().open().then(r => r.sRGBHex)", true);
+      if (hex) { clipboard.writeText(hex); send("toast", { text: `${hex} copied` }); }
+      return hex || null;
+    } catch { return null; } // cancelled with Esc, or the page can't be sampled
+  },
+  page_images: ({ id }) => pageImages(id),
+  save_images: ({ id }) => saveImages(id),
 
   // Settings
   get_app_settings: () => S(),
@@ -1735,11 +2011,9 @@ const commands = {
   get_app_info: () => ({
     version: app.getVersion(), electron: process.versions.electron, chrome: process.versions.chrome,
     platform: process.platform, packaged: app.isPackaged, isDefault: app.isDefaultProtocolClient("https"),
-    restartNeeded: process.platform === "darwin" && wantsClear() !== windowIsClear,
-    clearActive: windowIsClear && wantsClear(),
+    clearActive: wantsClear(),
     downloadDir: downloadsFolder(), adblock: config.adblock, sponsorBlock: config.sponsorBlock,
   }),
-  relaunch: () => { app.relaunch(); app.quit(); },
   set_default_browser: () => {
     if (!app.isPackaged) return { ok: false, reason: "Only the installed app can become the default browser." };
     const ok = app.setAsDefaultProtocolClient("http") && app.setAsDefaultProtocolClient("https");
@@ -1765,7 +2039,11 @@ const commands = {
     for (const v of tabs.values()) if (hostKey(v.webContents.getURL()) === host) applyDark(v.webContents, false);
   },
   open_settings: ({ section } = {}) => openSettings(section),
-  close_settings: () => { setImmediate(closeSettings); },
+  close_settings: () => { setImmediate(() => { closeSettings(); closeTools(); }); }, // choosing a tab shows that tab
+  open_tools: ({ tab } = {}) => { setImmediate(() => openTools(tab)); },
+  close_tools: () => { setImmediate(closeTools); },
+  toggle_tools: () => { setImmediate(() => (toolsView ? closeTools() : openTools())); },
+  tools_op: ({ op, args }) => { send("tools-op", { op, args }); }, // the sidebar runs the Tools engine
   mute_tab: ({ id }) => {
     const wc = wcOf(id);
     if (!wc) return null;
@@ -1910,7 +2188,7 @@ const commands = {
 };
 
 const fromOurPages = e =>
-  [ui, palette, region, shotView, peekBackdrop, divider, strip, settingsView].some(v => v && e.sender === v.webContents);
+  [ui, palette, region, shotView, peekBackdrop, divider, strip, settingsView, toolsView].some(v => v && e.sender === v.webContents);
 
 ipcMain.handle("invoke", (e, cmd, args) => {
   if (!fromOurPages(e)) throw new Error("forbidden");
@@ -1964,6 +2242,7 @@ function buildMenu() {
     ] },
     { label: "View", submenu: [
       { label: "Toggle Sidebar", accelerator: "CmdOrCtrl+S", click: toggleSidebar },
+      item("tools", "Show Tools", "CmdOrCtrl+Shift+U"),
       { type: "separator" },
       item("reload", "Reload", "CmdOrCtrl+R"),
       item("back", "Back", "CmdOrCtrl+["),
@@ -2032,8 +2311,7 @@ app.whenReady().then(() => {
     width: 1280, height: 800, minWidth: 640, minHeight: 400,
     title: p.id === "default" ? "Alcove" : `Alcove — ${p.name}`,
     backgroundColor: S().glass ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#1d1d20" : "#ececef",
-    ...(wantsClear() ? { transparent: true }
-      : process.platform === "darwin" && S().glass ? { vibrancy: "sidebar", visualEffectState: "active" } : {}),
+    ...(process.platform === "darwin" && S().glass ? { vibrancy: glassMaterial(), visualEffectState: "active" } : {}),
     autoHideMenuBar: true,
     // No title bar: window controls live in the sidebar (native lights on macOS, drawn ones elsewhere).
     ...(process.platform === "darwin"
@@ -2046,7 +2324,6 @@ app.whenReady().then(() => {
     buttonsShown = false;
     win.on("leave-full-screen", () => { buttonsShown = null; }); // macOS may restore them; set again
   }
-  windowIsClear = wantsClear();
   if (process.platform === "win32") applyGlass();
   createUi();
   createStrip();

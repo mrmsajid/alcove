@@ -56,6 +56,18 @@ const COMMANDS = [
   ["extensions", "Show Extensions"],
   ["browse-extensions", "Browse Chrome Web Store Extensions"],
   ["import", "Import from Browser (Chrome, Edge, Brave, Arc)"],
+  ["tools", "Show Tools", "Mod+Shift+U", "timer stopwatch pomodoro clock notes focus time tracker"],
+  ["pomodoro", "Start Pomodoro (25 min)", "", "timer focus work"],
+  ["focus-mode", "Start Focus Mode (25 min)", "", "block distractions sites concentrate"],
+  ["end-focus", "End Focus Mode", "", "unblock"],
+  ["world-clock", "Show World Clock", "", "time zones islamabad manila michigan"],
+  ["notes", "Show Notes", "", "scratchpad write"],
+  ["markdown-open", "Open Markdown File…", "", "md edit view read document"],
+  ["markdown-new", "New Markdown Document", "", "md write edit"],
+  ["color-picker", "Pick a Color from the Page", "", "eyedropper hex"],
+  ["download-images", "Download All Images on This Page", "", "save pictures photos"],
+  ["copy-asin", "Copy Amazon ASIN", "", "product amazon keepa"],
+  ["clean-link", "Copy Link Without Tracking", "", "utm clean url share"],
   ["settings", "Settings", "Mod+,", "preferences options search engine downloads theme"],
 ];
 

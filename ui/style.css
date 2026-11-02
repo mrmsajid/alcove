@@ -376,3 +376,66 @@ body.liquid .bottom .icon:hover, body.liquid .top .icon:hover {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / calc(.35 * var(--shine)));
 }
 body.liquid.overlay { box-shadow: inset 0 1px 0 rgb(255 255 255 / calc(.25 * var(--shine))), inset 0 0 0 1px rgb(255 255 255 / calc(.10 * var(--shine))); }
+
+/* ---- Tools panel ---- */
+#open-tools.running { width: auto; padding: 0 7px; gap: 5px; color: var(--accent); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#tools-chip { display: none; }
+#open-tools.running #tools-chip { display: inline; }
+.b-right { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+textarea, select {
+  width: 100%; background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 11px; font: inherit; outline: none; user-select: text; resize: vertical;
+}
+textarea:focus, select:focus { border-color: var(--accent); }
+.t-tabs { display: flex; gap: 2px; padding: 2px; background: var(--active); border-radius: 10px; flex: none; }
+.t-tab { flex: 1; padding: 5px 0; border-radius: 8px; color: var(--muted); font-size: 12px; }
+.t-tab:hover { background: transparent; color: var(--text); }
+.t-tab.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px #0003; }
+.t-view { display: flex; flex-direction: column; gap: 8px; padding: 8px 0 4px; }
+.t-card { display: flex; flex-direction: column; gap: 8px; padding: 11px; border: 1px solid var(--border); border-radius: 12px; background: var(--tile, var(--active)); }
+.t-title { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.t-sub { color: var(--muted); font-size: 12px; }
+.t-note { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+.t-big { font: 600 28px/1.1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: -.02em; user-select: text; }
+.t-btns { display: flex; gap: 6px; }
+.t-btns.wrap { flex-wrap: wrap; }
+.t-btn { padding: 5px 11px; border-radius: 8px; background: var(--active); color: var(--text); font-size: 12.5px; }
+.t-btn:hover { background: var(--hover); filter: brightness(1.15); }
+.t-btn.primary { background: var(--accent); color: #fff; }
+.t-btn.primary:hover { background: var(--accent); filter: brightness(1.1); }
+.t-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.t-chip { padding: 4px 9px; border-radius: 999px; background: var(--active); color: var(--text); font-size: 12px; }
+.t-chip.on { background: var(--accent); color: #fff; }
+.t-row { display: flex; gap: 6px; align-items: center; }
+.t-row input { flex: 1; min-width: 0; padding: 6px 10px; }
+.t-row input.t-min { flex: none; width: 64px; }
+.t-notes { min-height: 190px; line-height: 1.45; }
+.t-bars { display: flex; flex-direction: column; gap: 4px; }
+.t-bar { position: relative; display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 7px; overflow: hidden; font-size: 12px; }
+.t-bar .fill { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 7px; }
+.t-bar .n { position: relative; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-bar .v { position: relative; color: var(--muted); font-variant-numeric: tabular-nums; }
+.t-bar.plain { background: var(--active); }
+.z-list { display: flex; flex-direction: column; gap: 2px; }
+.z-row { display: flex; align-items: center; gap: 9px; padding: 6px 4px; border-radius: 8px; }
+.z-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: .45; }
+.z-dot.open { background: #34c759; opacity: 1; }
+.z-main { flex: 1; min-width: 0; }
+.z-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.z-sub { color: var(--muted); font-size: 11.5px; }
+.z-time { font: 600 15px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+
+/* ---- glass over a page: the app sends a small capture of the page under the sidebar (see updateBackdrop in
+   main.js); it is blurred here and tinted, so the floating sidebar frosts what's actually behind it ---- */
+#glass-bg { display: none; position: absolute; inset: 0; z-index: -1; overflow: hidden; border-radius: inherit; pointer-events: none; background: var(--chrome-solid, var(--bg)); }
+#glass-img { position: absolute; inset: -28px; background-size: 100% 100%; filter: blur(var(--glass-blur, 26px)) saturate(1.7) brightness(1.04); }
+#glass-bg::after { content: ""; position: absolute; inset: 0; background: var(--chrome-tint, transparent); }
+body.glass.overlay { position: relative; isolation: isolate; background: transparent; overflow: hidden; }
+body.glass.overlay #glass-bg { display: block; }
+
+/* Adaptive glass over a page: light tint and dark text on a bright page, dark tint and light text on a dark one. */
+body.glass.overlay.on-light { --text: #1c1c1f; --muted: #53535d; --border: #00000022; --hover: #00000010; --active: #00000017; --tile: #0000000e; --surface: #ffffffa6; color-scheme: light; }
+body.glass.overlay.on-dark { --text: #f3f3f6; --muted: #b6b6c0; --border: #ffffff24; --hover: #ffffff15; --active: #ffffff1e; --tile: #ffffff14; --surface: #ffffff1e; color-scheme: dark; }
+body.glass.overlay.on-light #glass-bg::after { background: rgb(255 255 255 / var(--tint-a, .5)); }
+body.glass.overlay.on-dark #glass-bg::after { background: rgb(24 24 27 / var(--tint-a, .5)); }
+body.glass-clear.on-light { text-shadow: 0 1px 0 rgb(255 255 255 / .4); }

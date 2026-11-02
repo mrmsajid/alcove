@@ -838,14 +838,13 @@ const hexRgb = h => {
 };
 const mixHex = (a, b, t) => "#" + hexRgb(a).map((x, i) => Math.round(x * t + hexRgb(b)[i] * (1 - t)).toString(16).padStart(2, "0")).join("");
 let sentChrome = null;
-let clearGlass = false; // the window was created see-through (Clear glass style, macOS)
-call("get_app_info").then(i => { if (i) { clearGlass = !!i.clearActive; renderChrome(); } });
 
 // When the address bar isn't being edited it shows the site in bold and the path dimmed.
 function renderAddr(t) {
   const d = $("addr-display");
   d.replaceChildren();
   if (!t) return;
+  if (/\/blocked\.html(\?|$)/.test(t.url)) { d.textContent = "Focus mode"; return; } // a site blocked by Tools › Focus mode
   try {
     const u = new URL(t.url);
     if (/^https?:$/.test(u.protocol)) {
@@ -866,10 +865,10 @@ function renderChrome() {
   document.body.classList.toggle("theme-dark", space().theme === "dark");
   const solid = mixHex("#000000", getComputedStyle(document.body).getPropertyValue("--bg"), 0);
   const glass = appSettings.glass !== false && /Mac|Windows/.test(navigator.userAgent);
-  const clear = glass && clearGlass;
+  const clear = glass && appSettings.glassStyle === "clear" && /Mac/.test(navigator.userAgent);
   const frost = Number.isFinite(appSettings.frost) ? appSettings.frost : 55;
-  // Frosted: 0 → mostly clear blur, 100 → solid. Clear glass: 0 → fully see-through, 100 → solid.
-  const alpha = Math.round((clear ? frost / 100 : 0.15 + 0.85 * frost / 100) * 100) / 100;
+  // Frosted: 0 → mostly clear blur, 100 → solid. Clear glass: 0 → just the blur, rising to solid at 100.
+  const alpha = Math.round((clear ? 0.03 + 0.87 * Math.pow(frost / 100, 1.4) : 0.15 + 0.85 * frost / 100) * 100) / 100;
   const shine = Number.isFinite(appSettings.shine) ? appSettings.shine : 40;
   document.body.classList.toggle("glass-clear", clear);
   document.body.classList.toggle("liquid", glass && shine > 0);
@@ -879,6 +878,10 @@ function renderChrome() {
   document.body.classList.toggle("glass", glass);
   document.documentElement.style.setProperty("--chrome", glass ? "transparent" : solid);
   document.documentElement.style.setProperty("--chrome-solid", solid);
+  document.documentElement.style.setProperty("--chrome-tint", glass ? chrome : solid);
+  document.documentElement.style.setProperty("--tint-a", String(alpha));
+  const blur = Number.isFinite(appSettings.blur) ? appSettings.blur : 55;
+  document.documentElement.style.setProperty("--glass-blur", `${Math.round(4 + 0.4 * blur)}px`);
   if (chrome !== sentChrome) { sentChrome = chrome; call("set_chrome_color", { color: chrome }); }
   const t = activeTab();
   $("yt-banner").hidden = !(t && YT_RE.test(t.url));
@@ -1275,6 +1278,18 @@ const actions = {
   "downloads": () => openPanel("downloads"),
   "extensions": () => openPanel("extensions"),
   "import": () => openPanel("import"),
+  "tools": () => call("toggle_tools"),
+  "world-clock": () => call("open_tools", { tab: "clocks" }),
+  "notes": () => call("open_tools", { tab: "notes" }),
+  "markdown-open": () => window.Tools.markdown("open"),
+  "markdown-new": () => window.Tools.markdown("new"),
+  "pomodoro": () => window.Tools.pomodoro(),
+  "focus-mode": () => window.Tools.focus(25),
+  "end-focus": () => window.Tools.stopFocus(),
+  "color-picker": () => window.Tools.colorPicker(),
+  "download-images": () => window.Tools.images(),
+  "copy-asin": () => window.Tools.asin(),
+  "clean-link": () => window.Tools.cleanLink(),
   "download-video": () => downloadVideo("video"),
   "browse-extensions": browseStore,
   "new-space": newSpace,
@@ -1330,6 +1345,17 @@ listen("palette-action", ({ payload: p }) => {
   else if (p.type === "reopen") reopenClosed(p.url);
   else if (p.type === "toast") toast(p.text);
 });
+// While the sidebar floats over a page, the app sends a small picture of the page under it for the glass.
+// It also says how bright that part of the page is: over a bright page the glass turns light with dark text,
+// over a dark one it stays dark with light text (with some hysteresis, so it doesn't flicker around the middle).
+let glassLight = false;
+listen("glass-backdrop", ({ payload }) => {
+  $("glass-img").style.backgroundImage = `url(${payload.url})`;
+  if (glassLight ? payload.lum < 0.42 : payload.lum > 0.58) glassLight = !glassLight;
+  document.body.classList.toggle("on-light", glassLight);
+  document.body.classList.toggle("on-dark", !glassLight);
+});
+listen("toast", ({ payload }) => toast(payload.text, payload.ms || 1600));
 listen("tab-audio", ({ payload: p }) => { audio.set(p.id, { audible: p.audible, muted: p.muted }); render(); });
 
 listen("new-tab-request", ({ payload }) => {
@@ -1351,7 +1377,7 @@ listen("split-ratio", ({ payload }) => { if (space().split) space().split.ratio 
 listen("window-buttons", ({ payload }) => document.body.classList.toggle("winctl-shown", !!payload.visible));
 
 listen("sidebar-state", ({ payload: p }) => {
-  document.body.classList.toggle("overlay", p.collapsed && p.peek);
+  document.body.classList.toggle("overlay", p.floating ?? (p.collapsed && p.peek));
   $("toggle-sidebar").title = p.collapsed ? "Show sidebar" : "Hide sidebar";
 });
 

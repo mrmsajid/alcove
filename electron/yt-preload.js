@@ -5,7 +5,7 @@
 // ad data (deleting it, emptying it, or keeping only the heartbeat) made YouTube hold the real video
 // back ~5-7 s on every load, sometimes indefinitely. Skipping leaves the data intact: videos start in
 // ~1.5 s and an ad, when one is served, is gone within a fraction of a second.
-const { contextBridge, webFrame, ipcRenderer } = require("electron");
+const { contextBridge, webFrame, ipcRenderer, webUtils } = require("electron");
 
 // Executed inside YouTube's own page (main world), before any of its scripts.
 function youtubePage(sponsorBlock) {
@@ -116,4 +116,23 @@ if (window === window.top && YT.test(location.hostname)) {
     if (contextBridge.executeInMainWorld) contextBridge.executeInMainWorld({ func: youtubePage, args: [!!mode.sponsor] });
     else webFrame.executeJavaScript(`(${youtubePage.toString()})(${!!mode.sponsor})`);
   }
+}
+
+// The Markdown editor page (ui/markdown.html) is the only page that gets a file bridge. main.js checks that
+// the caller is that page and that the path is a Markdown or text file before reading or writing anything.
+if (window === window.top && location.protocol === "file:" && /\/ui\/markdown\.html$/.test(location.pathname)) {
+  const md = (op, a, b) => ipcRenderer.invoke("alcove-md", op, a, b);
+  contextBridge.exposeInMainWorld("alcoveMd", {
+    open: () => md("open"),
+    read: p => md("read", p),
+    save: (p, text) => md("save", p, text),
+    saveAs: (name, text) => md("saveAs", name, text),
+  });
+  // A file dropped on the page opens in the editor (the page gets the path, never the File object).
+  window.addEventListener("dragover", e => e.preventDefault(), true);
+  window.addEventListener("drop", e => {
+    e.preventDefault();
+    const f = e.dataTransfer && e.dataTransfer.files[0];
+    if (f) window.postMessage({ __alcoveMdDrop: webUtils.getPathForFile(f) }, "*");
+  }, true);
 }

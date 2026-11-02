@@ -89,17 +89,18 @@ const SECTIONS = [
       h("div", { class: "swatches" }, ...["#76767f", "#7c8cff", "#5fd6a0", "#ff7c9c", "#ffb86b", "#c27cff", "#6cc7ff"].map(c =>
         h("button", { class: "swatch" + (S.accent === c ? " on" : ""), style: `background:${c}`, title: c, on: { click: () => set("accent", c) } })))),
     row("Glass sidebar", "See-through, frosted sidebar and window frame (macOS vibrancy, Windows 11 acrylic).", toggle(S.glass, v => set("glass", v))),
-    S.glass ? row("Glass style", MAC ? "Frosted blurs what's behind the window. Clear shows it as it is (applies after a restart)."
-      : "Frosted (acrylic). Clear glass isn't available on Windows, which can't resize fully transparent windows.",
-      seg(S.glassStyle, MAC ? [["frosted", "Frosted"], ["clear", "Clear"]] : [["frosted", "Frosted"]], async v => { await set("glassStyle", v); await refreshInfo(); })) : null,
-    S.glass && info.restartNeeded ? row("Restart to apply", "The window needs to reopen to switch glass style. Your tabs are kept.",
-      h("button", { class: "btn primary", on: { click: () => invoke("relaunch") } }, "Restart now")) : null,
-    S.glass ? row(S.glassStyle === "clear" && MAC ? "Tint" : "Frost", S.glassStyle === "clear" && MAC ? "0 is completely transparent; higher adds a tint for readability." : "How much the glass is tinted: lower shows more of what's behind the window.", rangeSlider("frost", "Clear", "Solid")) : null,
+    S.glass ? row("Glass style", MAC ? "Frosted is a soft, tinted blur. Clear is a lighter blur with almost no tint, so what's behind the window shows through."
+      : "Frosted (acrylic). Clear glass is macOS only.",
+      seg(S.glassStyle, MAC ? [["frosted", "Frosted"], ["clear", "Clear"]] : [["frosted", "Frosted"]], v => set("glassStyle", v))) : null,
+    S.glass ? row(S.glassStyle === "clear" && MAC ? "Tint" : "Frost", S.glassStyle === "clear" && MAC ? "0 is just the blur; higher adds a tint for readability." : "How much the glass is tinted: lower shows more of what's behind the window.", rangeSlider("frost", "Clear", "Solid")) : null,
+    S.glass ? row("Blur", "How softly the glass blurs the page behind the sidebar.", rangeSlider("blur", "Sharp", "Soft")) : null,
     S.glass ? row("Shine", "Specular edges and a faint color fringe on glass controls, like Liquid Glass.", rangeSlider("shine", "Off", "Strong")) : null,
     row("Sidebar text size", null, seg(S.textSize, [["small", "Small"], ["default", "Default"], ["large", "Large"]], v => set("textSize", v))),
     row("Page zoom", "Default zoom for new pages. ⌘+ / ⌘− still change one tab.",
       h("select", { on: { change: e => set("defaultZoom", parseFloat(e.target.value)) } },
         ...[0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2].map(z => h("option", { value: z, selected: Math.abs(S.defaultZoom - z) < 0.001 }, `${Math.round(z * 100)}%`)))),
+    row("Sidebar", "Overlay floats the sidebar over the page, which keeps its full width. Docked moves the page aside to make room.",
+      seg(S.sidebarMode, [["overlay", "Overlay"], ["docked", "Docked"]], v => set("sidebarMode", v))),
     row("Compact layout", "Remove the margin and rounded corners around pages.", toggle(S.compact, v => set("compact", v))),
   )]],
   ["downloads", "Downloads", () => [card(
@@ -163,7 +164,7 @@ const SECTIONS = [
       ["Find in page", "Mod+F"], ["Bookmark this page", "Mod+D"], ["Hide / show sidebar", "Mod+S"],
       ["Next / previous space", MAC ? "Mod+Alt+→ / ←" : "Ctrl+Alt+→ / ←"], ["Go to space 1–9", MAC ? "Ctrl+1 … 9" : "Alt+1 … 9"],
       ["Screenshot area / visible / full page", "Mod+Shift+4 / Mod+Shift+S / Mod+Alt+Shift+S"], ["Picture in picture", "Mod+Alt+P"],
-      ["Download YouTube video", "Mod+Shift+D"], ["Zoom in / out / reset", "Mod+= / Mod+- / Mod+0"], ["Settings", "Mod+,"],
+      ["Download YouTube video", "Mod+Shift+D"], ["Tools: timers, clocks, notes", "Mod+Shift+U"], ["Zoom in / out / reset", "Mod+= / Mod+- / Mod+0"], ["Settings", "Mod+,"],
       ["Open link in background", "Mod+click"], ["Open link in Peek", "Shift+click"],
     ];
     return [card(h("div", { class: "keys" }, ...list.flatMap(([what, keys]) => [h("span", { "data-find": what }, what), h("kbd", {}, k(keys))])))];
