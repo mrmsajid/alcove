@@ -711,6 +711,29 @@ async function initBlocker() {
 
 // ---- tabs ----
 
+// Sign-in popups. A page that opens a sized popup expects it to be a real window: the popup reports back to its
+// opener (postMessage) and closes itself (window.close()). A tab made from just the popup's URL has no opener, so
+// "Sign in with Google" (ClickUp, and most sites) ended on a blank page. The popup is a small window in the same
+// session (the same cookies), centred on the app, with no menu bar.
+function popupWindow(features) {
+  const n = k => { const m = new RegExp(`(?:^|[,\\s])${k}\\s*=\\s*(\\d+)`, "i").exec(features); return m ? Number(m[1]) : 0; };
+  const width = Math.min(Math.max(n("width") || 500, 360), 1100);
+  const height = Math.min(Math.max(n("height") || 650, 320), 900);
+  return {
+    action: "allow",
+    overrideBrowserWindowOptions: {
+      parent: win, width, height, show: true, autoHideMenuBar: true,
+      minimizable: false, maximizable: false, fullscreenable: false,
+      backgroundColor: nativeTheme.shouldUseDarkColors ? "#1d1d20" : "#ffffff",
+    },
+  };
+}
+function popupCreated(popup) {
+  popup.setMenuBarVisibility(false);
+  popup.center();
+  popup.webContents.setWindowOpenHandler(({ url: u }) => { send("new-tab-request", { url: u }); return { action: "deny" }; });
+}
+
 function openTab(id, url) {
   const view = new WebContentsView({
     webPreferences: {
@@ -754,14 +777,17 @@ function openTab(id, url) {
   });
   wc.on("did-navigate-in-page", (_e, u, isMainFrame) => { if (isMainFrame) send("tab-url", { id, url: u }); });
   wc.on("page-title-updated", (_e, title) => send("tab-title", { id, title }));
-  // Cmd/Ctrl+click opens a background tab; Shift+click (a featureless new window) opens Peek.
-  // Popups that ask for a size (sign-in windows, for example) still become normal tabs.
+  // Cmd/Ctrl+click opens a background tab; Shift+click (a featureless new window) opens Peek. A popup that asks
+  // for a size ("Sign in with Google" and other sign-in flows) gets a real window (see popupWindow); other links
+  // and window.open calls become tabs.
   wc.setWindowOpenHandler(({ url: u, disposition, features }) => {
+    if (disposition === "new-window" && features) return popupWindow(features);
     if (disposition === "background-tab") send("new-tab-request", { url: u, background: true, from: id });
-    else if (disposition === "new-window" && !features) openPeek(u);
+    else if (disposition === "new-window") openPeek(u);
     else send("new-tab-request", { url: u, from: id });
     return { action: "deny" };
   });
+  wc.on("did-create-window", popupCreated);
   wc.on("context-menu", (_e, p) => { const menu = pageMenu(id, wc, p); if (menu.items.length) menu.popup(); });
   wc.on("devtools-opened", () => { if (isOwnPage(wc.getURL())) wc.closeDevTools(); });
   wc.on("will-navigate", (e, u) => { if (isOwnSource(u)) e.preventDefault(); });

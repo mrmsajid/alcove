@@ -329,6 +329,12 @@ web session (`applyBlocking`).
   and tracks which one is on screen in `shownId`.
 - **Split view** shows two tab views side by side with a draggable `divider` view; `layout()` handles the bounds.
 - **Peek** (Shift-click a link) is a floating preview window with a backdrop.
+- **Links and `window.open`** are routed by `setWindowOpenHandler` in `openTab`: Cmd/Ctrl+click opens a background
+  tab, Shift+click opens Peek, and everything else becomes a tab, **except a popup that asks for a size**
+  (`window.open(url, name, "width=500,height=600")`). That one gets a real child window in the same session
+  (`popupWindow`, `popupCreated`), because sign-in popups ("Sign in with Google", most OAuth flows) report back to
+  their opener with `postMessage` and then call `window.close()`. A tab made from just the popup's URL has no opener,
+  so the sign-in ended on a blank page. A popup's own links open as tabs.
 - **Palette** (`ui/palette.js`): fuzzy and frecency ranking, site shortcuts (`yt …`), calculator, unit and
   currency conversion, ASIN links, QR code, page actions. A new command needs a row in `COMMANDS`
   (`palette.js`) and a handler in the sidebar's `actions` table (`app.js`).
@@ -631,6 +637,10 @@ Settings changes applying live; quit and relaunch (tabs restored).
 - **Test instances share the single-instance lock and the storage lock** of their data folder. Always give a test
   its own `ALCOVE_USER_DATA`; a test that shares the real profile slows startup (a storage `LOCK` wait) and can
   corrupt your session.
+- **Anything that needs `window.opener` must stay a window.** Electron cannot turn a popup into a tab and keep the
+  opener, so `window.open` calls with a size are real windows (6.1). To test a sign-in flow without a real account,
+  serve two local pages: one that calls `window.open('/popup', 'x', 'width=480,height=620')`, and a popup that sends
+  `opener.postMessage(...)` and `window.close()`. Run the CDP call with `userGesture: true`.
 - **The native `prompt()` does not exist in Electron.** The editor uses its own small popover (`ask()`).
 - **`webContents.capturePage` on an offscreen or hidden view returns an empty image.** `updateBackdrop` skips
   those cases.
