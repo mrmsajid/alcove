@@ -268,7 +268,7 @@ written to `yt-diagnostics.log`).
 | Where | What | Written by |
 | --- | --- | --- |
 | `<userData>/config.json` | the main process's settings and lists (see 5.2) | `main.js` (`saveConfig`) |
-| `<userData>/adblock-engine.bin` | cached ad-block rules; rebuilt when older than a day | ad blocker |
+| `<userData>/adblock-engine.bin` | cached ad-block rules; rebuilt when older than a day (the old copy is kept aside and used if the lists can't be fetched). Not loaded at all while blocking is off | ad blocker |
 | `<userData>/bin/` | `yt-dlp` and `ffmpeg`, downloaded on first use of the video downloader | `main.js` |
 | `<userData>/yt-diagnostics.log` | stuck-ad reports | `yt-preload.js` via main |
 | `<userData>/extensions/<profile id>/` | unpacked Chrome extensions, one folder per profile | `main.js` |
@@ -334,6 +334,14 @@ web session (`applyBlocking`).
   and tracks which one is on screen in `shownId`.
 - **Split view** shows two tab views side by side with a draggable `divider` view; `layout()` handles the bounds.
 - **Peek** (Shift-click a link) is a floating preview window with a backdrop.
+- **Staying up.** A page whose process dies is reloaded (`render-process-gone` -> `tab-crashed`); if the sidebar's own process dies its
+  tabs are closed quietly and it reloads and reopens the active tab. Asking to open a tab that already has a view just shows it,
+  and the sidebar marks a tab open before the call, so two activations at once can't make two views. Own-page tabs are saved as
+  `file://` addresses, which die if the app moves or is reinstalled elsewhere, so `rebaseOwn` in `app.js` points them at where the
+  pages are now. `tab-url` carries `inPage` for same-document changes (maps, scroll positions): they update the address but are not
+  history. A site's icon is requested once per origin (`favCache`; sites without one are not asked again for ten minutes).
+- **Idle cost.** The cursor loop polls every 50 ms while the window is focused or the pointer is over it and every 250 ms
+  otherwise; the glass backdrop is only captured while the window has the focus.
 - **Quitting or closing the window** with unsaved Markdown edits asks first (`guardClose`, `dirtyNotes`, `confirmQuit`: the
   editor answers through `window.__alcoveDirty()`, Cancel is the default). The editor also keeps those edits as a draft
   (6.6), so Quit means "come back to it later", not "lose it".

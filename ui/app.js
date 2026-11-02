@@ -30,9 +30,18 @@ let state = read(STATE_KEY, null) || {
   spaces: [{ id: uid(), name: "Space 1", color: COLORS[0], tabs: [], active: null }],
   space: 0,
 };
+// Own pages (the start page, the Markdown editor, the Focus mode page) are saved as the file:// address they had at the time.
+// If the app has moved since (reinstalled, updated into another folder, run from a different place) that address is dead, so
+// they are pointed at where the pages are now.
+const OWN_PAGE = /\/ui\/(newtab|markdown|blocked)\.html([?#].*)?$/;
+const rebaseOwn = u => {
+  const m = typeof u === "string" && u.startsWith("file:") ? OWN_PAGE.exec(u) : null;
+  return m ? new URL(`${m[1]}.html${m[2] || ""}`, location.href).href : u;
+};
 for (const sp of state.spaces) {
   sp.groups ||= []; // tab groups: { id, name, color, collapsed }
   sp.split = null;  // split view isn't restored after a restart
+  for (const t of sp.tabs) { t.url = rebaseOwn(t.url); if (t.pinUrl) t.pinUrl = rebaseOwn(t.pinUrl); }
 }
 const GROUP_COLORS = ["#7c8cff", "#ff7c9c", "#5fd6a0", "#ffb86b", "#c27cff", "#6cc7ff", "#9aa0a6"];
 let renamingGroup = null; // group id whose name is being edited
@@ -168,8 +177,9 @@ async function activate(id) {
   noteRecent(id);
   const tab = activeTab();
   if (tab && !opened.has(tab.id)) {
-    await invoke("open_tab", { id: tab.id, url: tab.url });
-    opened.add(tab.id);
+    tab.url = rebaseOwn(tab.url);
+    opened.add(tab.id); // before the call, so a second activation while this one waits doesn't open the tab twice
+    try { await invoke("open_tab", { id: tab.id, url: tab.url }); } catch (e) { opened.delete(tab.id); throw e; }
     if (tab.zoom && tab.zoom !== 1) invoke("zoom", { id: tab.id, factor: tab.zoom });
   } else {
     await invoke("switch_tab", { id: tab ? tab.id : null });
@@ -653,6 +663,9 @@ async function setZoom(delta) {
 
 // ---- rendering ----
 
+// A site's icon is asked for once per origin: the list is redrawn on every title or address change, and each redraw used to
+// request every tab's icon again (and again for sites that have none). Sites without one are not asked again for ten minutes.
+const favCache = new Map(); // origin -> { ok: boolean, at: ms }
 function favNode(t) {
   const span = document.createElement("span");
   span.className = "fav";
@@ -660,8 +673,11 @@ function favNode(t) {
   try {
     const u = new URL(t.url);
     if (/^https?:$/.test(u.protocol)) {
+      const known = favCache.get(u.origin);
+      if (known && !known.ok && Date.now() - known.at < 600000) return span;
       const img = new Image();
-      img.onload = () => span.replaceChildren(img);
+      img.onload = () => { favCache.set(u.origin, { ok: true, at: Date.now() }); span.replaceChildren(img); };
+      img.onerror = () => favCache.set(u.origin, { ok: false, at: Date.now() });
       img.src = u.origin + "/favicon.ico";
     }
   } catch {}
@@ -1416,13 +1432,18 @@ listen("tab-url", ({ payload }) => {
   const t = findTab(payload.id);
   if (!t) return;
   t.url = payload.url;
-  recordHistory(t);
+  if (!payload.inPage) recordHistory(t); // an address that changes inside a page (a map, a scroll position) isn't a visit
   render();
+});
+listen("tab-crashed", ({ payload }) => { // a page's process died: say so and reload it
+  if (!findTab(payload.id)) return;
+  toast("A page crashed. Reloading it…", 3000);
+  setTimeout(() => call("nav_action", { id: payload.id, action: "reload" }), 600);
 });
 
 listen("tab-title", ({ payload }) => {
   const t = findTab(payload.id);
-  if (!t) return;
+  if (!t || t.title === payload.title) return; // pages that re-set the same title all the time cost nothing
   t.title = payload.title;
   const h = read(HIST_KEY, []);
   const e = h.find(x => x.url === t.url);

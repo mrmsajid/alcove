@@ -293,7 +293,7 @@ function createStrip() {
     webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
   });
   strip.setBackgroundColor("#00000000");
-  strip.webContents.loadFile(uiFile("strip.html"));
+  strip.webContents.loadFile(uiFile("strip.html")).catch(() => {});
   win.contentView.addChildView(strip);
   layout();
 }
@@ -304,7 +304,7 @@ function createCaption() {
     webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
   });
   caption.setBackgroundColor("#00000000");
-  caption.webContents.loadFile(uiFile("caption.html"));
+  caption.webContents.loadFile(uiFile("caption.html")).catch(() => {});
   win.contentView.addChildView(caption);
   caption.setVisible(false);
   const state = () => { if (!deadView(caption)) caption.webContents.send("event", "window-state", { maximized: win.isMaximized() }); };
@@ -323,7 +323,7 @@ let backdropBusy = false;
 let lastBackdrop = "";
 async function updateBackdrop() {
   if (backdropBusy || !win || win.isDestroyed() || !ui || !S().glass) return;
-  if (!floating() || (collapsed && !peeking) || Math.abs(sidebarX) > 1 || !win.isVisible() || win.isMinimized()) return;
+  if (!floating() || (collapsed && !peeking) || Math.abs(sidebarX) > 1 || !win.isVisible() || win.isMinimized() || !win.isFocused()) return;
   const v = tabs.get(shownId);
   if (deadView(v)) return;
   backdropBusy = true;
@@ -401,7 +401,13 @@ function toggleSidebar() {
 
 // Cursor polling is simpler and more reliable than a transparent hot-zone view over the page.
 function watchCursor() {
-  setInterval(() => {
+  // Polled every 50 ms while it matters (the window is focused, or the pointer is over it: peek and the window buttons), and
+  // every 250 ms otherwise, so an idle or covered window isn't woken twenty times a second.
+  let slow = false;
+  const poll = () => {
+    setTimeout(() => { try { tickCursor(); } finally { poll(); } }, slow ? 250 : 50);
+  };
+  const tickCursor = () => {
     if (extPopup && deadView(extPopup)) closeExtPopup();
     if (extPopup) {
       if (extPopup.webContents.isFocused()) extPopupFocused = true;
@@ -412,12 +418,14 @@ function watchCursor() {
     const b = win.getContentBounds();
     const inside = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
     const rel = p.x - b.x;
+    slow = !inside && !win.isFocused() && !buttonsShown && !peeking;
     windowButtons(p, b); // before the focus check: a background window's buttons work too
     if (!win.isFocused()) return;
     if (!collapsed) return;
     if (!peeking && inside && rel <= 3) peek(true);
     else if (peeking && !sidebarBusy && Date.now() > peekHoldUntil && (!inside || rel > SIDEBAR_W + 12)) peek(false);
-  }, 50);
+  };
+  poll();
 }
 
 // Window buttons are hidden until the pointer is near them. On the Mac: along the top of the sidebar while it's
@@ -791,26 +799,42 @@ function onBlocked(request) {
 
 const ENGINE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
+// Loaded only while ad blocking is on (switching it on later loads it then), so with it off nothing is fetched at start-up.
+let blockerLoading = null;
+const ensureBlocker = () => (blocker ? Promise.resolve() : (blockerLoading ||= initBlocker().finally(() => { blockerLoading = null; })));
+
 async function initBlocker() {
   perf("blocker: start");
+  const cache = path.join(app.getPath("userData"), "adblock-engine.bin");
+  let stale = "";
   try {
-    // Rules go stale quickly (YouTube changes its ads often), so rebuild the cached engine daily.
-    const cache = path.join(app.getPath("userData"), "adblock-engine.bin");
+    // Rules go stale quickly (YouTube changes its ads often), so the cached engine is rebuilt daily. The old copy is only set
+    // aside while that happens: if the lists can't be fetched (offline, a proxy that blocks them) it comes back and is used,
+    // rather than leaving the browser with no blocking at all.
     try {
-      if (Date.now() - fs.statSync(cache).mtimeMs > ENGINE_MAX_AGE_MS) fs.rmSync(cache);
-    } catch {}
+      if (Date.now() - fs.statSync(cache).mtimeMs > ENGINE_MAX_AGE_MS) { stale = `${cache}.stale`; fs.renameSync(cache, stale); }
+    } catch { stale = ""; }
     const { ElectronBlocker } = require("@ghostery/adblocker-electron");
-    blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
-      path: path.join(app.getPath("userData"), "adblock-engine.bin"),
+    // Electron's own network stack, so the system proxy and certificates apply (Node's fetch ignores them).
+    const build = () => ElectronBlocker.fromPrebuiltAdsAndTracking((url, opts) => net.fetch(url, opts), {
+      path: cache,
       read: fs.promises.readFile,
       write: fs.promises.writeFile,
     });
+    try { blocker = await build(); } catch (e) {
+      if (!stale) throw e;
+      fs.renameSync(stale, cache);
+      stale = "";
+      blocker = await build(); // from the old copy, no network
+    }
     perf("blocker: engine loaded");
     blocker.on("request-blocked", onBlocked);
     applyBlocking();
     perf("blocker: ready");
   } catch (e) {
     console.error("ad blocker unavailable:", e.message);
+  } finally {
+    if (stale) { try { fs.rmSync(stale, { force: true }); } catch {} }
   }
 }
 
@@ -853,6 +877,7 @@ function popupCreated(popup, view) {
 }
 
 function openTab(id, url) {
+  if (tabs.has(id) && !deadView(tabs.get(id))) { showOnly(id); return; } // asked twice (two activations at once): there is one view per tab
   const view = new WebContentsView({
     webPreferences: {
       partition: webPartition(config.activeProfile),
@@ -897,7 +922,8 @@ function openTab(id, url) {
     if (f) { wc.loadURL(`${MD_PAGE}?file=${encodeURIComponent(f)}`).catch(() => {}); return; }
     send("tab-url", { id, url: u });
   });
-  wc.on("did-navigate-in-page", (_e, u, isMainFrame) => { if (isMainFrame) send("tab-url", { id, url: u }); });
+  wc.on("did-navigate-in-page", (_e, u, isMainFrame) => { if (isMainFrame) send("tab-url", { id, url: u, inPage: true }); }); // (not history: maps and scroll-spy pages change the address constantly)
+  wc.on("render-process-gone", (_e, d) => { if (d.reason !== "clean-exit") send("tab-crashed", { id, reason: d.reason }); });
   wc.on("page-title-updated", (_e, title) => send("tab-title", { id, title }));
   // Cmd/Ctrl+click opens a background tab; Shift+click (a featureless new window) opens Peek. A popup that asks
   // for a size ("Sign in with Google" and other sign-in flows) gets a real window (see popupWindow); other links
@@ -950,7 +976,7 @@ function setSplit(next) {
       webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, partition: uiPartition(config.activeProfile) },
     });
     divider.setBackgroundColor("#00000000");
-    divider.webContents.loadFile(uiFile("divider.html"));
+    divider.webContents.loadFile(uiFile("divider.html")).catch(() => {});
   } else if (!split && divider) {
     win.contentView.removeChildView(divider);
     divider.webContents.close();
@@ -1077,7 +1103,7 @@ function openTools(tab) {
   win.contentView.addChildView(toolsView);
   if (floating()) raiseUi();
   placeTools();
-  toolsView.webContents.loadFile(uiFile("tools.html"), tab ? { hash: String(tab) } : undefined);
+  toolsView.webContents.loadFile(uiFile("tools.html"), tab ? { hash: String(tab) } : undefined).catch(() => {});
   toolsView.webContents.focus();
 }
 
@@ -1098,7 +1124,7 @@ function openSettings(section) {
   win.contentView.addChildView(settingsView);
   if (floating()) raiseUi();
   placeSettings();
-  settingsView.webContents.loadFile(uiFile("settings.html"), section ? { hash: String(section) } : undefined);
+  settingsView.webContents.loadFile(uiFile("settings.html"), section ? { hash: String(section) } : undefined).catch(() => {});
   settingsView.webContents.focus();
   send("settings-open", { open: true });
 }
@@ -2419,7 +2445,7 @@ function showPalette() {
   });
   placePalette();
   win.contentView.addChildView(palette);
-  palette.webContents.loadFile(uiFile("palette.html"));
+  palette.webContents.loadFile(uiFile("palette.html")).catch(() => {});
   palette.webContents.focus();
 }
 
@@ -2435,6 +2461,12 @@ function createUi() {
   });
   ui.setBackgroundColor("#00000000"); // lets the glass show through when it's on
   ui.webContents.on("will-navigate", e => e.preventDefault());
+  ui.webContents.on("render-process-gone", (_e, d) => { // the sidebar's process died: its tabs are closed and it reloads, reopening the active one
+    if (d.reason === "clean-exit" || shuttingDown) return;
+    console.error("the sidebar crashed:", d.reason);
+    for (const id of [...tabs.keys()]) closeTab(id, true);
+    setTimeout(() => { if (!deadView(ui)) ui.webContents.reload(); }, 400);
+  });
   ui.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.contentView.addChildView(ui);
   ui.webContents.once("did-finish-load", () => {
@@ -2573,6 +2605,13 @@ const commands = {
     return installFromDir(String(dir), `local-test-${path.basename(String(dir)).replace(/[^\w.-]+/g, "_")}`);
   },
   debug_peek: ({ on }) => { if (process.env.ALCOVE_TEST === "1") peek(!!on); return process.env.ALCOVE_TEST === "1"; }, // test hook: as the cursor at the left edge would
+  debug_crash: ({ what, id }) => { // test hook: kill the process behind the sidebar or a tab, as an out-of-memory crash would
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    const v = what === "sidebar" ? ui : tabs.get(id);
+    if (deadView(v)) return false;
+    v.webContents.forcefullyCrashRenderer();
+    return true;
+  },
   debug_quit: () => { if (process.env.ALCOVE_TEST === "1") setImmediate(() => app.quit()); return process.env.ALCOVE_TEST === "1"; }, // test hook: as Cmd+Q would
   debug_quit_answer: ({ answer }) => { if (process.env.ALCOVE_TEST === "1") testQuit = answer === "quit" || answer === "cancel" ? answer : ""; },
   debug_close_window: () => { if (process.env.ALCOVE_TEST === "1") win.close(); return process.env.ALCOVE_TEST === "1"; }, // test hook: as the close button would
@@ -2829,7 +2868,8 @@ const commands = {
   set_adblock: ({ enabled }) => {
     config.adblock = !!enabled;
     saveConfig();
-    applyBlocking();
+    if (config.adblock && !blocker) blockerReady = ensureBlocker(); // first time on this run: load it (it applies itself)
+    else applyBlocking();
   },
   get_profiles: () => ({ profiles: config.profiles, active: config.activeProfile }),
   list_import_sources: () => listImportSources(),
@@ -2966,7 +3006,7 @@ app.whenReady().then(() => {
   nativeTheme.themeSource = S().theme;
   collapsed = !!config.collapsed;
   ensureSession(config.activeProfile);
-  blockerReady = initBlocker();
+  blockerReady = config.adblock ? ensureBlocker() : Promise.resolve();
   Menu.setApplicationMenu(buildMenu());
 
   const p = activeProfile();
