@@ -1,12 +1,41 @@
 name: Build Electron
 
+# Every push to main builds the installers (kept for 14 days as workflow artifacts); a tag like v0.2.0 also drafts a GitHub
+# Release with them. Pull requests only run the checks. Third-party actions are pinned to commit SHAs (the comment names the
+# tag); update them deliberately.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
+  pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: electron
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - name: The tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+
   build:
+    needs: check
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -18,17 +47,43 @@ jobs:
             name: alcove-electron-macos
             paths: electron/dist/*.dmg
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: electron
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
-      - run: npm install
+          cache: npm
+          cache-dependency-path: electron/package-lock.json
+      - run: npm ci
       - run: npm run dist
-      - uses: actions/upload-artifact@v4
+      # Windows code signing (SignPath Foundation) goes here once the project is accepted: build the unpacked app with
+      # "--dir", upload it, request the signature, then package the installer from the signed folder (--prepackaged).
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.name }}
           path: ${{ matrix.paths }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: alcove-electron-*
+          merge-multiple: true
+          path: dist
+      # A draft: nothing is public until someone reads the notes and presses Publish.
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "Alcove $GITHUB_REF_NAME"

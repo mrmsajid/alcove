@@ -21,7 +21,8 @@ Built on [Electron](https://www.electronjs.org/) (Chromium). Plain HTML, CSS and
 ## Install
 
 There are no releases yet. Build it yourself (below), or take the installers from the **Actions** tab of this
-repository (`alcove-electron-macos`, `alcove-electron-windows`).
+repository (`alcove-electron-macos`, `alcove-electron-windows`). Builds exist for macOS (Apple silicon and Intel) and
+Windows (64-bit). Alcove does not update itself yet: install each new version over the old one.
 
 > **Windows warns about the installer?** The Windows installer is not code signed yet, so Chrome and Windows
 > SmartScreen call it "uncommon" or "dangerous". In Chrome open the downloads list, click the three dots next to
@@ -33,7 +34,7 @@ repository (`alcove-electron-macos`, `alcove-electron-windows`).
 
 ## Build from source
 
-You need a current [Node.js](https://nodejs.org/).
+You need [Node.js](https://nodejs.org/) 20 or newer.
 
 ```bash
 cd electron
@@ -54,12 +55,13 @@ Besides the websites you visit, Alcove contacts these services, and only for the
 
 | Service | Why |
 | --- | --- |
-| Ad-block filter lists (via the [Ghostery adblocker](https://github.com/ghostery/adblocker) library) | keep the ad blocker up to date |
+| `raw.githubusercontent.com` (the filter lists of the [Ghostery adblocker](https://github.com/ghostery/adblocker) library) | ad blocking: fetched when Alcove starts with blocking on and its saved copy is over a day old; not at all while blocking is off |
 | `sponsor.ajay.app` | SponsorBlock on YouTube (sends a short hash prefix of the video id, not the id) |
-| `clients2.google.com` | installing and updating extensions from the Chrome Web Store |
+| `clients2.google.com` | installing extensions from the Chrome Web Store (installed extensions are not updated) |
 | `github.com` (yt-dlp and ffmpeg releases) | downloading the video tools, only when you set up video download |
 | `open.er-api.com` | exchange rates in the command palette |
-| The sites in your start page shortcuts | each one's `/favicon.ico`, the same way the sidebar gets tab icons |
+| The sites in your start page shortcuts and your open tabs | each site's `/favicon.ico`, for the icon in the sidebar and on the start page |
+| The Chromium dictionary server | on Windows and Linux, the spell checker downloads its dictionary the first time you type in a text field (switch spell check off in Settings to avoid it) |
 
 Do Not Track is on by default. Ad blocking and SponsorBlock can be switched off in Settings; the other services are
 only contacted when you use the feature.
@@ -73,6 +75,7 @@ download came from this repository's Releases or Actions page.
 
 ## License
 
-[MIT](LICENSE). Third-party software keeps its own licenses: Electron (MIT), Chromium (BSD-style and others, listed in the
-`LICENSES.chromium.html` that ships with every build), the Ghostery adblocker (MPL-2.0), adm-zip (MIT) and
-qrcode-generator by Kazuhiko Arase (MIT, in `ui/vendor/qrcode.js`).
+[MIT](LICENSE). Third-party software keeps its own licenses, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+(also shipped inside every build): the Ghostery adblocker and its helpers (MPL-2.0), adm-zip and tldts (MIT), and
+qrcode-generator (MIT). Electron and Chromium ship their own notices (`LICENSE.electron.txt`, `LICENSES.chromium.html`).
+The video tools Alcove can download on request (yt-dlp, ffmpeg) are separate programs under their own licenses.

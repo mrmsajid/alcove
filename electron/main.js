@@ -22,6 +22,9 @@ const onProcessError = kind => err => {
 process.on("uncaughtException", onProcessError("uncaught exception"));
 process.on("unhandledRejection", onProcessError("unhandled rejection"));
 
+// Windows attributes notifications (the alarms) and the taskbar entry to this id; it matches the installer's appId.
+if (process.platform === "win32") app.setAppUserModelId("com.xupbrands.alcove");
+
 const SIDEBAR_W = 280;
 const PRELOAD = path.join(__dirname, "preload.js");
 const COLORS = ["#7c8cff", "#ff7c9c", "#5fd6a0", "#ffb86b", "#c27cff"];
@@ -461,13 +464,15 @@ function windowButtons(p, b) {
 function startDrag() {
   if (win.isMaximized() || win.isFullScreen()) return;
   const start = screen.getCursorScreenPoint();
-  const [x0, y0] = win.getPosition();
+  const b0 = win.getBounds();
   clearInterval(dragTimer);
   const began = Date.now();
   dragTimer = setInterval(() => {
-    if (Date.now() - began > 15000) return clearInterval(dragTimer); // failsafe if mouseup is missed
+    if (Date.now() - began > 15000 || !win || win.isDestroyed()) return clearInterval(dragTimer); // failsafe if mouseup is missed
     const p = screen.getCursorScreenPoint();
-    win.setPosition(x0 + p.x - start.x, y0 + p.y - start.y);
+    // The size is set again with every move: on a screen scaled to a fraction (125%, 150%) Windows rounds a bare
+    // setPosition and the window grows a pixel at a time while it is dragged.
+    win.setBounds({ x: b0.x + p.x - start.x, y: b0.y + p.y - start.y, width: b0.width, height: b0.height });
   }, 8);
 }
 
@@ -2713,7 +2718,9 @@ const commands = {
   set_default_browser: () => {
     if (!app.isPackaged) return { ok: false, reason: "Only the installed app can become the default browser." };
     const ok = app.setAsDefaultProtocolClient("http") && app.setAsDefaultProtocolClient("https");
-    return { ok, isDefault: app.isDefaultProtocolClient("https") };
+    // Windows 10 and 11 don't let an app make itself the default: the user picks it in Default apps, so that page is opened.
+    if (process.platform === "win32") shell.openExternal("ms-settings:defaultapps").catch(() => {});
+    return { ok, isDefault: app.isDefaultProtocolClient("https"), pick: process.platform === "win32" };
   },
   clear_data: async ({ cookies, cache }) => {
     const ses = activeWebSession();

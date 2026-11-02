@@ -53,7 +53,7 @@ focuses the first; use `ALCOVE_USER_DATA` (below) to run a throwaway copy beside
 rm -rf /Applications/Alcove.app && ditto electron/dist/mac-arm64/Alcove.app /Applications/Alcove.app
 ```
 
-The macOS build is unsigned (`identity: null`), so the first launch on another Mac needs right-click > Open.
+The macOS build is ad-hoc signed (not notarized), so the first launch on another Mac may be blocked: allow it in System Settings > Privacy & Security (**Open Anyway**).
 The Windows installer is unsigned too, so SmartScreen will warn.
 
 **CI.** `.github/workflows/build-electron.yml` builds Windows and macOS on every push to `main` and uploads the
@@ -80,7 +80,7 @@ from the Actions tab.
 ```
 alcove/
 ├─ electron/                 the app
-│  ├─ main.js                the whole main process (~2600 lines): windows, tabs, IPC commands, features
+│  ├─ main.js                the whole main process (~3,000 lines): windows, tabs, IPC commands, features
 │  ├─ preload.js             exposes window.__TAURI__ (the IPC shim) to Alcove's own pages
 │  ├─ yt-preload.js          session preload for every web page: YouTube ad skipper, SponsorBlock,
 │  │                         the Markdown editor's file bridge (window.alcoveMd) and the start page's bridge (window.alcoveStart)
@@ -204,7 +204,7 @@ const { listen } = window.__TAURI__.event;     // listen("event-name", ({ payloa
 ### 4.2 The gate
 
 `fromOurPages(e)` accepts an `invoke` only from the views in its list (`ui`, `palette`, `region`, `shotView`,
-`peekBackdrop`, `divider`, `strip`, `settingsView`, `toolsView`). **Websites never get the shim**, so they cannot
+`peekBackdrop`, `divider`, `strip`, `caption`, `settingsView`, `toolsView`). **Websites never get the shim**, so they cannot
 call commands. If you add a new view that needs commands, add it to that list.
 
 ### 4.3 Adding a command
@@ -241,13 +241,13 @@ call commands. If you add a new view that needs commands, add it to that list.
 
 `download` `new-tab-request` `screenshot-saved` `settings-changed` `settings-open` `shortcut` `sidebar-state`
 `split-ratio` `split-request` `store-install` `tab-audio` `tab-blocked` `tab-focused` `tab-title` `tab-url`
-`toast` `tools-op` `video-download` `window-state` (Windows caption view) `glass-backdrop`. The `shortcut` event carries the id of a
+`toast` `tools-op` `video-download` `glass-backdrop` `tab-closed` `tab-crashed` `alcove-inset` (to the start page only). `window-state` goes to the Windows caption view, not the sidebar. The `shortcut` event carries the id of a
 menu accelerator; the sidebar maps ids to behaviour in its `actions` table (`ui/app.js`).
 
 ### 4.6 The session preload and its channels
 
 `yt-preload.js` is registered with `ses.registerPreloadScript({ type: "frame" })` on the web session, so it runs
-in **every frame of every website**, at document start. It does three things:
+in **every frame of every website**, at document start. It does these things:
 
 1. On YouTube: installs the ad skipper (see 6.2).
 2. On YouTube: SponsorBlock lookups, through `ipcMain.handle("alcove-sb")`.
@@ -696,10 +696,17 @@ notification banners, and **everything on Windows**. Check those by hand before 
 
 ### 8.5 Release checklist (manual)
 
-Open and close the sidebar (button, edge hover, `Cmd+S`); open links in a background tab and Peek; split view;
-install a Chrome extension; ad blocking on and off; a YouTube video (no black frame, ads skipped); a download and a
-screenshot; each Tools tab including a real alarm; the Markdown editor in both views with a folder mounted;
-Settings changes applying live; quit and relaunch (tabs restored).
+1. Update `version` in `electron/package.json` (and `npm install` so the lockfile follows), run `npm run notices` if dependencies
+   changed, run `npm run check`, and commit.
+2. Tag it (`git tag v0.2.0 && git push origin v0.2.0`). The workflow builds macOS (Apple silicon and Intel) and Windows (x64), checks the
+   tag matches `version`, and drafts a **draft** GitHub Release with the installers attached. Read the notes and press Publish yourself.
+3. Windows code signing is not wired up yet (see the comment in the workflow). Until it is, the release notes should say the installers
+   are unsigned and how to get past the warnings (the README has the steps).
+4. Then check by hand: open and close the sidebar (button, edge hover, `Cmd+S`, and that `Cmd+S` still saves in the Markdown
+   editor); open links in a background tab and Peek; split view; install a Chrome extension; ad blocking on and off; a YouTube
+   video (no black frame, ads skipped); a download and a screenshot; each Tools tab including a real alarm; the Markdown editor in
+   both views with a folder mounted; Settings changes applying live; sign in with Google on a site that uses a popup; quit with an
+   unsaved note and relaunch (tabs restored, the edit offered back).
 
 ---
 
@@ -777,8 +784,10 @@ Windows. Verify in this order:
 7. **Notifications and sound.** Alarms use Electron `Notification` and Web Audio. Check the Windows toast and
    Focus Assist behaviour.
 8. **Default browser.** `set_default_browser` and opening links from other apps (`isWebUrl`, `second-instance`).
-9. **Installer.** NSIS config is minimal (`win.target: nsis`). Decide on icon, install scope, auto-update and
-   code signing (SmartScreen warns on unsigned installers).
+9. **Installer.** NSIS is per-user, one-click, x64 (`nsis` in `electron/package.json`; the file name is `Alcove-Setup-<version>-x64.exe`).
+   `build/installer.nsh` writes the registry keys that make Alcove appear in Default apps (`StartMenuInternet`, `RegisteredApplications`,
+   `AlcoveURL`, `AlcoveHTML`) and removes them on uninstall; **none of it has been run on Windows**. Check the uninstaller removes
+   them, that Alcove is listed under Default apps, and what the SmartScreen warning says. Auto-update and code signing are not done.
 10. **The Markdown editor.** Open/save dialogs, drag a file onto the window (`webUtils.getPathForFile`), and
     CRLF files (the scanner handles `\r\n`, check the editor round trip).
 
@@ -790,7 +799,7 @@ Windows. Verify in this order:
 - **No automated tests.** The CDP scripts in 8.2 are the starting point for a regression suite.
 - **Licence: MIT** (`LICENSE`, `"license"` in `electron/package.json`). Provenance note: the sidebar design was
   influenced by the Nook browser (GPL-3.0, macOS-only). Alcove contains none of its code and uses a different name
-  and icon because of Nook's trademark policy. Dependencies keep their own licences (README lists them); keep the
+  and icon because of Nook's trademark policy. Dependencies keep their own licences (`THIRD_PARTY_NOTICES.md`, made by `npm run notices`); keep the
   notice at the top of `ui/vendor/qrcode.js`.
 - **Code signing.** Installers are unsigned, so Chrome and SmartScreen warn on Windows. The plan is free signing from
   the SignPath Foundation, which needs a public repository, a public release, a "Code signing policy" section

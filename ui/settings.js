@@ -149,7 +149,8 @@ const SECTIONS = [
       info.isDefault ? h("span", { class: "pill2 ok" }, "Alcove is your default browser")
         : h("button", { class: "btn primary", on: { click: async () => {
           const r = await invoke("set_default_browser");
-          flash(r.ok ? "Confirm the change in the system dialog if one appears." : r.reason || "Couldn't change the default browser.");
+          flash(r.pick ? "In the Windows settings that just opened, choose Alcove as your web browser."
+            : r.ok ? "Confirm the change in the system dialog if one appears." : r.reason || "Couldn't change the default browser.");
           setTimeout(refreshInfo, 1500);
         } } }, "Make default")),
     row("Import from another browser", "Bookmarks, history and extensions from Chrome, Edge, Brave, Arc or Vivaldi.", h("button", { class: "btn", on: { click: () => sidebar("import") } }, "Import…")),

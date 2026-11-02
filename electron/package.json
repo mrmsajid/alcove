@@ -10,7 +10,8 @@
     "sync-ui": "node scripts/sync-ui.js",
     "start": "npm run sync-ui && electron .",
     "dist": "npm run sync-ui && electron-builder",
-    "check": "node --check main.js && node --check crx.js && node --check md-search.js && node --check preload.js && node --check yt-preload.js && node scripts/check-package.js"
+    "check": "node --check main.js && node --check crx.js && node --check md-search.js && node --check preload.js && node --check yt-preload.js && node scripts/check-package.js",
+    "notices": "node scripts/third-party.js"
   },
   "build": {
     "appId": "com.xupbrands.alcove",
@@ -26,23 +27,54 @@
       "preload.js",
       "yt-preload.js",
       "ui/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.map"
     ],
     "mac": {
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "identity": null,
       "category": "public.app-category.productivity",
       "extendInfo": {
         "NSCameraUsageDescription": "Websites you allow can use your camera.",
         "NSMicrophoneUsageDescription": "Websites you allow can use your microphone.",
-        "NSLocationWhenInUseUsageDescription": "Websites you allow can know your location."
-      }
+        "NSLocationWhenInUseUsageDescription": "Websites you allow can know your location.",
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "HTML document",
+            "CFBundleTypeRole": "Viewer",
+            "LSItemContentTypes": [
+              "public.html"
+            ],
+            "LSHandlerRank": "Alternate"
+          },
+          {
+            "CFBundleTypeName": "XHTML document",
+            "CFBundleTypeRole": "Viewer",
+            "LSItemContentTypes": [
+              "public.xhtml"
+            ],
+            "LSHandlerRank": "Alternate"
+          }
+        ]
+      },
+      "artifactName": "Alcove-${version}-mac-${arch}.${ext}"
     },
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "electronFuses": {
@@ -51,6 +83,33 @@
       "enableNodeOptionsEnvironmentVariable": false,
       "onlyLoadAppFromAsar": true,
       "resetAdHocDarwinSignature": true
+    },
+    "copyright": "Copyright © 2026 Alcove contributors",
+    "extraResources": [
+      {
+        "from": "../LICENSE",
+        "to": "LICENSE.alcove.txt"
+      },
+      {
+        "from": "../THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      }
+    ],
+    "protocols": [
+      {
+        "name": "Web site",
+        "schemes": [
+          "http",
+          "https"
+        ]
+      }
+    ],
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh",
+      "artifactName": "Alcove-Setup-${version}-${arch}.${ext}"
     }
   },
   "devDependencies": {
@@ -60,5 +119,13 @@
   "dependencies": {
     "@ghostery/adblocker-electron": "^2.20.3",
     "adm-zip": "^0.6.1"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/muhammadxupbrands/alcove-by-sajid.git"
   }
 }
