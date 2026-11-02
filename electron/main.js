@@ -11,8 +11,16 @@ const { searchUrl } = require(path.join(__dirname, "ui", "engines.js"));
 
 // A bug in one place must not put Electron's native error dialog in front of the user (a page closing itself while a timer
 // still holds its view, for one): log it and carry on.
-process.on("uncaughtException", err => console.error("uncaught exception:", (err && err.stack) || err));
-process.on("unhandledRejection", err => console.error("unhandled rejection:", (err && err.stack) || err));
+// Before the window is up nothing can work, so an error then is shown and the app quits (rather than sitting there with no
+// window and no message).
+const onProcessError = kind => err => {
+  console.error(`${kind}:`, (err && err.stack) || err);
+  if (globalThis.__alcoveStarted) return;
+  try { require("electron").dialog.showErrorBox("Alcove couldn't start", String((err && err.message) || err)); } catch {}
+  require("electron").app.exit(1);
+};
+process.on("uncaughtException", onProcessError("uncaught exception"));
+process.on("unhandledRejection", onProcessError("unhandled rejection"));
 
 const SIDEBAR_W = 280;
 const PRELOAD = path.join(__dirname, "preload.js");
@@ -1859,10 +1867,14 @@ async function finishRegion(rect) {
 const YT_HOST = /^(?:www\.|m\.|music\.)?youtube\.com$|^youtu\.be$/;
 const binDir = () => path.join(app.getPath("userData"), "bin");
 const exeName = n => (process.platform === "win32" ? `${n}.exe` : n);
-const downloadDir = () => process.env.ALCOVE_DOWNLOAD_DIR || downloadsFolder(); // env override is for tests
+const downloadDir = () => devEnv("ALCOVE_DOWNLOAD_DIR") || downloadsFolder(); // env override is for tests (not in a packaged app)
+
+// Environment overrides that only make sense in development and tests (a path to run, a folder to write to). A packaged app
+// ignores them, so a process that can set our environment can't make Alcove run or write somewhere of its choosing.
+const devEnv = name => (app.isPackaged ? undefined : process.env[name]);
 
 function findBinary(name, envVar) {
-  if (envVar && process.env[envVar] && fs.existsSync(process.env[envVar])) return process.env[envVar];
+  if (envVar && devEnv(envVar) && fs.existsSync(devEnv(envVar))) return devEnv(envVar);
   const own = path.join(binDir(), exeName(name));
   if (fs.existsSync(own)) return own;
   // GUI apps on macOS get a minimal PATH, so add the usual package-manager folders.
@@ -2261,7 +2273,7 @@ function openExtPopup(id) {
 // Bookmarks, history and installed extensions are plain files in each browser profile. Passwords and
 // cookies are encrypted with a Keychain/DPAPI key, so they are not imported (sites need one new sign-in).
 function browserRoots() {
-  if (process.env.ALCOVE_IMPORT_ROOT) return [{ browser: "Test Browser", dir: process.env.ALCOVE_IMPORT_ROOT }]; // tests only
+  if (devEnv("ALCOVE_IMPORT_ROOT")) return [{ browser: "Test Browser", dir: devEnv("ALCOVE_IMPORT_ROOT") }]; // tests only
   const home = app.getPath("home");
   if (process.platform === "darwin") {
     const as = path.join(home, "Library", "Application Support");
@@ -3019,6 +3031,7 @@ app.whenReady().then(() => {
   if (IS_WIN) createCaption();
   win.on("resize", layout);
   watchCursor();
+  globalThis.__alcoveStarted = true; // from here on, stray errors are logged instead of ending the app (see onProcessError)
 });
 
 app.on("window-all-closed", () => app.quit());

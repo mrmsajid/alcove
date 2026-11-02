@@ -67,7 +67,7 @@ from the Actions tab.
 | `ALCOVE_USER_DATA` | use this folder as the data folder (throwaway profiles for tests) |
 | `ALCOVE_TEST=1` | enables the `debug_*` commands (see [Testing](#8-testing)) |
 | `ALCOVE_TEST_WIN=1` | use the Windows window buttons (the `caption` view, shown on hover) on any OS, to check them without a Windows machine |
-| `ALCOVE_DOWNLOAD_DIR` | where downloads, saved images and the video downloader write |
+| `ALCOVE_DOWNLOAD_DIR` | where saved images and the video downloader write (also `ALCOVE_YTDLP`, `ALCOVE_FFMPEG`: a tool to run, and `ALCOVE_IMPORT_ROOT`: a fake browser profile folder). These three are **ignored by a packaged app** (`devEnv()`), so a process that can set our environment cannot make Alcove run or write somewhere of its choosing |
 | `ALCOVE_PERF=1` | print startup timing marks and main-thread stalls |
 | `ALCOVE_DOM_OBSERVER=1` | turn the ad blocker's DOM observer back on (off by default, for measuring only) |
 | `ALCOVE_IMPORT_ROOT` | pretend this folder is a browser profile for the import feature (tests) |
@@ -572,6 +572,17 @@ the page only sends ops.
   The check handler answers `true` only for the permissions the request handler allows outright (`ALWAYS_ALLOWED`).
 - **HTTPS-Only** leaves plain http alone for local addresses only (`isLocalHttp` parses the host: loopback, private
   ranges, `.local`, `.test`; `localhost.evil.com` and `10.evil.com` are not local).
+- **Electron fuses** (`build.electronFuses` in `electron/package.json`, flipped by electron-builder after packaging):
+  `runAsNode`, `enableNodeCliInspectArguments` and `enableNodeOptionsEnvironmentVariable` are off, so the app cannot be
+  turned into a plain Node process (`ELECTRON_RUN_AS_NODE`, `--inspect`, `NODE_OPTIONS`) that would inherit its camera,
+  microphone and file access; `onlyLoadAppFromAsar` is on. `grantFileProtocolExtraPrivileges` stays on because the own
+  pages are `file://` pages that share storage. `resetAdHocDarwinSignature` re-signs the app ad hoc after the flip, which
+  also makes `codesign --verify` pass. Check a build with `npx electron-fuses read --app <Alcove.app>`.
+- **Errors at startup are fatal and visible, later ones are not.** `onProcessError` (top of `main.js`) shows "Alcove
+  couldn't start" and quits if the window is not up yet (`globalThis.__alcoveStarted`); after that it only logs.
+- **`npm run check`** (`electron/scripts/check-package.js`) fails if `main.js` or the preloads require a file that
+  `build.files` does not package (a missing `crx.js` once made the packaged app hang at startup), or load a page from
+  `ui/` that does not exist. Run it before building.
 - **Settings** are validated per key (`SETTING_RULES`); arguments to commands are validated in the handler.
 - **Content from files or pages is data.** The Markdown renderer escapes first; the Tools page and sidebar build
   DOM with `textContent` and elements rather than HTML strings wherever the text is not ours.
