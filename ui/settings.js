@@ -79,7 +79,7 @@ const SECTIONS = [
     ),
     h("h2", { style: "font-size:13px;color:var(--muted);margin:18px 0 8px" }, "New tabs open"),
     card(
-      radios(S.newTab, [["engine", `${(ENGINES[S.searchEngine] || { name: "Search engine" }).name} home page`], ["blank", "A blank page"], ["custom", "A specific page"]], v => set("newTab", v)),
+      radios(S.newTab, [["start", "Alcove start page (search and tools)"], ["engine", `${(ENGINES[S.searchEngine] || { name: "Search engine" }).name} home page`], ["blank", "A blank page"], ["custom", "A specific page"]], v => set("newTab", v)),
       S.newTab === "custom" ? urlInput(S.newTabUrl, "https://…", "newTabUrl", isUrl) : null,
     ),
   ]],

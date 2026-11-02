@@ -963,7 +963,7 @@
       syncSoon();
     });
     vis.addEventListener("change", e => { // ticking a to-do
-      if (e.target.matches && e.target.matches("input[type=checkbox]")) { const li = e.target.closest("li"); if (li) li.classList.toggle("done", e.target.checked); syncSoon(); }
+      if (e.target.matches && e.target.matches("input[type=checkbox]")) { const li = e.target.closest("li"); if (li) { li.classList.toggle("done", e.target.checked); tallyTodo(e.target.checked); } syncSoon(); }
     });
     vis.addEventListener("click", e => {
       const chip = e.target.closest && e.target.closest("span.tag");
@@ -1108,6 +1108,17 @@
     }
 
     // ---- preferences: text size and font ----
+    // To-dos ticked in the editor are counted per day for the start page's daily report (ui/newtab.html, same storage).
+    const DONE = "alcove-md-done-v1"; // { "2026-11-02": n }
+    function tallyTodo(checked) {
+      try {
+        const d = new Date(), day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const all = JSON.parse(localStorage.getItem(DONE) || "{}");
+        all[day] = Math.max(0, (all[day] || 0) + (checked ? 1 : -1));
+        for (const k of Object.keys(all).sort().slice(0, -35)) delete all[k];
+        localStorage.setItem(DONE, JSON.stringify(all));
+      } catch {}
+    }
     const prefs = (() => { const d = { size: "m", font: "sans", mode: "visual", split: true }; try { return { ...d, ...JSON.parse(localStorage.getItem(PREFS) || "{}") }; } catch { return d; } })();
     function applyPrefs() {
       const size = { s: 14, m: 15, l: 17, xl: 19 }[prefs.size] || 15;
@@ -2119,6 +2130,7 @@
       const lines = ta.value.split("\n"), n = bodyLines + Number(box.dataset.line);
       if (n >= lines.length) return;
       const from = lines.slice(0, n).reduce((c, l) => c + l.length + 1, 0);
+      tallyTodo(box.checked);
       const fixed = lines[n].replace(/\[( |x|X)\]/, box.checked ? "[x]" : "[ ]");
       const sel = [ta.selectionStart, ta.selectionEnd];
       replaceRange(from, from + lines[n].length, fixed, sel[0], sel[1]);

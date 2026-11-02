@@ -359,8 +359,20 @@ function clocksView() {
 
 // ---- to-do list (one per space) ----
 
-const TODO_KEY = "alcove-todos-v1"; // { spaceId: [{ id, text, done }] }, written by this page
+const TODO_KEY = "alcove-todos-v1"; // { spaceId: [{ id, text, done, doneOn }] }, written by this page
+const DONE_KEY = "alcove-done-v1";  // { "2026-11-02": { todos: n } }: to-dos ticked per day, for the start page's daily report
 let refocusTodo = false;
+
+// Ticking counts toward that day; unticking takes the count back off the day it was ticked. Clearing done items keeps it.
+function tallyTodo(it, done) {
+  const day = done ? today() : it.doneOn;
+  if (!day) return;
+  const all = read(DONE_KEY, {});
+  const d = (all[day] ||= { todos: 0 });
+  d.todos = Math.max(0, (d.todos || 0) + (done ? 1 : -1));
+  for (const k of Object.keys(all).sort().slice(0, -35)) delete all[k];
+  try { localStorage.setItem(DONE_KEY, JSON.stringify(all)); } catch {}
+}
 
 function todoCard() {
   const space = ctx.space.id || "default";
@@ -395,7 +407,11 @@ function todoCard() {
       edit.select();
     } } }, it.text);
     return el("div", { class: "todo" + (it.done ? " done" : "") },
-      el("input", { type: "checkbox", checked: it.done, on: { change: e => commit(items.map(x => (x.id === it.id ? { ...x, done: e.target.checked } : x))) } }),
+      el("input", { type: "checkbox", checked: it.done, on: { change: e => {
+        const done = e.target.checked;
+        tallyTodo(it, done);
+        commit(items.map(x => (x.id === it.id ? { ...x, done, doneOn: done ? today() : undefined } : x)));
+      } } }),
       text,
       el("button", { class: "icon sm", title: "Delete", on: { click: () => commit(items.filter(x => x.id !== it.id)) } }, "×"));
   };

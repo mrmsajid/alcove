@@ -34,6 +34,7 @@ let config = {
   sponsorBlock: true, // skip sponsor segments on YouTube
   sitePermissions: {}, // "origin permission" -> allowed (true/false), for remembered choices
   forceDark: [], // hostnames shown with a forced dark theme
+  shortcuts: [], // websites pinned to the start page: [{ name, url }]
   activeProfile: "default",
   profiles: [{ id: "default", name: "Default", color: COLORS[0] }],
   settings: {},
@@ -43,7 +44,7 @@ let config = {
 const DEFAULT_SETTINGS = {
   searchEngine: "duckduckgo", customSearch: "",
   startup: "restore", startupUrl: "",       // restore | newtab | custom
-  newTab: "engine", newTabUrl: "",          // engine | blank | custom
+  newTab: "start", newTabUrl: "",           // start (ui/newtab.html) | engine | blank | custom
   downloadDir: "", askDownload: false,
   theme: "system", accent: "#76767f", textSize: "default", defaultZoom: 1, compact: false,
   glass: true, frost: 55,                   // frosted see-through sidebar and frame; frost 0 = clear, 100 = solid
@@ -58,7 +59,7 @@ const SETTING_RULES = {
   customSearch: v => typeof v === "string" && (v === "" || (/^https?:\/\//.test(v) && v.includes("%s"))),
   startup: v => ["restore", "newtab", "custom"].includes(v),
   startupUrl: v => typeof v === "string" && v.length < 2000,
-  newTab: v => ["engine", "blank", "custom"].includes(v),
+  newTab: v => ["start", "engine", "blank", "custom"].includes(v),
   newTabUrl: v => typeof v === "string" && v.length < 2000,
   downloadDir: v => v === "",               // set a folder through choose_download_dir
   askDownload: v => typeof v === "boolean",
@@ -92,6 +93,12 @@ function loadConfig() {
   if ((config.settingsVersion || 1) < 2) {
     if (config.settings.accent === "#7c8cff") config.settings.accent = DEFAULT_SETTINGS.accent;
     config.settingsVersion = 2;
+  }
+  // v3: new tabs open the start page. Earlier builds saved "engine" (the search engine's home page) as the default,
+  // so it is moved over once; choosing it again in Settings sticks.
+  if (config.settingsVersion < 3) {
+    if (config.settings.newTab === "engine") config.settings.newTab = DEFAULT_SETTINGS.newTab;
+    config.settingsVersion = 3;
   }
   if (!config.profiles.some(p => p.id === config.activeProfile)) config.activeProfile = "default";
 }
@@ -1062,6 +1069,7 @@ function pageMenu(tabId, wc, p) {
     );
     sep();
     if (tabId) items.push({ label: "Take Screenshot…", click: () => send("shortcut", "screenshot-region") });
+    if (!own && /^https?:/.test(wc.getURL())) items.push({ label: "Add to Start Page", click: () => send("toast", { text: addShortcut(wc.getURL(), wc.getTitle()) ? "Added to the start page" : "Already on the start page, or the list is full" }) });
     if (!own) items.push({ label: "View Page Source", click: () => send("new-tab-request", { url: `view-source:${wc.getURL()}` }) });
   }
   sep();
@@ -1345,6 +1353,44 @@ function mdWrite(p, text) {
     return { path: p };
   } catch { return { error: "Couldn't save the file. Check that the folder is writable." }; }
 }
+
+// The start page (ui/newtab.html, what a new tab shows) reads the Tools engine's saved state from the sidebar and
+// can start a timer or open a tool. It is the only caller allowed, and it can only run the ops listed here.
+const NEWTAB_PAGE = pathToFileURL(uiFile("newtab.html")).href;
+const MAX_SHORTCUTS = 24;
+const cleanShortcuts = list => (Array.isArray(list) ? list : []).flatMap(x => {
+  try {
+    const u = new URL(String(x && x.url));
+    if (!/^https?:$/.test(u.protocol)) return [];
+    const name = String((x && x.name) || u.hostname.replace(/^www\./, "")).trim().slice(0, 40);
+    return [{ name: name || u.hostname, url: u.href }];
+  } catch { return []; }
+}).slice(0, MAX_SHORTCUTS);
+function addShortcut(url, name) { // false when it isn't a website, is already there, or the list is full
+  const [item] = cleanShortcuts([{ url, name }]);
+  if (!item || (config.shortcuts || []).some(x => x.url === item.url)) return false;
+  if ((config.shortcuts || []).length >= MAX_SHORTCUTS) return false;
+  config.shortcuts = [...(config.shortcuts || []), item];
+  saveConfig();
+  return true;
+}
+const START_OPS = { "timer-start": m => [Math.min(600, Math.max(1, Math.round(Number(m)) || 25))], "pomo-start": () => [] };
+ipcMain.handle("alcove-start", async (e, op, a, b) => {
+  if (!e.senderFrame || e.senderFrame.url.split(/[?#]/)[0] !== NEWTAB_PAGE) throw new Error("forbidden");
+  if (op === "settings") return { searchEngine: S().searchEngine, customSearch: S().customSearch, accent: S().accent };
+  if (op === "tools-data") { // the Tools engine's state, time tracking, to-dos and to-do tallies: JSON text, or null
+    if (!ui || ui.webContents.isDestroyed()) return null;
+    const keys = ["alcove-tools-v1", "alcove-time-v1", "alcove-todos-v1", "alcove-done-v1"];
+    return ui.webContents.executeJavaScript(`JSON.stringify(${JSON.stringify(keys)}.map(k => localStorage.getItem(k)))`).catch(() => null);
+  }
+  if (op === "shortcuts") return config.shortcuts || [];
+  if (op === "shortcuts-set") { config.shortcuts = cleanShortcuts(a); saveConfig(); return config.shortcuts; }
+  if (op === "copy") { clipboard.writeText(String(a).slice(0, 8000)); return; }
+  if (op === "tools") { setImmediate(() => openTools(String(a || "timers").slice(0, 20))); return; }
+  if (op === "markdown") { e.sender.loadURL(MD_PAGE).catch(() => {}); return; }
+  if (op === "op" && Object.hasOwn(START_OPS, a)) { send("tools-op", { op: a, args: START_OPS[a](b) }); return; }
+  throw new Error("unknown op");
+});
 
 ipcMain.handle("alcove-md", async (e, op, a, b) => {
   if (!e.senderFrame || e.senderFrame.url.split(/[?#]/)[0] !== MD_PAGE) throw new Error("forbidden");
@@ -2253,6 +2299,7 @@ const commands = {
   peek_open_tab: () => { setImmediate(peekToTab); },
   pip: ({ id }) => pictureInPicture(wcOf(id)),
   copy_text: ({ text }) => clipboard.writeText(String(text)),
+  add_shortcut: ({ url, name }) => addShortcut(url, name), // the sidebar's tab menu: "Add to start page"
   // Tools panel
   md_url: () => MD_PAGE,
   md_recent: () => (config.recentMd || []).filter(p => fs.existsSync(p)),

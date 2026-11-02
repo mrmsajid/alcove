@@ -5,9 +5,11 @@ const $ = id => document.getElementById(id);
 const COLORS = ["#7c8cff", "#ff7c9c", "#5fd6a0", "#ffb86b", "#c27cff"];
 // Settings (search engine, new tab page, accent, text size, zoom…), kept in sync with the Settings page.
 let appSettings = {};
+const START_PAGE = new URL("newtab.html", location.href).href; // the default new tab: a search bar and the tools
 const newTabUrl = () => appSettings.newTab === "blank" ? "about:blank"
   : appSettings.newTab === "custom" && appSettings.newTabUrl ? appSettings.newTabUrl
-  : engineHome(appSettings);
+  : appSettings.newTab === "engine" ? engineHome(appSettings)
+  : START_PAGE;
 function applyAppSettings(s) {
   appSettings = s || {};
   document.documentElement.style.setProperty("--accent", appSettings.accent || "#76767f");
@@ -731,6 +733,7 @@ function tabEl(t, depth = 0, kids = 0) {
       ...splitItems,
       ...groupItems,
       { label: "Duplicate", fn: () => newTab(t.url) },
+      ...(/^https?:/.test(t.url) ? [{ label: "Add to start page", fn: () => call("add_shortcut", { url: t.url, name: t.title }).then(ok => toast(ok ? "Added to the start page" : "Already on the start page, or the list is full")) }] : []),
       { label: "Copy link", fn: () => navigator.clipboard.writeText(t.url).then(() => toast("Link copied")) },
       { label: t.pinned ? "Unload tab" : "Close tab", fn: () => closeTab(t.id) },
     ]);
@@ -845,6 +848,7 @@ function renderAddr(t) {
   d.replaceChildren();
   if (!t) return;
   if (/\/blocked\.html(\?|$)/.test(t.url)) { d.textContent = "Focus mode"; return; } // a site blocked by Tools › Focus mode
+  if (t.url.split(/[?#]/)[0] === START_PAGE) { d.textContent = "Search or enter address"; return; }
   try {
     const u = new URL(t.url);
     if (/^https?:$/.test(u.protocol)) {

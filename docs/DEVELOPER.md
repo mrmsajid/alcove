@@ -83,7 +83,7 @@ alcove/
 │  ├─ main.js                the whole main process (~2600 lines): windows, tabs, IPC commands, features
 │  ├─ preload.js             exposes window.__TAURI__ (the IPC shim) to Alcove's own pages
 │  ├─ yt-preload.js          session preload for every web page: YouTube ad skipper, SponsorBlock,
-│  │                         and the Markdown editor's file bridge (window.alcoveMd)
+│  │                         the Markdown editor's file bridge (window.alcoveMd) and the start page's bridge (window.alcoveStart)
 │  ├─ scripts/sync-ui.js     copies ../ui to electron/ui
 │  ├─ package.json           scripts + electron-builder config
 │  └─ build/icon.png         app icon source
@@ -94,6 +94,7 @@ alcove/
 │  ├─ tools.html, tools-page.js         Tools page (interface)
 │  ├─ tools.js                          Tools engine (runs inside the sidebar page)
 │  ├─ tools-shared.js                   state shape and helpers used by both of the above
+│  ├─ newtab.html                       the start page: what a new tab shows (search, shortcuts, today's report, tools)
 │  ├─ markdown.html                     the Markdown editor (one file: HTML, CSS and JS)
 │  ├─ blocked.html                      page shown when Focus mode blocks a site
 │  ├─ caption.html                      Windows only: the Minimize / Maximize / Close buttons
@@ -122,7 +123,7 @@ is an `<iframe>` and there is no `<webview>`.
 | View | Page | What it is |
 | --- | --- | --- |
 | `ui` | `ui/index.html` | the sidebar. Always alive, even when hidden. It owns the tab list and is the app's UI brain |
-| tab views | websites, plus `ui/markdown.html` and `ui/blocked.html` | one per open tab, in the web session |
+| tab views | websites, plus `ui/newtab.html`, `ui/markdown.html` and `ui/blocked.html` | one per open tab, in the web session |
 | `strip` | `ui/strip.html` | the margin above the page: drag handle, double-click to maximize |
 | `caption` | `ui/caption.html` | Windows only: flat Minimize / Maximize-Restore / Close buttons, hidden until the pointer reaches the top right |
 | `palette` | `ui/palette.html` | Cmd+K. Re-created on every open so it is always on top |
@@ -231,6 +232,7 @@ call commands. If you add a new view that needs commands, add it to that list.
 | Profiles and import | `get_profiles` `create_profile` `switch_profile` `delete_profile` `list_import_sources` `import_browser` `take_pending_import` |
 | Tools | `open_tools` `close_tools` `toggle_tools` `tools_op` `notify` `activity` `focus_mode` `focus_state` `eyedropper` `page_images` `save_images` |
 | Markdown | `md_url` `md_recent` `md_recent_folders` (the editor itself uses its own bridge, see 6.6) |
+| Start page | `add_shortcut` (the start page itself uses its own bridge, see 6.7) |
 | Misc | `reveal` |
 | Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` |
 
@@ -250,6 +252,8 @@ in **every frame of every website**, at document start. It does three things:
 2. On YouTube: SponsorBlock lookups, through `ipcMain.handle("alcove-sb")`.
 3. On `ui/markdown.html` only (checked by `location`): exposes `window.alcoveMd`, the Markdown editor's file
    bridge (see 6.6), over `ipcMain.handle("alcove-md")`.
+4. On `ui/newtab.html` only: exposes `window.alcoveStart`, the start page's bridge (see 6.7), over
+   `ipcMain.handle("alcove-start")`.
 
 Other direct channels: `alcove-yt-mode` (sync, asks whether to skip ads) and `alcove-yt-diag` (stuck-ad reports,
 written to `yt-diagnostics.log`).
@@ -276,7 +280,8 @@ written to `yt-diagnostics.log`).
 
 `collapsed`, `adblock`, `adblockAllow` (hostnames), `sponsorBlock`, `sitePermissions` (`"origin permission"` ->
 bool), `forceDark` (hostnames), `activeProfile`, `profiles` (`{ id, name, color }`), `recentMd` and
-`recentMdFolders` (Markdown editor), and `settings` (below). Missing keys fall back to defaults in `loadConfig`.
+`recentMdFolders` (Markdown editor), `shortcuts` (websites pinned to the start page, `{ name, url }`, at most 24,
+http(s) only) and `settings` (below). Missing keys fall back to defaults in `loadConfig`.
 
 **Settings** (`config.settings`) are defined in two tables near the top of `main.js`: `DEFAULT_SETTINGS` and
 `SETTING_RULES` (a validator per key). To add a setting:
@@ -296,11 +301,13 @@ bool), `forceDark` (hostnames), `activeProfile`, `profiles` (`{ id, name, color 
 | `alcove-tools-v1` | **Tools engine only** | timers, Pomodoro, alarms, focus, task log, world-clock zones, sound |
 | `alcove-tools-ctx` | Tools engine only | what the sidebar is showing, for the Tools page |
 | `alcove-time-v1` | Tools engine only | seconds per site and space, per day (35 days kept) |
-| `alcove-notes-v1`, `alcove-todos-v1`, `alcove-tools-tab` | Tools page | per-space notes and to-dos, last tab |
+| `alcove-notes-v1`, `alcove-todos-v1`, `alcove-tools-tab` | Tools page | per-space notes and to-dos (a done item keeps `doneOn`), last tab |
+| `alcove-done-v1` | Tools page | `{ "2026-11-02": { todos: n } }`: to-dos ticked per day (35 days). Unticking takes the count off the day it was ticked; clearing done items keeps it |
 
 The Markdown editor is a *tab*, so its keys live in the **web** session's storage on a `file://` origin:
 `alcove-md-draft` (untitled draft), `alcove-md-prefs` (text size, font, view), `alcove-md-side` (panel state),
-`alcove-md-folders` (mounted folders; `alcove-md-folder` is the older single-folder key, still read once).
+`alcove-md-folders` (mounted folders; `alcove-md-folder` is the older single-folder key, still read once),
+`alcove-md-done-v1` (`{ "2026-11-02": n }`, to-dos ticked in the editor per day; the start page reads it from the same storage).
 
 ### 5.4 Profiles and sessions
 
@@ -462,15 +469,56 @@ note (`openAt`) and selects the match: by line and column in Code view, by "nth 
 Visual view, falling back to Code view when the match is not visible text. Search reads from disk, so unsaved
 edits are not searched.
 
+### 6.7 The start page (`ui/newtab.html`)
+
+What a new tab shows. Setting `newTab` is `start` (default), `engine` (the search engine's home page), `blank` or
+`custom`; `loadConfig` moves a saved `engine` to `start` once (`settingsVersion` 3), so an explicit choice made
+afterwards sticks. `app.js` builds the URL with `newTabUrl()`.
+
+It is a normal tab on a `file://` page, self-contained like the Markdown editor, with four parts:
+
+- **Search bar** with the address bar's rules (`normalize`: scheme, domain, `localhost`, else the chosen engine).
+  Typing anywhere focuses it.
+- **Shortcuts**: pinned websites. Add, edit, remove and drag to reorder on the page; "Add to Start Page" in a page's
+  right-click menu and "Add to start page" in a sidebar tab's menu add one too (`addShortcut` in `main.js`, command
+  `add_shortcut`). Stored in `config.shortcuts`, so they are shared by all profiles. Icons come from
+  `<origin>/favicon.ico`, the same way the sidebar's tabs get theirs; a coloured letter is the fallback. Tiles are
+  real links, so Cmd/Ctrl+click opens a background tab.
+- **Today**: a live report, refreshed every second from data polled every 2 s. To-dos done (counted per day in
+  `alcove-done-v1`, with the open count from `alcove-todos-v1`), Markdown to-dos done (`alcove-md-done-v1`, which the
+  editor writes and the page sees at once through the `storage` event), browsing time and top sites
+  (`alcove-time-v1`), task time (the task log plus the task running now) and Pomodoros. "Copy report" puts the day
+  as plain text on the clipboard.
+- **Tools**: a tile per Tools tab with a live status (timer, Pomodoro and stopwatch countdowns, next alarm, focus
+  mode, world clock) and quick-start buttons for 5, 15 and 25 minute timers and a Pomodoro.
+
+**The bridge (`window.alcoveStart`, channel `alcove-start`).** The Tools engine and the to-do list live in the
+*sidebar's* storage, which the tab cannot read, so the page asks `main.js`:
+
+| Call | What it does |
+| --- | --- |
+| `settings` | search engine, custom search URL and accent only |
+| `toolsData` | the four storage values above as JSON text, read from the sidebar with `executeJavaScript` |
+| `shortcuts`, `setShortcuts` | read and replace the list (validated: http(s), at most 24, names cut to 40) |
+| `openTools(tab)` | opens the Tools page on that tab |
+| `openMarkdown` | loads the Markdown editor in this tab |
+| `startTimer(min)`, `startPomodoro` | the only two engine ops allowed (`START_OPS`), minutes clamped to 1-600 |
+| `copy(text)` | clipboard, capped at 8000 characters |
+
+Every call checks `e.senderFrame.url` is exactly `ui/newtab.html`. The engine stays the single writer of its keys:
+the page only sends ops.
+
 ---
 
 ## 7. Security model
 
 - **Websites get no app access.** Only Alcove's own views get `window.__TAURI__`, and every command passes
   `fromOurPages`. Websites run sandboxed with context isolation and no Node.
-- **Alcove's own pages are not websites.** Tabs that show them (`ui/markdown.html`, `ui/blocked.html`, anything
+- **Alcove's own pages are not websites.** Tabs that show them (`ui/newtab.html`, `ui/markdown.html`, `ui/blocked.html`, anything
   under `UI_PREFIX`) get no "View Page Source" or "Inspect" in their right-click menu, their developer tools are
   closed if opened (`devtools-opened`), and `view-source:` of them is refused. Websites keep the normal menu.
+- **The start page bridge is narrow too** (6.7): one `file://` page, sender URL checked, a fixed list of calls, and
+  only two engine ops (a timer and a Pomodoro). It exposes no file or navigation access.
 - **The Markdown bridge is narrow**: exists only on one `file://` page, checks the sender's URL, reads only
   Markdown/text files, writes only to paths the session opened or the user chose in a dialog, lists only inside
   folders the user mounted, and never returns file contents it was not asked for.

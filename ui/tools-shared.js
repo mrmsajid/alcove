@@ -11,7 +11,8 @@ const ToolsShared = (() => {
 
   const read = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 
-  const loadState = () => Object.assign({
+  // `saved` is the stored state; the start page (ui/newtab.html) has none of its own and is handed the sidebar's.
+  const loadState = (saved = read(KEY, {})) => Object.assign({
     sw: { start: 0, acc: 0, laps: [] },               // stopwatch: start = running since (ms), acc = banked ms, laps = elapsed at each lap
     timer: { end: 0, left: 0, total: 0 },             // end > 0 running; left > 0 paused
     pomo: { phase: "", end: 0, left: 0, total: 0 },   // phase "work" | "break" | "" (idle)
@@ -26,7 +27,7 @@ const ToolsShared = (() => {
     alarms: [],                                       // { id, time: "07:30", label, repeat: once|daily|weekly|monthly, days: [0-6] (weekly), dom: 1-31|"last" (monthly), on, last, snooze }
     ringing: null,                                    // { id, label, time, at } while an alarm is going off
     sound: true,
-  }, read(KEY, {}));
+  }, saved);
   // Alarm repeats. Older alarms have no `repeat`: a weekday list meant weekly, none meant once.
   const repeatKind = a => a.repeat || (a.days && a.days.length ? "weekly" : "once");
   function alarmDue(a, d) { // does this alarm apply on the day of `d`?

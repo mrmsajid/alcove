@@ -118,6 +118,23 @@ if (window === window.top && YT.test(location.hostname)) {
   }
 }
 
+// The start page (ui/newtab.html) gets a small bridge to the tools: its settings, the Tools engine's saved state
+// (timers, time tracking, to-dos), a copy command and a few launchers. main.js checks that the caller is that page.
+if (window === window.top && location.protocol === "file:" && /\/ui\/newtab\.html$/.test(location.pathname)) {
+  const start = (op, a, b) => ipcRenderer.invoke("alcove-start", op, a, b);
+  contextBridge.exposeInMainWorld("alcoveStart", {
+    settings: () => start("settings"),
+    toolsData: () => start("tools-data"),
+    copy: text => start("copy", text),
+    shortcuts: () => start("shortcuts"),
+    setShortcuts: list => start("shortcuts-set", list),
+    openTools: tab => start("tools", tab),
+    openMarkdown: () => start("markdown"),
+    startTimer: minutes => start("op", "timer-start", minutes),
+    startPomodoro: () => start("op", "pomo-start"),
+  });
+}
+
 // The Markdown editor page (ui/markdown.html) is the only page that gets a file bridge. main.js checks that
 // the caller is that page and that the path is a Markdown or text file before reading or writing anything.
 if (window === window.top && location.protocol === "file:" && /\/ui\/markdown\.html$/.test(location.pathname)) {
