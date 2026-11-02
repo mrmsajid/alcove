@@ -311,7 +311,7 @@ that pass `SETTING_RULES`; `downloadDir` may be any string).
 | `alcove-done-v1` | Tools page | `{ "2026-11-02": { todos: n } }`: to-dos ticked per day (35 days). Unticking takes the count off the day it was ticked; clearing done items keeps it |
 
 The Markdown editor is a *tab*, so its keys live in the **web** session's storage on a `file://` origin:
-`alcove-md-draft` (untitled draft), `alcove-md-prefs` (text size, font, view), `alcove-md-side` (panel state),
+`alcove-md-draft` (untitled draft), `alcove-md-drafts` (unsaved edits to saved files, per path), `alcove-md-prefs` (text size, font, view), `alcove-md-side` (panel state),
 `alcove-md-folders` (mounted folders; `alcove-md-folder` is the older single-folder key, still read once),
 `alcove-md-done-v1` (`{ "2026-11-02": n }`, to-dos ticked in the editor per day; the start page reads it from the same storage).
 
