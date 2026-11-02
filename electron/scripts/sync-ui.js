@@ -1,4 +1,4 @@
-// The sidebar and palette live in ../ui and are shared with the Tauri build; copy them in.
+// The pages Alcove draws live in ../ui; copy them in so the app (and the packaged build) can load them.
 const fs = require("fs");
 const path = require("path");
 

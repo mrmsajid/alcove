@@ -41,7 +41,7 @@ let panel = null;
 let dragId = null;
 const seen = new Map(); // tab id -> first render time, so only new tabs animate in
 document.body.classList.add(/Mac/.test(navigator.userAgent) ? "mac" : "win");
-// Newer commands may be missing on other shells (e.g. the Tauri build), so failures are swallowed.
+// A command the app doesn't have, or that fails, shouldn't break the page, so failures are swallowed.
 const call = (cmd, args) => invoke(cmd, args).catch(() => null);
 let adblock = true;
 let adblockAllow = []; // hostnames where the blocker is off

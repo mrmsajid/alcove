@@ -40,7 +40,7 @@ npm start          # copies ../ui into electron/ui, then runs electron .
 | `npm run dist -- --mac --arm64` | macOS Apple-silicon build only |
 
 **Edit `ui/`, never `electron/ui/`.** `electron/ui/` is a git-ignored copy that `sync-ui` overwrites on every
-start and build. (`ui/` sits at the repo root because it was shared with the older Tauri build.)
+start and build. (`ui/` sits at the repo root, beside `electron/`; `sync-ui` copies it in.)
 
 **Dev data is separate from the installed app.** An unpackaged run stores its data in
 `~/Library/Application Support/Alcove Dev` (macOS), so developing never touches the installed app's profile.
@@ -57,8 +57,8 @@ The macOS build is unsigned (`identity: null`), so the first launch on another M
 The Windows installer is unsigned too, so SmartScreen will warn.
 
 **CI.** `.github/workflows/build-electron.yml` builds Windows and macOS on every push to `main` and uploads the
-installers as artifacts (`alcove-electron-windows`, `alcove-electron-macos`). `build-windows.yml` belongs to the
-frozen Tauri build and only runs by hand.
+installers as artifacts (`alcove-electron-windows`, `alcove-electron-macos`). You can also start it by hand
+from the Actions tab.
 
 **Environment variables** (all optional, mostly for testing):
 
@@ -98,10 +98,12 @@ alcove/
 │  ├─ peek.html, divider.html, strip.html, region.html, shot.html   small overlay views
 │  ├─ engines.js                        search engines, shared by sidebar, palette, settings and main
 │  └─ vendor/qrcode.js                  qrcode-generator (MIT), for "QR code for this page"
-├─ src-tauri/                the first, Tauri-based build. Frozen; kept for reference
 ├─ docs/DEVELOPER.md         this file
 └─ .github/workflows/        CI
 ```
+
+Alcove began as a Tauri app. That build was removed once Electron became the only one; it is still in git
+history (`git log --all -- src-tauri`) if you ever need it.
 
 Runtime dependencies are deliberately few: `@ghostery/adblocker-electron` (ad blocking), `adm-zip` (unpacking
 extensions), and the vendored QR generator. Everything else is hand-written.
@@ -174,8 +176,9 @@ The page sits in a rounded "card" with an 8 px margin on every side (`MARGIN`, `
 
 ### 4.1 The shim
 
-`electron/preload.js` gives every Alcove page the same `window.__TAURI__` object the pages were first written
-against (the Tauri build). It is not Tauri; it is a thin wrapper:
+`electron/preload.js` gives every Alcove page a `window.__TAURI__` object. The name comes from the first,
+Tauri-based version of Alcove, whose API the pages were written against; Tauri is no longer used, and this is just
+a thin wrapper (renaming it would be a mechanical change across `ui/` if you want it gone):
 
 ```js
 const { invoke } = window.__TAURI__.core;      // invoke("command_name", { args }) -> Promise
@@ -615,6 +618,5 @@ Windows. Verify in this order:
 - Markdown editor: no rename or delete in the file tree, search ignores unsaved edits, the Visual view normalises
   the file the first time you edit it (blank lines between blocks, `*` bullets become `-`).
 - Glass could not be checked pixel-for-pixel from automated tests (native vibrancy is not capturable); judge by eye.
-- The frozen `src-tauri/` build can be deleted once nobody needs it for reference.
 - Ideas discussed but not built: an AI assistant with the user's own API key (summarise pages, ask questions;
   key kept in the OS keychain), clipboard history, lap export for the stopwatch.

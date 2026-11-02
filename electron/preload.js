@@ -1,5 +1,6 @@
-// Exposes the same `window.__TAURI__` surface the sidebar and palette already use,
-// so ../ui works unchanged on both the Tauri and Electron builds.
+// Gives Alcove's own pages `window.__TAURI__`: `core.invoke` (run a command from main.js) and
+// `event.listen` / `emit`. The name is left over from the first, Tauri-based version of Alcove, whose
+// API the pages were written against. Tauri itself is no longer used.
 const { contextBridge, ipcRenderer } = require("electron");
 
 const listeners = new Map();
