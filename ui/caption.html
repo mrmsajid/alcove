@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Window controls</title>
+  <style>
+    /* Windows window controls: flat 46 x 32 buttons, close turns red. Self-contained on purpose: the sidebar's
+       stylesheet gives every svg an outline and a size. */
+    :root { color-scheme: dark light; --sym: #ffffff; --hover: #ffffff1a; --press: #ffffff2e; }
+    @media (prefers-color-scheme: light) { :root { --sym: #1b1b1f; --hover: #0000000f; --press: #0000001f; } }
+    html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none; }
+    body { display: flex; }
+    button { width: 46px; height: 32px; flex: none; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--sym);
+      display: flex; align-items: center; justify-content: center; cursor: default; }
+    button:hover { background: var(--hover); }
+    button:active { background: var(--press); }
+    button.close:hover { background: #e81123; color: #fff; }
+    button.close:active { background: #f1707a; color: #fff; }
+    svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1; overflow: visible; shape-rendering: crispEdges; }
+    #max .restore, #max.on .square { display: none; }
+    #max.on .restore { display: block; }
+    #max:not(.on) .restore { display: none; }
+  </style>
+</head>
+<body>
+  <button id="min" title="Minimize" aria-label="Minimize"><svg viewBox="0 0 10 10"><path d="M0 5.5h10"/></svg></button>
+  <button id="max" title="Maximize" aria-label="Maximize">
+    <svg class="square" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg>
+    <svg class="restore" viewBox="0 0 10 10"><rect x="2.5" y="0.5" width="7" height="7"/><path d="M0.5 2.5v7h7"/></svg>
+  </button>
+  <button id="close" class="close" title="Close" aria-label="Close"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" shape-rendering="auto"/></svg></button>
+  <script>
+    const { invoke } = window.__TAURI__.core;
+    const { listen } = window.__TAURI__.event;
+    const act = (id, action) => document.getElementById(id).addEventListener("click", () => invoke("window_action", { action }));
+    act("min", "minimize");
+    act("max", "maximize");
+    act("close", "close");
+    listen("window-state", ({ payload }) => {
+      const max = document.getElementById("max");
+      max.classList.toggle("on", !!payload.maximized);
+      max.title = max.ariaLabel = payload.maximized ? "Restore" : "Maximize";
+    });
+  </script>
+</body>
+</html>

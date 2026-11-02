@@ -66,6 +66,7 @@ from the Actions tab.
 | --- | --- |
 | `ALCOVE_USER_DATA` | use this folder as the data folder (throwaway profiles for tests) |
 | `ALCOVE_TEST=1` | enables the `debug_*` commands (see [Testing](#8-testing)) |
+| `ALCOVE_TEST_WIN=1` | lay the window out as it is on Windows (title row, caption buttons) on any OS, to check that layout without a Windows machine |
 | `ALCOVE_DOWNLOAD_DIR` | where downloads, saved images and the video downloader write |
 | `ALCOVE_PERF=1` | print startup timing marks and main-thread stalls |
 | `ALCOVE_DOM_OBSERVER=1` | turn the ad blocker's DOM observer back on (off by default, for measuring only) |
@@ -95,6 +96,7 @@ alcove/
 │  ├─ tools-shared.js                   state shape and helpers used by both of the above
 │  ├─ markdown.html                     the Markdown editor (one file: HTML, CSS and JS)
 │  ├─ blocked.html                      page shown when Focus mode blocks a site
+│  ├─ caption.html                      Windows only: the Minimize / Maximize / Close buttons
 │  ├─ peek.html, divider.html, strip.html, region.html, shot.html   small overlay views
 │  ├─ engines.js                        search engines, shared by sidebar, palette, settings and main
 │  └─ vendor/qrcode.js                  qrcode-generator (MIT), for "QR code for this page"
@@ -121,7 +123,8 @@ is an `<iframe>` and there is no `<webview>`.
 | --- | --- | --- |
 | `ui` | `ui/index.html` | the sidebar. Always alive, even when hidden. It owns the tab list and is the app's UI brain |
 | tab views | websites, plus `ui/markdown.html` and `ui/blocked.html` | one per open tab, in the web session |
-| `strip` | `ui/strip.html` | the thin margin above the page: drag handle, and the window buttons on Windows |
+| `strip` | `ui/strip.html` | the margin above the page (the whole title row on Windows): drag handle, double-click to maximize |
+| `caption` | `ui/caption.html` | Windows only: flat Minimize / Maximize-Restore / Close buttons at the top right |
 | `palette` | `ui/palette.html` | Cmd+K. Re-created on every open so it is always on top |
 | `settingsView`, `toolsView` | `settings.html`, `tools.html` | full-page overlays that fill the page area (never both at once) |
 | peek + backdrop | `peek.html` | the Shift-click preview |
@@ -149,8 +152,12 @@ The page sits in a rounded "card" with an 8 px margin on every side (`MARGIN`, `
   the sidebar is hidden, touching the left edge slides it in.
 - Window buttons (macOS) are hidden and shown by `windowButtons()` as the pointer nears the top-left, even when
   Alcove is not the focused window. On macOS the native traffic lights are repositioned with
-  `setWindowButtonPosition` when the sidebar floats. On Windows the window is frameless and the buttons are drawn
-  by the sidebar (`.winctl`) or the strip.
+  `setWindowButtonPosition` when the sidebar floats.
+- **Windows** has a 32 px **title row** across the top (`IS_WIN`, `TITLE_H`): the `strip` view is the drag area, and
+  the `caption` view (`ui/caption.html`) draws Windows-style Minimize, Maximize/Restore and Close buttons at the top
+  right (46 x 32 px each, close turns red on hover). The page card and the floating sidebar start below it
+  (`pageTop()`, `sideTop()`); full screen removes the row. The caption view learns the maximized state from the
+  `window-state` event. Set `ALCOVE_TEST_WIN=1` to see this layout on a Mac.
 
 ### 3.3 Glass
 
@@ -223,13 +230,13 @@ call commands. If you add a new view that needs commands, add it to that list.
 | Tools | `open_tools` `close_tools` `toggle_tools` `tools_op` `notify` `activity` `focus_mode` `focus_state` `eyedropper` `page_images` `save_images` |
 | Markdown | `md_url` `md_recent` `md_recent_folders` (the editor itself uses its own bridge, see 6.6) |
 | Misc | `reveal` |
-| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` |
+| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` |
 
 ### 4.5 Events sent to the sidebar
 
 `download` `new-tab-request` `screenshot-saved` `settings-changed` `settings-open` `shortcut` `sidebar-state`
 `split-ratio` `split-request` `store-install` `tab-audio` `tab-blocked` `tab-focused` `tab-title` `tab-url`
-`toast` `tools-op` `video-download` `window-buttons` `glass-backdrop`. The `shortcut` event carries the id of a
+`toast` `tools-op` `video-download` `window-state` (Windows caption view) `glass-backdrop`. The `shortcut` event carries the id of a
 menu accelerator; the sidebar maps ids to behaviour in its `actions` table (`ui/app.js`).
 
 ### 4.6 The session preload and its channels
@@ -517,7 +524,8 @@ before launch.
 
 ### 8.3 Test hooks
 
-With `ALCOVE_TEST=1`: `debug_window_buttons` (runs the hover logic for a point), `debug_page_menu` (returns the
+With `ALCOVE_TEST=1`: `debug_layout` (where the sidebar, strip, caption buttons and page card are),
+`debug_window_buttons` (runs the macOS hover logic for a point), `debug_page_menu` (returns the
 labels of a tab's right-click menu), `debug_open_devtools` (tries to open developer tools on a tab).
 
 ### 8.4 What this does not cover
@@ -585,10 +593,12 @@ Windows. Verify in this order:
 
 1. **It builds and starts.** Get the CI artifact (`alcove-electron-windows`), install it, launch. Check the
    console (`ALCOVE_PERF=1`) for errors.
-2. **Window frame.** The window is frameless (`frame: false`); the sidebar draws the close/minimize/maximize
-   buttons (`.winctl`, hidden until hover, with `window-buttons` events) and the strip carries them when the sidebar
-   is hidden. Dragging uses `startDrag()` (cursor polling) because there is no title bar. Check drag, snap,
-   maximize, double-click to maximize, and multi-monitor DPI.
+2. **Window frame.** The window is frameless (`frame: false`) with a 32 px title row: `ui/strip.html` is the drag
+   area and `ui/caption.html` the Minimize / Maximize / Close buttons at the top right (checked on a Mac with
+   `ALCOVE_TEST_WIN=1`, never on Windows). Check that the buttons look and behave like Windows ones, the icon
+   switches to Restore when maximized, dragging (`startDrag()`, cursor polling) and double-click to maximize work,
+   and multi-monitor DPI. Known gap: a frameless window gets no Aero Snap or Windows 11 snap-layout flyout; the
+   native alternative is `titleBarStyle: "hidden"` with `titleBarOverlay`, which draws real caption buttons.
 3. **Glass.** Windows 11 acrylic via `setBackgroundMaterial("acrylic")`. Check that it renders, that the
    over-the-page backdrop (`updateBackdrop`) and adaptive text look right, and what happens on Windows 10 (no
    acrylic): `glass` may need to default to off there.

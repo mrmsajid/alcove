@@ -137,6 +137,14 @@ const send = (name, payload) => {
 // buttons stay hidden until the pointer nears them (see windowButtons), so they take no room either.
 const MARGIN = 8;
 const gap = () => (S().compact ? 0 : MARGIN); // Settings › Appearance › Compact layout removes it
+// Windows has a title row across the top: drag area on the left, Minimize / Maximize / Close at the top right
+// (ui/caption.html), with the page starting below it. ALCOVE_TEST_WIN=1 shows that layout on a Mac, for testing.
+const IS_WIN = process.platform === "win32" || process.env.ALCOVE_TEST_WIN === "1";
+const TITLE_H = 32;
+const CAPTION_W = 138; // three 46 px buttons
+const titleH = () => (IS_WIN && !(win && win.isFullScreen()) ? TITLE_H : 0);
+const pageTop = () => (IS_WIN ? titleH() + (S().compact ? 0 : titleH() ? 4 : MARGIN) : gap()); // where the page card starts
+const sideTop = () => (IS_WIN ? titleH() + (titleH() ? 4 : MARGIN) : MARGIN);                   // where a floating sidebar starts
 const HIDE_X = -(SIDEBAR_W + MARGIN + 4); // sidebar x when hidden (fully off screen)
 // The sidebar floats over the page by default and never resizes it. In "docked" mode (Settings) the page
 // makes room for it instead, and only floats when the sidebar is hidden and slides out from the edge.
@@ -155,16 +163,18 @@ function contentRect() {
   const hidden = 1 - Math.min(1, Math.max(0, contentLeft / SIDEBAR_W)); // 0 = sidebar shown, 1 = hidden (animates)
   const g = gap();
   const x = Math.round(contentLeft + g * hidden);
-  return { x, y: g, w: Math.max(width - x - g, 1), h: Math.max(height - 2 * g, 1), hidden, width };
+  const y = pageTop();
+  return { x, y, w: Math.max(width - x - g, 1), h: Math.max(height - y - g, 1), hidden, width };
 }
 
 function layout() {
   const { height } = win.getContentBounds();
   // Docked: flush with the window. Otherwise a floating rounded panel over the page.
   const float = floating();
+  const top = float ? sideTop() : titleH();
   ui.setBounds(float
-    ? { x: Math.round(sidebarX) + MARGIN, y: MARGIN, width: SIDEBAR_W, height: height - 2 * MARGIN }
-    : { x: Math.round(sidebarX), y: 0, width: SIDEBAR_W, height });
+    ? { x: Math.round(sidebarX) + MARGIN, y: top, width: SIDEBAR_W, height: height - top - MARGIN }
+    : { x: Math.round(sidebarX), y: top, width: SIDEBAR_W, height: height - top });
   // Keep the macOS window buttons level with the sidebar's top row, which sits lower when it floats.
   if (process.platform === "darwin" && float !== lightsFloat && typeof win.setWindowButtonPosition === "function") {
     lightsFloat = float;
@@ -184,11 +194,18 @@ function layout() {
     divider.setBounds(dividerDragging ? { x: c.x, y: c.y, width: c.w, height: c.h } : { x: c.x + lw, y: c.y, width: DIVIDER_W, height: c.h });
   }
   if (strip) {
-    const left = Math.round(contentLeft);
-    strip.setBounds(cornerControls
-      ? { x: 0, y: 0, width: 110, height: 36 }
-      : { x: left, y: 0, width: Math.max(c.width - left, 1), height: Math.max(gap(), 1) });
-    strip.setVisible(cornerControls || gap() > 0);
+    if (IS_WIN) { // the title row, minus the caption buttons
+      strip.setBounds({ x: 0, y: 0, width: Math.max(c.width - (titleH() ? CAPTION_W : 0), 1), height: Math.max(titleH() + (S().compact || !titleH() ? 0 : 4), 1) });
+      strip.setVisible(titleH() > 0);
+    } else {
+      const left = Math.round(contentLeft);
+      strip.setBounds({ x: left, y: 0, width: Math.max(c.width - left, 1), height: Math.max(gap(), 1) });
+      strip.setVisible(gap() > 0);
+    }
+  }
+  if (caption) {
+    caption.setBounds({ x: Math.max(c.width - CAPTION_W, 0), y: 0, width: CAPTION_W, height: TITLE_H });
+    caption.setVisible(titleH() > 0);
   }
   placePeek();
   placeSettings();
@@ -197,10 +214,9 @@ function layout() {
 }
 
 // The margin above the page doubles as a title bar: drag to move the window, double-click to zoom.
-// On Windows, with the sidebar hidden, it grows into the top-left corner while the pointer is there to
-// show the window buttons (macOS draws its own).
+// On Windows it is the title row (see IS_WIN); macOS draws its own window buttons.
 let strip = null;
-let cornerControls = false;
+let caption = null; // Windows only: the Minimize / Maximize / Close buttons
 function createStrip() {
   strip = new WebContentsView({
     webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
@@ -208,6 +224,23 @@ function createStrip() {
   strip.setBackgroundColor("#00000000");
   strip.webContents.loadFile(uiFile("strip.html"));
   win.contentView.addChildView(strip);
+  layout();
+}
+
+// Windows: flat Minimize / Maximize-Restore / Close at the top right, like any Windows app.
+function createCaption() {
+  caption = new WebContentsView({
+    webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true },
+  });
+  caption.setBackgroundColor("#00000000");
+  caption.webContents.loadFile(uiFile("caption.html"));
+  win.contentView.addChildView(caption);
+  const state = () => { if (caption && !caption.webContents.isDestroyed()) caption.webContents.send("event", "window-state", { maximized: win.isMaximized() }); };
+  caption.webContents.on("did-finish-load", state);
+  win.on("maximize", state);
+  win.on("unmaximize", state);
+  win.on("enter-full-screen", layout);
+  win.on("leave-full-screen", layout);
   layout();
 }
 
@@ -320,6 +353,7 @@ function watchCursor() {
 let buttonsShown = null; // last visibility given to macOS; null = unknown, set it again
 let buttonsSeenAt = 0;
 function windowButtons(p, b) {
+  if (process.platform !== "darwin") return; // Windows has its own title row and always-visible buttons
   const x = p.x - b.x, y = p.y - b.y;
   const sidebarShown = !collapsed || peeking;
   const near = x >= 0 && y >= 0 && x < (sidebarShown ? SIDEBAR_W + MARGIN : 96) && y < (buttonsSeenAt ? 52 : 40);
@@ -327,17 +361,7 @@ function windowButtons(p, b) {
   if (near) buttonsSeenAt = now;
   else if (now - buttonsSeenAt > 400) buttonsSeenAt = 0;
   const want = win.isFullScreen() || buttonsSeenAt > 0;
-  if (process.platform === "darwin") {
-    if (want !== buttonsShown) { buttonsShown = want; win.setWindowButtonVisibility(want); }
-    return;
-  }
-  if (want !== buttonsShown) { buttonsShown = want; send("window-buttons", { visible: want }); }
-  const corner = want && !sidebarShown;
-  if (corner !== cornerControls) {
-    cornerControls = corner;
-    if (corner) win.contentView.addChildView(strip); // above the page
-    layout();
-  }
+  if (want !== buttonsShown) { buttonsShown = want; win.setWindowButtonVisibility(want); }
 }
 
 // Frameless window: the sidebar's top strip acts as the title bar.
@@ -1894,9 +1918,9 @@ function openExtPopup(id) {
     webPreferences: { partition: webPartition(config.activeProfile), sandbox: true, contextIsolation: true },
   });
   extPopup.setBounds({
-    x: left + 12, y: 12,
+    x: left + 12, y: pageTop() + 4,
     width: Math.max(Math.min(400, width - left - 24), 200),
-    height: Math.max(Math.min(560, height - 24), 200),
+    height: Math.max(Math.min(560, height - pageTop() - 16), 200),
   });
   extPopupFocused = false;
   win.contentView.addChildView(extPopup);
@@ -2208,12 +2232,17 @@ const commands = {
     if (process.env.ALCOVE_TEST !== "1") return null;
     const b = win.getContentBounds();
     windowButtons({ x: b.x + x, y: b.y + y }, b);
-    return { shown: buttonsShown, corner: cornerControls, collapsed, peeking, content: contentRect(),
+    return { shown: buttonsShown, collapsed, peeking, content: contentRect(),
       pos: typeof win.getWindowButtonPosition === "function" ? win.getWindowButtonPosition() : null };
   },
   debug_page_menu: ({ id, params }) => process.env.ALCOVE_TEST === "1" && wcOf(id)
     ? pageMenu(id, wcOf(id), { mediaType: "none", selectionText: "", isEditable: false, linkURL: "", srcURL: "", x: 0, y: 0, ...params }).items.map(i => i.type === "separator" ? "—" : i.label || i.role)
     : null,
+  debug_layout: () => { // test hook: where the views are
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    const b = v => (v ? v.getBounds() : null);
+    return { win: win.getContentBounds(), ui: b(ui), strip: b(strip), caption: b(caption), page: contentRect(), maximized: win.isMaximized(), IS_WIN };
+  },
   debug_open_devtools: async ({ id }) => { // test hook: try to open the developer tools on a tab and say whether they stayed open
     if (process.env.ALCOVE_TEST !== "1" || !wcOf(id)) return null;
     wcOf(id).openDevTools({ mode: "detach" });
@@ -2463,7 +2492,7 @@ const commands = {
 };
 
 const fromOurPages = e =>
-  [ui, palette, region, shotView, peekBackdrop, divider, strip, settingsView, toolsView].some(v => v && e.sender === v.webContents);
+  [ui, palette, region, shotView, peekBackdrop, divider, strip, caption, settingsView, toolsView].some(v => v && e.sender === v.webContents);
 
 ipcMain.handle("invoke", (e, cmd, args) => {
   if (!fromOurPages(e)) throw new Error("forbidden");
@@ -2602,6 +2631,7 @@ app.whenReady().then(() => {
   if (process.platform === "win32") applyGlass();
   createUi();
   createStrip();
+  if (IS_WIN) createCaption();
   win.on("resize", layout);
   watchCursor();
 });

@@ -7,23 +7,11 @@
   <style>
     /* Transparent: the window's own color (matching the sidebar) shows through. */
     html, body { display: block; height: 100%; margin: 0; padding: 0; background: transparent !important; overflow: hidden; }
-    .winctl { display: none; position: absolute; left: 14px; top: 11px; gap: 8px; }
-    body.win .winctl { display: flex; }
   </style>
 </head>
 <body>
-  <div class="winctl">
-    <button class="dot close" data-act="close" title="Close"></button>
-    <button class="dot min" data-act="minimize" title="Minimize"></button>
-    <button class="dot max" data-act="maximize" title="Maximize"></button>
-  </div>
   <script>
     const { invoke } = window.__TAURI__.core;
-    document.body.classList.add(/Mac/.test(navigator.userAgent) ? "mac" : "win");
-    for (const b of document.querySelectorAll(".dot")) {
-      b.addEventListener("click", () => invoke("window_action", { action: b.dataset.act }));
-      b.addEventListener("mousedown", e => e.stopPropagation());
-    }
     document.addEventListener("mousedown", e => { if (e.button === 0) invoke("drag_start"); });
     document.addEventListener("dblclick", () => invoke("window_action", { action: "maximize" }));
     for (const ev of ["mouseup", "blur"]) window.addEventListener(ev, () => invoke("drag_end"));

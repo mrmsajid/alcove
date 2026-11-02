@@ -1374,9 +1374,6 @@ listen("tab-focused", ({ payload }) => {
 });
 listen("split-ratio", ({ payload }) => { if (space().split) space().split.ratio = payload.ratio; });
 
-// Windows: the drawn window buttons fade in while the pointer is near them, like macOS (see main.js).
-listen("window-buttons", ({ payload }) => document.body.classList.toggle("winctl-shown", !!payload.visible));
-
 listen("sidebar-state", ({ payload: p }) => {
   document.body.classList.toggle("overlay", p.floating ?? (p.collapsed && p.peek));
   $("toggle-sidebar").title = p.collapsed ? "Show sidebar" : "Hide sidebar";
@@ -1453,11 +1450,7 @@ $("open-library").addEventListener("click", e => {
 });
 $("open-palette").addEventListener("click", () => call("show_palette"));
 
-// Window controls and drag handle (the window has no native title bar).
-for (const b of document.querySelectorAll(".dot")) {
-  b.addEventListener("click", () => call("window_action", { action: b.dataset.act }));
-  b.addEventListener("mousedown", e => e.stopPropagation());
-}
+// Drag handle (the window has no native title bar; Windows draws its buttons in ui/caption.html).
 $("topbar").addEventListener("mousedown", e => { if (e.button === 0 && !e.target.closest("button")) call("drag_start"); });
 $("topbar").addEventListener("dblclick", e => { if (!e.target.closest("button")) call("window_action", { action: "maximize" }); });
 for (const ev of ["mouseup", "blur"]) window.addEventListener(ev, () => call("drag_end"));

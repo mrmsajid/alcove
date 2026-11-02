@@ -142,18 +142,6 @@ body.panel-open #tabs, body.panel-open #pinned, body.panel-open .new-row { displ
 /* ---- title strip (window controls live here) ---- */
 .titlebar { height: 16px; margin: -4px -4px -2px; flex: none; display: flex; align-items: center; }
 body.mac .titlebar { height: 22px; } /* room for the native traffic lights, which float over this strip */
-.winctl { display: none; gap: 8px; padding-left: 6px; }
-body.win .winctl { display: flex; }
-.dot { width: 12px; height: 12px; padding: 0; border-radius: 50%; position: relative; }
-.dot:hover { background: inherit; filter: brightness(1.1); }
-.dot.close { background: #ff5f57; }
-.dot.min { background: #febc2e; }
-.dot.max { background: #28c840; }
-.dot::after { position: absolute; inset: 0; font-size: 9px; line-height: 12px; text-align: center; color: #0008; opacity: 0; transition: opacity .12s; }
-.winctl:hover .dot::after { opacity: 1; }
-.dot.close::after { content: "×"; }
-.dot.min::after { content: "–"; }
-.dot.max::after { content: "+"; }
 
 /* ---- motion ---- */
 button { transition: background .14s ease, color .14s ease, transform .08s ease, filter .14s ease; }
@@ -278,9 +266,6 @@ body.overlay { padding-top: 2px; border: 1px solid var(--border); border-radius:
 /* top row: window buttons, sidebar toggle, back/forward/reload */
 .top { height: 32px; flex: none; }
 body.mac .top { padding-left: 64px; }            /* room for the macOS window buttons */
-body.win .winctl { margin-right: 6px; }
-body.win .top .winctl { opacity: 0; pointer-events: none; transition: opacity .15s ease; } /* shown on hover */
-body.win.winctl-shown .top .winctl { opacity: 1; pointer-events: auto; }
 .top .icon { width: 30px; height: 30px; border-radius: 8px; }
 
 /* address pill: site in bold, path dimmed; full URL while editing */
