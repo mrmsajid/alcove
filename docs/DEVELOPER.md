@@ -497,8 +497,19 @@ through `setTags`. Clicking any tag chip opens a search for it.
 
 **Drafts.** Unsaved edits to a saved file are kept per path in `alcove-md-drafts` (this page's storage; written 250 ms after
 the last keystroke, on `pagehide` and when the app asks `__alcoveDirty()`; at most five drafts of 400 KB). Opening the file
-again restores the draft with an "Undo" in the footer; saving, or choosing Discard, clears it. Untitled documents keep their
-single draft in `alcove-md-draft`.
+again restores the draft with an "Undo" in the footer; saving, or choosing Discard, clears it. A document with no file yet
+keeps its draft in `alcove-md-untitled` under an id carried in the tab's own address (`?draft=<id>`, so a restored tab finds it and
+tabs never share one). A new blank tab offers the drafts of closed tabs ("Recover") instead of showing them, and the single
+`alcove-md-draft` of earlier versions is carried over as one of them.
+
+**Saving over changes made elsewhere.** `read` returns the file's modified time and `save` takes it back as the expected time; if
+the file has changed since it was opened (another app, another device, a sync service) nothing is written and the editor asks
+before replacing it (`{ conflict: true }`); a plain save after that needs no question. Save As never checks.
+
+**Search runs off the main thread when it has to.** `electron/md-search.js` holds the folder scanning, tag reading and search
+(plain Node, no Electron). Plain-text and tag queries run in the main process; a regular expression typed by the user runs in a
+worker thread (`mdSearch` in `main.js`) that is stopped after six seconds ("That pattern takes too long"), because a pattern like
+`(a+)+$` can otherwise run for minutes and freeze every window. The module is in `build.files`, and `npm run check` covers it.
 
 **The file bridge (`window.alcoveMd`, channel `alcove-md`).** Operations and their checks, in `main.js`:
 

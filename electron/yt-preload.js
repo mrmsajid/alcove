@@ -140,11 +140,11 @@ if (window === window.top && location.protocol === "file:" && /\/ui\/newtab\.htm
 // The Markdown editor page (ui/markdown.html) is the only page that gets a file bridge. main.js checks that
 // the caller is that page and that the path is a Markdown or text file before reading or writing anything.
 if (window === window.top && location.protocol === "file:" && /\/ui\/markdown\.html$/.test(location.pathname)) {
-  const md = (op, a, b) => ipcRenderer.invoke("alcove-md", op, a, b);
+  const md = (op, a, b, c) => ipcRenderer.invoke("alcove-md", op, a, b, c);
   contextBridge.exposeInMainWorld("alcoveMd", {
     open: () => md("open"),
     read: p => md("read", p),
-    save: (p, text) => md("save", p, text),
+    save: (p, text, mtime) => md("save", p, text, mtime),
     saveAs: (name, text) => md("saveAs", name, text),
     openFolder: () => md("openFolder"),
     folder: p => md("folder", p),

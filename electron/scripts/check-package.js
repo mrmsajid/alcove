@@ -9,7 +9,7 @@ const files = pkg.build.files;
 const included = f => files.some(g => (g.endsWith("/**/*") ? f.startsWith(g.slice(0, -4)) : g === f));
 const problems = [];
 
-for (const src of ["main.js", "crx.js", "preload.js", "yt-preload.js"]) {
+for (const src of ["main.js", "crx.js", "md-search.js", "preload.js", "yt-preload.js"]) {
   const text = fs.readFileSync(path.join(root, src), "utf8");
   for (const [, rel] of text.matchAll(/require\(\s*["'](\.{1,2}\/[^"']+)["']\s*\)/g)) {
     const target = path.relative(root, path.resolve(root, path.dirname(src), rel));

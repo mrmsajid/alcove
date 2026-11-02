@@ -1329,15 +1329,16 @@ const MD_PAGE = pathToFileURL(uiFile("markdown.html")).href;
 const UI_PREFIX = pathToFileURL(path.join(__dirname, "ui") + path.sep).href;
 const isOwnPage = u => String(u).startsWith(UI_PREFIX);
 const isOwnSource = u => /^view-source:/i.test(String(u)) && isOwnPage(String(u).replace(/^view-source:/i, ""));
-const MD_EXT = /\.(md|markdown|mdown|mkd|txt)$/i;
+const { MD_EXT, MD_SKIP, MD_GRAPH_MAX_FILES, mdScan, mdFiles, searchNotes } = require("./md-search");
 const MD_FILTERS = [{ name: "Markdown", extensions: ["md", "markdown", "mdown", "mkd", "txt"] }];
 const MD_MAX = 5 * 1024 * 1024;
+const { Worker } = require("worker_threads");
+const MD_SEARCH_LIMIT_MS = 6000;
 const mdAllowed = new Set(); // files this session opened or saved: the only ones the editor may write
 
 // Folders: the editor shows a file tree for a folder the user picked (or one picked before, from the recent
 // list). It can only list inside those folders, and only shows folders and Markdown or text files.
 const mdRoots = new Set();
-const MD_SKIP = /^(\.|node_modules$|__pycache__$)/;
 const mdInside = p => [...mdRoots].some(r => p === r || p.startsWith(r + path.sep));
 const realPath = p => { try { return fs.realpathSync(p); } catch { return p; } };
 // What the editor page may read: a file this session opened or saved, one from the recent list, or one inside an open
@@ -1364,123 +1365,6 @@ function mdList(dir) {
 // Graph view: every note in the folder, which notes link to which ([[wiki links]] and relative .md links),
 // and the tags in each. Reads each file once; very large files and huge folders are capped.
 const MD_NOTE = /\.(md|markdown|mdown|mkd)$/i;
-const MD_GRAPH_MAX_FILES = 3000;
-
-function mdScan(text) {
-  let body = text, tags = [];
-  const fm = text.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/);
-  if (fm) {
-    body = text.slice(fm[0].length);
-    const lines = fm[1].split(/\r?\n/);
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(/^tags\s*:\s*(.*)$/i);
-      if (!m) continue;
-      const v = m[1].trim();
-      if (v.startsWith("[")) tags.push(...v.replace(/^\[|\]\s*$/g, "").split(","));
-      else if (v) tags.push(...v.split(/[,\s]+/));
-      else for (let j = i + 1; j < lines.length && /^\s*-\s+/.test(lines[j]); j++) tags.push(lines[j].replace(/^\s*-\s+/, ""));
-    }
-  }
-  const clean = body.replace(/^\s*(```|~~~)[\s\S]*?^\s*\1.*$/gm, "").replace(/`[^`\n]*`/g, ""); // links and tags in code don't count
-  const wiki = [...clean.matchAll(/\[\[([^\]|#\n]+?)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g)].map(m => m[1].trim()).filter(Boolean);
-  const rel = [...clean.matchAll(/(?<!!)\[[^\]\n]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map(m => m[1]).filter(h => !/^[a-z][a-z0-9+.-]*:/i.test(h) && !h.startsWith("#"));
-  for (const m of clean.matchAll(/(^|[\s(])#([A-Za-z][\w/-]{0,39})(?![\w/-])/g)) tags.push(m[2]);
-  tags = [...new Set(tags.map(t => t.trim().replace(/^["']|["']$/g, "").replace(/^#+/, "")).filter(Boolean))];
-  return { tags, wiki, rel, words: (body.match(/\S+/g) || []).length };
-}
-
-// Every file of the given kind under a folder (hidden folders, node_modules and links are skipped).
-async function mdFiles(rootDir, kind = MD_EXT) {
-  const files = [];
-  const walk = async (dir, depth) => {
-    if (depth > 12) return;
-    let ents;
-    try { ents = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
-    for (const d of ents) {
-      if (files.length >= MD_GRAPH_MAX_FILES) return;
-      if (MD_SKIP.test(d.name)) continue;
-      const full = path.join(dir, d.name);
-      if (d.isDirectory()) await walk(full, depth + 1);
-      else if (d.isFile() && kind.test(d.name)) files.push(full);
-    }
-  };
-  await walk(rootDir, 0);
-  return files;
-}
-
-// Search across the loaded folders: text in notes (and their names), or #tags. With no query it returns the
-// tags in use instead, so the panel can offer them. Reads each file once; results are capped.
-async function mdSearch(o) {
-  const roots = (Array.isArray(o && o.roots) ? o.roots : []).map(r => path.resolve(String(r))).filter(r => mdRoots.has(r));
-  if (!roots.length) return { error: "Load a folder first." };
-  const q = String((o && o.q) || "").trim().slice(0, 200);
-  const tagMode = q.length > 1 && q.startsWith("#");
-  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  let re = null;
-  if (q && !tagMode) {
-    try { re = new RegExp(o.regex ? q : esc(q), o.matchCase ? "g" : "gi"); } catch { return { error: "That isn't a valid pattern." }; }
-  }
-  const want = tagMode ? q.slice(1).toLowerCase() : "";
-  const found = [];
-  for (const r of roots) for (const f of await mdFiles(r)) found.push({ root: r, path: f });
-  const rows = new Array(found.length), tagCount = new Map();
-  let next = 0;
-  const worker = async () => {
-    while (next < found.length) {
-      const i = next++, { root: r, path: f } = found[i];
-      let text = "";
-      try { const st = await fs.promises.stat(f); if (st.size <= 1024 * 1024) text = await fs.promises.readFile(f, "utf8"); } catch {}
-      const name = path.basename(f);
-      const row = { path: f, name, root: r, rel: path.relative(r, f).split(path.sep).join("/"), tags: [], matches: [], nameMatch: false };
-      if (!q || tagMode) {
-        const tags = mdScan(text).tags;
-        if (!q) for (const t of tags) tagCount.set(t, (tagCount.get(t) || 0) + 1);
-        const hit = tags.filter(t => t.toLowerCase().startsWith(want));
-        if (tagMode && hit.length) {
-          row.tags = hit;
-          const inline = new RegExp(`(^|[\\s(])#(?:${hit.map(esc).join("|")})(?![\\w/-])`, "i");
-          const lines = text.split("\n");
-          let fenced = false;
-          lines.forEach((line, ln) => {
-            if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; return; }
-            if (fenced || row.matches.length >= 30) return;
-            const mm = inline.exec(line);
-            if (mm) { const col = mm.index + mm[1].length; row.matches.push({ line: ln + 1, col, len: line.slice(col).match(/^#[\w/-]+/)[0].length, text: line.slice(Math.max(0, col - 60), col + 120), at: Math.min(col, 60), nth: 0 }); }
-            else if (ln < 40 && /^tags\s*:/i.test(line)) row.matches.push({ line: ln + 1, col: 0, len: line.length, text: line.slice(0, 160), at: 0, nth: 0, front: true });
-          });
-          rows[i] = row;
-        }
-        continue;
-      }
-      row.nameMatch = (() => { re.lastIndex = 0; return re.test(name); })();
-      const seen = new Map();
-      const lines = text.split("\n");
-      for (let ln = 0; ln < lines.length && row.matches.length < 30; ln++) {
-        const line = lines[ln].replace(/\r$/, "");
-        if (line.length > 4000) continue;
-        re.lastIndex = 0;
-        let mm;
-        while ((mm = re.exec(line)) && row.matches.length < 30) {
-          if (!mm[0]) { re.lastIndex++; continue; }
-          const key = o.matchCase ? mm[0] : mm[0].toLowerCase(), nth = seen.get(key) || 0;
-          seen.set(key, nth + 1);
-          const from = Math.max(0, mm.index - 60);
-          row.matches.push({ line: ln + 1, col: mm.index, len: mm[0].length, text: line.slice(from, mm.index + mm[0].length + 120), at: mm.index - from, nth, found: mm[0] });
-        }
-      }
-      if (row.matches.length || row.nameMatch) rows[i] = row;
-    }
-  };
-  await Promise.all(Array.from({ length: 12 }, worker));
-  if (!q) return { tags: [...tagCount].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 300), files: found.length };
-  const results = rows.filter(Boolean).sort((x, y) => (y.matches.length - x.matches.length) || x.name.localeCompare(y.name));
-  return {
-    q, tagMode, files: found.length,
-    total: results.reduce((n, r) => n + r.matches.length, 0),
-    results: results.slice(0, 150),
-    truncated: results.length > 150 || found.length >= MD_GRAPH_MAX_FILES,
-  };
-}
 
 async function mdGraph(rootDir) {
   rootDir = path.resolve(String(rootDir || ""));
@@ -1571,13 +1455,15 @@ function mdRead(p, trusted) {
     const text = fs.readFileSync(p, "utf8");
     mdAllowed.add(p);
     mdRemember(p);
-    return { path: p, text };
+    return { path: p, text, mtime: st.mtimeMs };
   } catch (e) {
     return { error: e.code === "ENOENT" ? "File not found." : "Couldn't read this file." };
   }
 }
 
-function mdWrite(p, text) {
+// expected: the file's modified time when the editor opened it. If the file has changed since (another app, another device,
+// a sync service), nothing is written and { conflict: true } lets the editor ask; saving again without it overwrites.
+function mdWrite(p, text, expected) {
   if (typeof text !== "string" || text.length > 2 * MD_MAX) return { error: "Nothing to save, or the document is too large." };
   let tmp = "";
   try {
@@ -1585,7 +1471,9 @@ function mdWrite(p, text) {
     // but only if that is a Markdown or text file too.
     const target = fs.existsSync(p) ? fs.realpathSync(p) : p;
     if (!MD_EXT.test(target)) return { error: "This file is a link to something that isn't a Markdown or text file." };
-    const mode = fs.existsSync(target) ? fs.statSync(target).mode & 0o777 : 0o644; // keep the file's permissions
+    const before = fs.existsSync(target) ? fs.statSync(target) : null;
+    if (before && typeof expected === "number" && Math.abs(before.mtimeMs - expected) > 1) return { conflict: true, mtime: before.mtimeMs };
+    const mode = before ? before.mode & 0o777 : 0o644; // keep the file's permissions
     // The temporary file has a random name and is created exclusively ("wx"), so a link planted at a guessable name
     // can't redirect the write; the rename then swaps it in whole, so a crash never leaves half a note.
     tmp = path.join(path.dirname(target), `.${path.basename(target)}.${require("crypto").randomBytes(6).toString("hex")}.alcove-tmp`);
@@ -1593,11 +1481,27 @@ function mdWrite(p, text) {
     fs.renameSync(tmp, target);
     mdAllowed.add(p);
     mdRemember(p);
-    return { path: p };
+    return { path: p, mtime: fs.statSync(target).mtimeMs };
   } catch {
     if (tmp) { try { fs.rmSync(tmp, { force: true }); } catch {} }
     return { error: "Couldn't save the file. Check that the folder is writable." };
   }
+}
+
+// Search across the open folders. A plain-text or tag query can't run away, so it runs here; a regular expression typed by the
+// user can (a pattern like (a+)+$ may run for minutes), so it runs in a worker thread that is stopped after a few seconds.
+async function mdSearch(o) {
+  const roots = (Array.isArray(o && o.roots) ? o.roots : []).map(r => path.resolve(String(r))).filter(r => mdRoots.has(r));
+  if (!roots.length) return { error: "Load a folder first." };
+  if (!(o && o.regex && String(o.q || "").trim())) return searchNotes(o, roots);
+  return new Promise(resolve => {
+    let done = false;
+    const finish = r => { if (done) return; done = true; clearTimeout(timer); worker.terminate().catch(() => {}); resolve(r); };
+    const worker = new Worker(path.join(__dirname, "md-search.js"), { workerData: { mdSearch: true, o, roots } });
+    const timer = setTimeout(() => finish({ error: "That pattern takes too long to search. Try a simpler one." }), MD_SEARCH_LIMIT_MS);
+    worker.once("message", finish);
+    worker.once("error", () => finish({ error: "The search failed." }));
+  });
 }
 
 // The start page (ui/newtab.html, what a new tab shows) reads the Tools engine's saved state from the sidebar and
@@ -1639,7 +1543,7 @@ ipcMain.handle("alcove-start", async (e, op, a, b) => {
   throw new Error("unknown op");
 });
 
-ipcMain.handle("alcove-md", async (e, op, a, b) => {
+ipcMain.handle("alcove-md", async (e, op, a, b, c) => {
   if (!e.senderFrame || e.senderFrame.url.split(/[?#]/)[0] !== MD_PAGE) throw new Error("forbidden");
   if (op === "read") { // the file this tab was opened on (?file=…) is allowed; anything else must have been opened, dropped or mounted
     let own = null;
@@ -1698,7 +1602,7 @@ ipcMain.handle("alcove-md", async (e, op, a, b) => {
   }
   if (op === "save") {
     const p = path.resolve(String(a || ""));
-    return mdAllowed.has(p) && MD_EXT.test(p) ? mdWrite(p, b) : { error: "Use Save As to choose where this goes." };
+    return mdAllowed.has(p) && MD_EXT.test(p) ? mdWrite(p, b, c) : { error: "Use Save As to choose where this goes." };
   }
   if (op === "saveAs") {
     const { canceled, filePath } = await dialog.showSaveDialog(win, {

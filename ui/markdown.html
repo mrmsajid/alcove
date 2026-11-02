@@ -429,16 +429,28 @@
     // own single draft (DRAFT). Drafts are cleared on save and when the user chooses to discard. At most five, each under
     // 400 KB, so they can't fill the storage that the rest of the app shares.
     const DRAFTS = "alcove-md-drafts", DRAFT_MAX = 400000, DRAFT_KEEP = 5;
-    const readDrafts = () => { try { const d = JSON.parse(localStorage.getItem(DRAFTS) || "{}"); return d && typeof d === "object" && !Array.isArray(d) ? d : {}; } catch { return {}; } };
-    const writeDrafts = d => {
+    const readStore = key => { try { const d = JSON.parse(localStorage.getItem(key) || "{}"); return d && typeof d === "object" && !Array.isArray(d) ? d : {}; } catch { return {}; } };
+    const writeStore = (key, d) => {
       const keep = Object.entries(d).sort((a, b) => b[1].at - a[1].at).slice(0, DRAFT_KEEP);
-      try { localStorage.setItem(DRAFTS, JSON.stringify(Object.fromEntries(keep))); } catch {}
+      try { localStorage.setItem(key, JSON.stringify(Object.fromEntries(keep))); } catch {}
     };
+    const readDrafts = () => readStore(DRAFTS), writeDrafts = d => writeStore(DRAFTS, d);
+    // A document with no file yet keeps its draft under an id that lives in the tab's own address (?draft=…), so tabs don't
+    // share one draft (saving or opening in one tab used to delete the draft another tab relied on). A new blank tab offers
+    // the drafts of tabs that were closed (and the one single draft earlier versions kept) instead of showing them at once.
+    const UNTITLED = "alcove-md-untitled";
+    let draftId = new URLSearchParams(location.search).get("draft") || Math.random().toString(36).slice(2, 10);
+    function discardUntitled() { const u = readStore(UNTITLED); if (draftId in u) { delete u[draftId]; writeStore(UNTITLED, u); } }
     function discardDraft(path) { const d = readDrafts(); if (path in d) { delete d[path]; writeDrafts(d); } }
     let draftTimer;
     function flushDraft() {
       clearTimeout(draftTimer);
-      if (!file.path) return;
+      if (!file.path) {
+        const u = readStore(UNTITLED);
+        if (ta.value.trim() && ta.value.length <= DRAFT_MAX) u[draftId] = { text: ta.value, at: Date.now() }; else delete u[draftId];
+        writeStore(UNTITLED, u);
+        return;
+      }
       const d = readDrafts();
       if (dirty() && ta.value.length <= DRAFT_MAX) d[file.path] = { text: ta.value, at: Date.now() };
       else delete d[file.path];
@@ -1383,12 +1395,12 @@
       return entries;
     }
 
-    function sayUndo(text, undo) { // a footer message with an Undo button
+    function sayUndo(text, undo, label = "Undo") { // a footer message with an Undo (or other) button
       const m = $("msg");
       clearTimeout(msgTimer);
       m.textContent = text;
       if (undo) {
-        const b = Object.assign(document.createElement("button"), { textContent: "Undo" });
+        const b = Object.assign(document.createElement("button"), { textContent: label });
         b.style.cssText = "color:var(--accent);padding:0 6px;font-size:12px";
         b.onclick = () => { m.textContent = ""; undo(); };
         m.append(" ", b);
@@ -1934,6 +1946,7 @@
     async function openGraphNode(n) {
       if (n.type === "note") return openFile(n.path, true);
       if (n.type === "tag") { $("gsearch").value = n.label; G.query = n.label.toLowerCase(); return run(); }
+      if (!confirmDiscard()) return; // the new note replaces what is open
       const made = await bridge.newFile(n.root || folders[0].root, n.label); // an unresolved link: create the note it points at
       if (made.error) return say(made.error, 5000);
       G.raw = G.data = null;
@@ -2084,7 +2097,7 @@
       saved = text;
       const kept = f.path ? takeDraft(f.path, text) : null; // unsaved edits from last time
       if (kept !== null) ta.value = kept;
-      history.replaceState(null, "", f.path ? `?file=${encodeURIComponent(f.path)}` : location.pathname);
+      history.replaceState(null, "", f.path ? `?file=${encodeURIComponent(f.path)}` : `${location.pathname}?draft=${draftId}`);
       const chosen = prefs.mode === "code" ? (prefs.split && innerWidth > 900 ? "split" : "code") : "visual";
       setMode(next === "keep" && mode !== "graph" ? mode : chosen, true); // opening a note from the graph leaves the graph
       renderTree();
@@ -2106,21 +2119,25 @@
       const r = path ? await bridge.read(path) : await bridge.open();
       if (!r) return;
       if (r.error) return say(r.error, 5000);
-      load({ path: r.path, name: base(r.path) }, r.text, fresh ? "edit" : fromTree ? "keep" : path ? "view" : undefined);
-      localStorage.removeItem(DRAFT);
+      load({ path: r.path, name: base(r.path), mtime: r.mtime }, r.text, fresh ? "edit" : fromTree ? "keep" : path ? "view" : undefined);
+      discardUntitled();
     }
 
     async function save(as) {
       if (!bridge) return say("Open this page in Alcove to save files.");
       flushVisual();
       const text = ta.value;
-      const r = !as && file.path ? await bridge.save(file.path, text) : await bridge.saveAs(file.name, text);
+      let r = !as && file.path ? await bridge.save(file.path, text, file.mtime) : await bridge.saveAs(file.name, text);
+      if (r && r.conflict) { // another app or device changed the file after it was opened here
+        if (!confirm("This file was changed on disk after you opened it (by another app or another device).\n\nReplace it with what you have here?")) return say("Not saved: the file on disk is newer", 6000);
+        r = await bridge.save(file.path, text); // no expected time: the user chose to overwrite
+      }
       if (!r) return;
       if (r.error) return say(r.error, 5000);
-      file = { path: r.path, name: base(r.path) };
+      file = { path: r.path, name: base(r.path), mtime: r.mtime };
       saved = text;
       history.replaceState(null, "", `?file=${encodeURIComponent(r.path)}`);
-      localStorage.removeItem(DRAFT);
+      discardUntitled();
       discardDraft(r.path);
       paint();
       say("Saved");
@@ -2128,7 +2145,7 @@
     }
 
     $("open").onclick = () => openFile();
-    $("new").onclick = () => { if (confirmDiscard()) { load({ path: "", name: "Untitled.md" }, "", false); localStorage.removeItem(DRAFT); } };
+    $("new").onclick = () => { if (confirmDiscard()) { load({ path: "", name: "Untitled.md" }, "", false); discardUntitled(); } };
     $("save").onclick = () => save(false);
     $("saveas").onclick = () => save(true);
     $("openfolder").onclick = chooseFolder;
@@ -2167,8 +2184,7 @@
 
     function docChanged() {
       paintSoon();
-      if (!file.path) { try { localStorage.setItem(DRAFT, ta.value); } catch {} } // untitled drafts survive closing the tab
-      else { clearTimeout(draftTimer); draftTimer = setTimeout(flushDraft, 250); }  // so do edits to a saved file
+      clearTimeout(draftTimer); draftTimer = setTimeout(flushDraft, 250); // drafts survive closing the tab, quitting and crashes
     }
     ta.addEventListener("input", docChanged);
 
@@ -2249,11 +2265,22 @@
       if (q) {
         const r = bridge ? await bridge.read(q) : { error: "Open this page in Alcove to use files." };
         if (r.error) { load({ path: "", name: "Untitled.md" }, "", undefined); say(r.error, 6000); }
-        else load({ path: r.path, name: base(r.path) }, r.text, "view");
+        else load({ path: r.path, name: base(r.path), mtime: r.mtime }, r.text, "view");
       } else {
-        let draft = ""; try { draft = localStorage.getItem(DRAFT) || ""; } catch {}
+        try { // the single shared draft of earlier versions becomes one of the drafts that can be recovered
+          const old = localStorage.getItem(DRAFT);
+          if (old) { const u = readStore(UNTITLED); u.earlier = { text: old, at: Date.now() }; writeStore(UNTITLED, u); localStorage.removeItem(DRAFT); }
+        } catch {}
         load({ path: "", name: "Untitled.md" }, "", undefined);
-        if (draft) { ta.value = draft; if (visual()) renderVisual(); paint(); say("Restored your last draft"); }
+        const mine = readStore(UNTITLED)[draftId];
+        if (mine && mine.text) { ta.value = mine.text; if (visual()) renderVisual(); paint(); say("Restored your last draft"); }
+        else {
+          const others = Object.entries(readStore(UNTITLED)).filter(([id, d]) => id !== draftId && d.text && d.text.trim()).sort((a, b) => b[1].at - a[1].at);
+          if (others.length) sayUndo(`${others.length === 1 ? "An unsaved draft" : `${others.length} unsaved drafts`} from a closed tab`, () => {
+            const u = readStore(UNTITLED); delete u[others[0][0]]; writeStore(UNTITLED, u); // it becomes this tab's draft
+            ta.value = others[0][1].text; if (visual()) renderVisual(); paint(); flushDraft();
+          }, "Recover");
+        }
         if (location.hash === "#open") { history.replaceState(null, "", location.pathname); openFile(); }
         else if (location.hash === "#folder") { history.replaceState(null, "", location.pathname); chooseFolder(); }
       }
