@@ -22,7 +22,8 @@ Built on [Electron](https://www.electronjs.org/) (Chromium). Plain HTML, CSS and
 
 There are no releases yet. Build it yourself (below), or take the installers from the **Actions** tab of this
 repository (`alcove-electron-macos`, `alcove-electron-windows`). Builds exist for macOS (Apple silicon and Intel) and
-Windows (64-bit). Alcove does not update itself yet: install each new version over the old one.
+Windows (64-bit). Alcove does not update itself: **Settings › About › Check for updates** (or the command palette) tells you when a newer release exists
+and opens its page, and you install it over the old version (your tabs, settings and notes are kept).
 
 > **Windows warns about the installer?** The Windows installer is not code signed yet, so Chrome and Windows
 > SmartScreen call it "uncommon" or "dangerous". In Chrome open the downloads list, click the three dots next to
@@ -60,6 +61,7 @@ Besides the websites you visit, Alcove contacts these services, and only for the
 | `clients2.google.com` | installing extensions from the Chrome Web Store (installed extensions are not updated) |
 | `github.com` (yt-dlp and ffmpeg releases) | downloading the video tools, only when you set up video download |
 | `open.er-api.com` | exchange rates in the command palette |
+| `api.github.com` | checking for a newer release: only when you press **Check for updates**, or each day at start-up if you switched on **Check when Alcove starts** (off by default). The request carries the app name and version like any request, and nothing else about you. Nothing is downloaded or installed |
 | The sites in your start page shortcuts and your open tabs | each site's `/favicon.ico`, for the icon in the sidebar and on the start page |
 | The Chromium dictionary server | on Windows and Linux, the spell checker downloads its dictionary the first time you type in a text field (switch spell check off in Settings to avoid it) |
 

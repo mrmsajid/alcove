@@ -61,6 +61,7 @@ const COMMANDS = [
   ["focus-mode", "Start Focus Mode (25 min)", "", "block distractions sites concentrate"],
   ["end-focus", "End Focus Mode", "", "unblock"],
   ["world-clock", "Show World Clock", "", "time zones clocks cities"],
+  ["check-updates", "Check for Updates", "", "version release new download upgrade"],
   ["notes", "Show Notes", "", "scratchpad write"],
   ["markdown-open", "Open Markdown File…", "", "md edit view read document"],
   ["markdown-new", "New Markdown Document", "", "md write edit"],

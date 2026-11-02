@@ -177,6 +177,9 @@ const SECTIONS = [
       h("b", {}, "Alcove"), h("br"),
       `Version ${info.version || ""} · Chromium ${info.chrome || ""} · Electron ${info.electron || ""}`, h("br"),
       h("span", { style: "color:var(--muted)" }, "A productivity and privacy focused browser for Mac and Windows.")),
+    row("Updates", updateNote || "Alcove doesn't update itself. Check whether a newer version has been released.", h("button", { class: "btn", on: { click: checkUpdates } }, "Check for updates"),
+      updateUrl ? h("button", { class: "btn primary", on: { click: () => emit("palette-action", { type: "url", url: updateUrl, newTab: true }) } }, "Download") : null),
+    row("Check when Alcove starts", "Off by default. Asks GitHub for the latest release once a day (it sends nothing about you).", toggle(S.checkUpdates, v => set("checkUpdates", v))),
     row("Reset settings", "Put every setting on this page back to its default.", h("button", { class: "btn danger", on: { click: async () => {
       if (!confirm("Reset all settings to their defaults?")) return;
       S = await invoke("reset_settings");
@@ -185,6 +188,19 @@ const SECTIONS = [
     } } }, "Reset")),
   )]],
 ];
+
+let updateNote = "", updateUrl = "";
+async function checkUpdates() {
+  updateNote = "Checking…"; updateUrl = ""; render();
+  const r = await invoke("check_update").catch(() => null);
+  updateUrl = r && r.newer ? r.url : "";
+  updateNote = !r ? "Couldn't check for updates."
+    : r.error ? r.error
+    : r.none ? "No release has been published yet."
+    : r.newer ? `Alcove ${r.latest} is available (you have ${r.current}).`
+    : `Alcove ${r.current} is up to date.`;
+  render();
+}
 
 // 0–100 slider for a setting: live while dragging (throttled), saved when released.
 function rangeSlider(key, low, high) {

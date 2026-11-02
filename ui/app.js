@@ -1339,6 +1339,7 @@ const actions = {
   "import": () => openPanel("import"),
   "tools": () => call("toggle_tools"),
   "world-clock": () => call("open_tools", { tab: "clocks" }),
+  "check-updates": () => checkForUpdates(),
   "notes": () => call("open_tools", { tab: "notes" }),
   "markdown-open": () => window.Tools.markdown("open"),
   "markdown-new": () => window.Tools.markdown("new"),
@@ -1416,6 +1417,20 @@ listen("glass-backdrop", ({ payload }) => {
   document.body.classList.toggle("on-dark", !glassLight);
 });
 listen("toast", ({ payload }) => toast(payload.text, payload.ms || 1600));
+
+// Updates: Alcove doesn't update itself; this says whether a newer release exists and opens its page to download from.
+function announceUpdate(r, always) {
+  if (!r) return always && toast("Couldn't check for updates.");
+  if (r.error) return always && toast(r.error, 5000);
+  if (r.none) return always && toast("No release has been published yet.", 4000);
+  if (r.newer) return toast(`Alcove ${r.latest} is available (you have ${r.current})`, 15000, [{ label: "Download", fn: () => openUrl(r.url, true) }]);
+  if (always) toast(`Alcove ${r.current} is up to date.`, 3500);
+}
+async function checkForUpdates() {
+  toast("Checking for updates…", 8000);
+  announceUpdate(await call("check_update"), true);
+}
+listen("update-available", ({ payload }) => announceUpdate(payload, false));
 listen("tab-audio", ({ payload: p }) => { audio.set(p.id, { audible: p.audible, muted: p.muted }); render(); });
 
 listen("new-tab-request", ({ payload }) => {

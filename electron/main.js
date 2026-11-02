@@ -52,6 +52,7 @@ let config = {
   sitePermissions: {}, // "origin permission" -> allowed (true/false), for remembered choices
   forceDark: [], // hostnames shown with a forced dark theme
   shortcuts: [], // websites pinned to the start page: [{ name, url }]
+  lastUpdateCheck: 0, // when the start-up update check last ran (ms)
   activeProfile: "default",
   profiles: [{ id: "default", name: "Default", color: COLORS[0] }],
   settings: {},
@@ -70,6 +71,7 @@ const DEFAULT_SETTINGS = {
   glassStyle: "frosted",                    // frosted (soft tinted blur) | clear (lighter blur, almost no tint; macOS). Applies live
   shine: 40,                                // specular edges and color fringe on glass controls (0 = off)
   dnt: true, httpsOnly: false, spellcheck: true,
+  checkUpdates: false,                      // ask GitHub for a newer release when Alcove starts (at most once a day); off unless the user turns it on
 };
 const SETTING_RULES = {
   searchEngine: v => typeof v === "string" && v.length < 30,
@@ -88,6 +90,7 @@ const SETTING_RULES = {
   dnt: v => typeof v === "boolean",
   httpsOnly: v => typeof v === "boolean",
   spellcheck: v => typeof v === "boolean",
+  checkUpdates: v => typeof v === "boolean",
   glass: v => typeof v === "boolean",
   frost: v => typeof v === "number" && v >= 0 && v <= 100,
   sidebarMode: v => ["overlay", "docked"].includes(v),
@@ -124,6 +127,7 @@ function loadConfig() {
   // Whatever was saved, the rest of the app can rely on these shapes.
   for (const k of ["adblockAllow", "forceDark", "shortcuts", "recentMd", "recentMdFolders"]) if (!Array.isArray(config[k])) config[k] = [];
   if (!isPlainObject(config.sitePermissions)) config.sitePermissions = {};
+  if (typeof config.lastUpdateCheck !== "number") config.lastUpdateCheck = 0;
   config.profiles = (Array.isArray(config.profiles) ? config.profiles : [])
     .filter(p => isPlainObject(p) && typeof p.id === "string" && p.id && typeof p.name === "string")
     .map(p => ({ id: p.id, name: p.name.slice(0, 60), color: typeof p.color === "string" ? p.color : COLORS[0] }));
@@ -2542,9 +2546,52 @@ async function deleteProfile(id) {
 // ---- IPC ----
 
 const wcOf = id => { const wc = tabs.get(id)?.webContents; return wc && !wc.isDestroyed() ? wc : undefined; };
+// ---- updates ----
+// Alcove doesn't update itself. "Check for updates" (Settings > About, the palette) asks GitHub for the latest published release
+// of the repository named in package.json and, if it is newer than this version, offers the release page to download from; the
+// start-up check does the same once a day, only if the person turned it on. Nothing is downloaded or installed here.
+const UPDATE_REPO = (() => {
+  try { return /github\.com[/:]([^/]+\/[^/.]+)/.exec(require("./package.json").repository.url)[1]; } catch { return ""; }
+})();
+const versionParts = v => String(v).replace(/^v/i, "").split(/[-+]/)[0].split(".").map(n => parseInt(n, 10) || 0);
+const isNewer = (a, b) => {
+  const x = versionParts(a), y = versionParts(b);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+};
+
+async function checkForUpdate() {
+  const current = app.getVersion();
+  if (!UPDATE_REPO) return { current, error: "This build doesn't say where its releases are." };
+  const test = devEnv("ALCOVE_UPDATE_API"); // tests only: a local server standing in for GitHub
+  const api = test || `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
+  let res;
+  try { res = await net.fetch(api, { headers: { accept: "application/vnd.github+json", "user-agent": `Alcove/${current}` } }); }
+  catch { return { current, error: "Couldn't reach GitHub. Check your connection." }; }
+  if (res.status === 404) return { current, none: true }; // no published release (or the repository isn't public yet)
+  if (!res.ok) return { current, error: `GitHub answered ${res.status}. Try again later.` };
+  let release;
+  try { release = await res.json(); } catch { return { current, error: "GitHub's answer wasn't readable." }; }
+  const tag = String((release && release.tag_name) || "");
+  if (!/^v?\d+\.\d+\.\d+/.test(tag)) return { current, error: "The latest release has no version number." };
+  // The page to open must be this repository's release page: the answer is data from the network, not an instruction.
+  const url = String((release && release.html_url) || "");
+  if (!url.startsWith(test ? "http://127.0.0.1" : `https://github.com/${UPDATE_REPO}/releases/`)) return { current, error: "The latest release has an unexpected address." };
+  return { current, latest: tag.replace(/^v/i, ""), newer: isNewer(tag, current), url };
+}
+
+async function startupUpdateCheck() {
+  if (!S().checkUpdates || Date.now() - (config.lastUpdateCheck || 0) < 20 * 3600 * 1000) return;
+  config.lastUpdateCheck = Date.now();
+  saveConfig();
+  const r = await checkForUpdate();
+  if (r.newer) send("update-available", r);
+}
+
 const fxCache = new Map();
 
 const commands = {
+  check_update: () => checkForUpdate(),
   open_tab: ({ id, url }) => openTab(id, url),
   switch_tab: ({ id }) => showOnly(id),
   close_tab: ({ id, force }) => closeTab(id, !!force), // true once closed; false if the page asked "Leave this page?" and the user stayed
@@ -3041,6 +3088,7 @@ app.whenReady().then(() => {
   win.on("resize", layout);
   guardClose();
   watchCursor();
+  setTimeout(() => startupUpdateCheck().catch(() => {}), 15000); // not while the window is still settling
   globalThis.__alcoveStarted = true; // from here on, stray errors are logged instead of ending the app (see onProcessError)
 });
 

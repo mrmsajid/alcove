@@ -69,6 +69,7 @@ from the Actions tab.
 | `ALCOVE_TEST_WIN=1` | use the Windows window buttons (the `caption` view, shown on hover) on any OS, to check them without a Windows machine |
 | `ALCOVE_DOWNLOAD_DIR` | where saved images and the video downloader write (also `ALCOVE_YTDLP`, `ALCOVE_FFMPEG`: a tool to run, and `ALCOVE_IMPORT_ROOT`: a fake browser profile folder). These three are **ignored by a packaged app** (`devEnv()`), so a process that can set our environment cannot make Alcove run or write somewhere of its choosing |
 | `ALCOVE_PERF=1` | print startup timing marks and main-thread stalls |
+| `ALCOVE_UPDATE_API` | tests only (ignored by a packaged app): a URL standing in for GitHub's "latest release" endpoint |
 | `ALCOVE_DOM_OBSERVER=1` | turn the ad blocker's DOM observer back on (off by default, for measuring only) |
 | `ALCOVE_IMPORT_ROOT` | pretend this folder is a browser profile for the import feature (tests) |
 | `ALCOVE_YTDLP`, `ALCOVE_FFMPEG` | use these binaries instead of the downloaded ones |
@@ -281,7 +282,7 @@ written to `yt-diagnostics.log`).
 
 `collapsed`, `adblock`, `adblockAllow` (hostnames), `sponsorBlock`, `sitePermissions` (`"origin permission"` ->
 bool), `forceDark` (hostnames), `activeProfile`, `profiles` (`{ id, name, color }`), `recentMd` and
-`recentMdFolders` (Markdown editor), `shortcuts` (websites pinned to the start page, `{ name, url }`, at most 24,
+`recentMdFolders` (Markdown editor), `lastUpdateCheck` (ms of the last start-up update check), `shortcuts` (websites pinned to the start page, `{ name, url }`, at most 24,
 http(s) only) and `settings` (below). Missing keys fall back to defaults in `loadConfig`.
 
 `saveConfig` writes `config.json.tmp` and renames it over the real file (mode 0600), keeping the previous version as
@@ -611,6 +612,22 @@ available width and they use plain media queries (Tools: under 600 px its tab ba
 
 Every call checks `e.senderFrame.url` is exactly `ui/newtab.html`. The engine stays the single writer of its keys:
 the page only sends ops.
+
+### 6.8 Updates
+
+Alcove does not update itself (an unsigned Mac app can't, and nothing is installed behind the user's back). `checkForUpdate()` in
+`main.js` asks `api.github.com/repos/<owner>/<repo>/releases/latest` for the latest *published* release (drafts and pre-releases are not
+returned), where `<owner>/<repo>` is read from `repository.url` in `package.json` (so a renamed or moved repository is one edit there),
+compares the tag with `app.getVersion()` (`isNewer`) and returns `{ current, latest, newer, url }`, or `none` (404: nothing published,
+or the repository is private), or an `error`. The release page address is only accepted if it begins with
+`https://github.com/<owner>/<repo>/releases/` (the answer is data from the network). It is used from **Settings › About** (a button, with
+a Download button that opens the release page in a tab), from the palette command "Check for Updates", and, if the setting
+`checkUpdates` is on (off by default), once a day at start-up, 15 s after launch (`startupUpdateCheck`, remembered in
+`config.lastUpdateCheck`), which sends an `update-available` event that the sidebar turns into a toast with a Download button. To
+release: tag `vX.Y.Z` matching `version` in `package.json` and publish the draft release the workflow creates (8.5); people see it
+the next time they check. The check needs the repository's releases to be readable without a login, i.e. a public repository.
+Tested with a local stand-in server (`ALCOVE_UPDATE_API`): newer, same, older, minor bump, 404, 500, unreadable body, no tag, and a release
+page on the wrong host.
 
 ---
 

@@ -8,7 +8,7 @@ You can expect a first answer within a few days.
 
 ## What is supported
 
-Only the latest release. Alcove does not update itself yet, so after a security fix is released, install the new version.
+Only the latest release. Alcove does not update itself, so after a security fix is released, use **Settings › About › Check for updates** and install the new version.
 
 ## What counts
 
