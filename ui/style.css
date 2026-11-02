@@ -439,3 +439,6 @@ body.glass.overlay.on-dark { --text: #f3f3f6; --muted: #b6b6c0; --border: #fffff
 body.glass.overlay.on-light #glass-bg::after { background: rgb(255 255 255 / var(--tint-a, .5)); }
 body.glass.overlay.on-dark #glass-bg::after { background: rgb(24 24 27 / var(--tint-a, .5)); }
 body.glass-clear.on-light { text-shadow: 0 1px 0 rgb(255 255 255 / .4); }
+
+#open-tools.ringing { color: #ff5f57; animation: chip-ring .9s ease-in-out infinite; }
+@keyframes chip-ring { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }

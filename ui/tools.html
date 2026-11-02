@@ -20,6 +20,64 @@
     #view .t-card { background: var(--surface); }
     #view .t-card.wide { grid-column: 1 / -1; }
     .t-big { font-size: 34px; }
+    .bar nav { overflow-x: auto; scrollbar-width: none; }
+    .bar nav button { flex: none; }
+    .dialcard { align-items: center; text-align: center; }
+    .dialcard .t-title { align-self: flex-start; }
+    .dialcard .t-btns, .dialcard .t-chips, .dialcard .t-row { justify-content: center; }
+    .dial text, .ring text, .dial-face, .dial-btn, .hand-hub { stroke: none; } /* style.css gives every svg an outline: not wanted here */
+    .ring.timer .ring-prog { stroke: #4c8dff; }
+    .ring.idle .ring-prog { stroke: var(--border); }
+    .dial, .ring { width: 100%; max-width: 250px; height: auto; display: block; overflow: visible; }
+    .ring { max-width: 220px; }
+    .dial-case { fill: var(--active); stroke: var(--border); stroke-width: 2; }
+    .dial-face { fill: var(--bg); }
+    .dial-btn { fill: var(--muted); }
+    .tick { stroke: var(--muted); stroke-width: 1; stroke-linecap: round; }
+    .tick.major { stroke: var(--text); stroke-width: 2; }
+    .dial-num { fill: var(--muted); font: 600 9.5px -apple-system, "Segoe UI", sans-serif; text-anchor: middle; }
+    .sub-ring { fill: none; stroke: var(--border); stroke-width: 1.5; }
+    .dial-read { fill: var(--text); font: 600 19px ui-monospace, "SF Mono", Menlo, Consolas, monospace; text-anchor: middle; font-variant-numeric: tabular-nums; }
+    .hand-sec { stroke: #ff5a4d; stroke-width: 2.2; stroke-linecap: round; }
+    .hand-min { stroke: var(--text); stroke-width: 1.8; stroke-linecap: round; }
+    .hand-hub { fill: #ff5a4d; }
+    .ring-track { fill: none; stroke: var(--active); stroke-width: 12; }
+    .ring-prog { fill: none; stroke: var(--accent); stroke-width: 12; stroke-linecap: round; transition: stroke .3s; }
+    .ring.pomo.focus .ring-prog { stroke: #ff6b5e; }
+    .ring.pomo.break .ring-prog { stroke: #34c759; }
+    .ring-time { fill: var(--text); font: 600 40px ui-monospace, "SF Mono", Menlo, Consolas, monospace; text-anchor: middle; font-variant-numeric: tabular-nums; }
+    .ring-sub { fill: var(--muted); font: 13px -apple-system, "Segoe UI", sans-serif; text-anchor: middle; }
+    .pips { display: flex; gap: 9px; justify-content: center; }
+    .pip { width: 10px; height: 10px; border-radius: 50%; background: var(--active); border: 1px solid var(--border); }
+    .pip.done { background: #ff6b5e; border-color: #ff6b5e; }
+    .pip.now { box-shadow: 0 0 0 3px #ff6b5e55; }
+    .cfgs { display: flex; gap: 8px; justify-content: center; }
+    .cfg { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); }
+    .cfg input { width: 58px; text-align: center; padding: 4px 6px; }
+    .laps { width: 100%; max-height: 160px; overflow: auto; display: flex; flex-direction: column; font: 12.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .lap { display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 4px 8px; border-top: 1px solid var(--border); text-align: right; }
+    .lap span:first-child { text-align: left; }
+    .lap .d { color: var(--muted); }
+    .lap.best { color: #34c759; } .lap.worst { color: #ff6b5e; }
+    .alarms { display: flex; flex-direction: column; }
+    .alarm { display: flex; align-items: center; gap: 14px; padding: 10px 4px; border-top: 1px solid var(--border); }
+    .alarm:first-child { border-top: 0; }
+    .alarm .at { font: 600 26px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; min-width: 104px; }
+    .alarm .al { flex: 1; min-width: 0; }
+    .alarm.off .at, .alarm.off .al > div:first-child { color: var(--muted); }
+    .t-switch { flex: none; width: 40px; height: 22px; padding: 0; border-radius: 999px; background: var(--active); border: 1px solid var(--border); position: relative; }
+    .t-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
+    .t-switch.on { background: var(--accent); border-color: var(--accent); }
+    .t-switch.on::after { transform: translateX(18px); background: #fff; }
+    .alarm-form { display: flex; flex-direction: column; gap: 10px; }
+    .t-time { width: 130px !important; flex: none !important; }
+    .alarm-sec { display: flex; flex-direction: column; gap: 8px; }
+    .alarm-sec.t-row { flex-direction: row; }
+    .t-dom { width: 110px; padding: 5px 8px; }
+    .t-row.spaced { justify-content: space-between; }
+    .t-card.ringing { border-color: #ff5f57; animation: ringpulse 1s ease-in-out infinite; }
+    .ring-name { font-size: 22px; font-weight: 600; }
+    @keyframes ringpulse { 0%, 100% { box-shadow: 0 0 0 0 #ff5f5766; } 50% { box-shadow: 0 0 0 8px #ff5f5700; } }
     .t-notes { min-height: 300px; }
     .todos { display: flex; flex-direction: column; gap: 1px; }
     .todo { display: flex; align-items: center; gap: 10px; padding: 5px 4px; border-radius: 8px; }

@@ -1088,10 +1088,116 @@ function mdList(dir) {
   } catch { return { error: "Couldn't read this folder." }; }
 }
 
+// Graph view: every note in the folder, which notes link to which ([[wiki links]] and relative .md links),
+// and the tags in each. Reads each file once; very large files and huge folders are capped.
+const MD_NOTE = /\.(md|markdown|mdown|mkd)$/i;
+const MD_GRAPH_MAX_FILES = 3000;
+
+function mdScan(text) {
+  let body = text, tags = [];
+  const fm = text.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/);
+  if (fm) {
+    body = text.slice(fm[0].length);
+    const lines = fm[1].split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^tags\s*:\s*(.*)$/i);
+      if (!m) continue;
+      const v = m[1].trim();
+      if (v.startsWith("[")) tags.push(...v.replace(/^\[|\]\s*$/g, "").split(","));
+      else if (v) tags.push(...v.split(/[,\s]+/));
+      else for (let j = i + 1; j < lines.length && /^\s*-\s+/.test(lines[j]); j++) tags.push(lines[j].replace(/^\s*-\s+/, ""));
+    }
+  }
+  const clean = body.replace(/^\s*(```|~~~)[\s\S]*?^\s*\1.*$/gm, "").replace(/`[^`\n]*`/g, ""); // links and tags in code don't count
+  const wiki = [...clean.matchAll(/\[\[([^\]|#\n]+?)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g)].map(m => m[1].trim()).filter(Boolean);
+  const rel = [...clean.matchAll(/(?<!!)\[[^\]\n]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map(m => m[1]).filter(h => !/^[a-z][a-z0-9+.-]*:/i.test(h) && !h.startsWith("#"));
+  for (const m of clean.matchAll(/(^|[\s(])#([A-Za-z][\w/-]{0,39})(?![\w/-])/g)) tags.push(m[2]);
+  tags = [...new Set(tags.map(t => t.trim().replace(/^["']|["']$/g, "").replace(/^#+/, "")).filter(Boolean))];
+  return { tags, wiki, rel, words: (body.match(/\S+/g) || []).length };
+}
+
+async function mdGraph(rootDir) {
+  rootDir = path.resolve(String(rootDir || ""));
+  if (!mdRoots.has(rootDir)) return { error: "That folder isn't open." };
+  const files = [];
+  const walk = async (dir, depth) => {
+    if (depth > 12) return;
+    let ents;
+    try { ents = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const d of ents) {
+      if (files.length >= MD_GRAPH_MAX_FILES) return;
+      if (MD_SKIP.test(d.name)) continue;
+      const full = path.join(dir, d.name);
+      if (d.isDirectory()) await walk(full, depth + 1);
+      else if (d.isFile() && MD_NOTE.test(d.name)) files.push(full);
+    }
+  };
+  await walk(rootDir, 0);
+
+  const scans = new Array(files.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < files.length) {
+      const i = next++;
+      try {
+        const st = await fs.promises.stat(files[i]);
+        scans[i] = st.size > 1024 * 1024 ? { tags: [], wiki: [], rel: [], words: 0 } : mdScan(await fs.promises.readFile(files[i], "utf8"));
+      } catch { scans[i] = { tags: [], wiki: [], rel: [], words: 0 }; }
+    }
+  };
+  await Promise.all(Array.from({ length: 12 }, worker));
+
+  const posix = f => path.relative(rootDir, f).split(path.sep).join("/");
+  const noExt = s => s.replace(/\.(md|markdown|mdown|mkd)$/i, "");
+  const byAbs = new Map(), byRel = new Map(), byName = new Map();
+  files.forEach((f, i) => {
+    byAbs.set(f, i);
+    byAbs.set(f.toLowerCase(), i);
+    const r = noExt(posix(f)).toLowerCase();
+    byRel.set(r, i);
+    const n = r.split("/").pop();
+    if (!byName.has(n)) byName.set(n, []);
+    byName.get(n).push(i);
+  });
+  const resolveWiki = name => {
+    const key = noExt(name.replace(/\\/g, "/")).toLowerCase();
+    if (byRel.has(key)) return byRel.get(key);
+    const c = byName.get(key.split("/").pop());
+    if (!c) return -1;
+    const exact = key.includes("/") ? c.find(i => noExt(posix(files[i])).toLowerCase().endsWith("/" + key)) : undefined;
+    return exact ?? c.slice().sort((a, b) => files[a].length - files[b].length)[0]; // the shallowest match, like most note apps
+  };
+
+  const edges = new Set(), ghosts = new Map();
+  files.forEach((f, i) => {
+    const link = j => { if (j >= 0 && j !== i) edges.add(i < j ? `${i},${j}` : `${j},${i}`); };
+    for (const w of scans[i].wiki) {
+      const j = resolveWiki(w);
+      if (j >= 0) link(j);
+      else { const k = w.toLowerCase(); if (!ghosts.has(k)) ghosts.set(k, { name: w, from: new Set() }); ghosts.get(k).from.add(i); }
+    }
+    for (const h of scans[i].rel) {
+      let target;
+      try { target = decodeURIComponent(h.split("#")[0].split("?")[0]); } catch { continue; }
+      if (!target) continue;
+      const abs = path.resolve(path.dirname(f), target);
+      link(byAbs.get(abs) ?? byAbs.get(abs.toLowerCase()) ?? byAbs.get(abs + ".md") ?? -1);
+    }
+  });
+
+  return {
+    root: rootDir,
+    nodes: files.map((f, i) => ({ path: f, name: noExt(path.basename(f)), folder: path.posix.dirname(posix(f)).replace(/^\.$/, ""), tags: scans[i].tags, words: scans[i].words })),
+    edges: [...edges].map(e => e.split(",").map(Number)),
+    ghosts: [...ghosts.values()].slice(0, 500).map(g => ({ name: g.name, from: [...g.from] })),
+    truncated: files.length >= MD_GRAPH_MAX_FILES,
+  };
+}
+
 function mdAdoptRoot(p) {
   const rootDir = path.resolve(p);
   mdRoots.add(rootDir);
-  config.recentMdFolders = [rootDir, ...(config.recentMdFolders || []).filter(x => x !== rootDir)].slice(0, 8);
+  config.recentMdFolders = [rootDir, ...(config.recentMdFolders || []).filter(x => x !== rootDir)].slice(0, 20);
   saveConfig();
   return { root: rootDir, ...mdList(rootDir) };
 }
@@ -1141,6 +1247,8 @@ ipcMain.handle("alcove-md", async (e, op, a, b) => {
     return (config.recentMdFolders || []).includes(p) && fs.existsSync(p) ? mdAdoptRoot(p) : { error: "Choose the folder again." };
   }
   if (op === "list") return mdList(a);
+  if (op === "recentFolders") return (config.recentMdFolders || []).filter(d => fs.existsSync(d));
+  if (op === "graph") return mdGraph(a);
   if (op === "newFile" || op === "newFolder") {
     const dir = path.resolve(String(a || ""));
     if (!mdInside(dir)) return { error: "That folder isn't open." };

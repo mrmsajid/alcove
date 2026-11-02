@@ -8,6 +8,7 @@
     :root { color-scheme: dark light; --bg: #1d1d20; --surface: #26262a; --text: #ededf0; --muted: #8e8e97; --line: #ffffff17; --accent: #76767f; --code: #ffffff0f; --link: #8ab4ff; --hover: #ffffff10; --tag: #ffffff14; }
     @media (prefers-color-scheme: light) { :root { --bg: #fbfbfc; --surface: #f1f1f4; --text: #1c1c1f; --muted: #6e6e78; --line: #0000001a; --code: #0000000a; --link: #1a5fd0; --hover: #0000000a; --tag: #0000000d; } }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; } /* panels set their own display, which would otherwise win over hidden */
     html, body { height: 100%; margin: 0; }
     body { display: flex; flex-direction: column; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
       --doc-size: 15px; --doc-font: -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; --ed-size: 13.5px; }
@@ -41,7 +42,6 @@
     .chip.soft { color: var(--muted); padding-right: 9px; }
     .chip button { padding: 0 5px; border-radius: 50%; color: var(--muted); line-height: 1.3; }
     .addtag { color: var(--muted); border: 1px dashed var(--line); border-radius: 999px; padding: 1px 10px; }
-    body.view #fmt, body.view .addtag { display: none; }
 
     main { flex: 1; display: flex; min-height: 0; position: relative; }
     /* right side panel: files of an opened folder, and the outline of this document */
@@ -68,12 +68,56 @@
     #outlinelist button { color: var(--muted); }
     #outlinelist button:hover { color: var(--text); }
     .side-empty { padding: 10px 12px; color: var(--muted); font-size: 12.5px; }
+    .rootrow { display: flex; align-items: center; margin-top: 4px; }
+    #tree .rootrow .root { flex: 1; font-weight: 600; }
+    #tree .rootrow .unload { flex: none; width: 24px; justify-content: center; padding: 3px 0; color: var(--muted); opacity: 0; }
+    .rootrow:hover .unload { opacity: 1; }
+    #tree .rootrow .unload:hover { color: var(--text); }
+    .side-empty .recents { margin-top: 14px; display: flex; flex-direction: column; gap: 2px; text-align: left; }
+    .side-empty .recents h5 { margin: 0 0 2px 8px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+    .side-empty .recents button { border: 0; margin: 0; padding: 3px 8px; color: var(--text); display: block; width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .side-empty button { margin-top: 10px; border: 1px solid var(--line); }
     #edit { flex: 1; min-width: 0; border: 0; outline: 0; resize: none; padding: 20px 24px; background: var(--bg); color: var(--text);
       font: var(--ed-size)/1.65 ui-monospace, "SF Mono", Menlo, Consolas, monospace; tab-size: 2; }
     #view { flex: 1; min-width: 0; overflow: auto; padding: 20px 28px 60px; }
-    body.edit #view, body.view #edit { display: none; }
+    /* visual editor: a page you type into directly */
+    #visbox { flex: 1; min-width: 0; overflow: auto; padding: 20px 28px 60px; }
+    #vis { max-width: 760px; margin: 0 auto; min-height: calc(100% - 4px); outline: none; }
+    #vis.is-empty > p:first-child::before { content: "Start writing. Type # for a heading, - for a list, [] for a to-do, or use the toolbar."; color: var(--muted); pointer-events: none; }
+    #vis pre { white-space: pre-wrap; }
+    #vis table { display: table; width: 100%; }
+    #vis td, #vis th { min-width: 60px; }
+    #vis li.task { list-style: none; margin-left: -1.3em; }
+    #vis li.task input { margin-right: .55em; }
+    #vis::selection, #vis *::selection { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+    body.visual #edit, body.visual #view, body.code #view, body.code #visbox, body.split #visbox { display: none; }
     body.split #edit { border-right: 1px solid var(--line); }
+    /* graph view: notes as glowing nodes, links as lines */
+    #graphbox { flex: 1; min-width: 0; position: relative; display: none; overflow: hidden;
+      background: radial-gradient(ellipse at center, color-mix(in srgb, var(--accent) 9%, var(--bg)) 0%, var(--bg) 75%); }
+    body.graph #graphbox { display: block; }
+    body.graph #edit, body.graph #view, body.graph #visbox, body.graph #fmt, body.graph #tagbar { display: none; }
+    #gcanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+    #gbar { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; pointer-events: none; z-index: 2; }
+    #gbar > * { pointer-events: auto; }
+    .gpanel { display: flex; align-items: center; gap: 4px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 11px; background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(10px); font-size: 12.5px; }
+    .gpanel input[type=search] { width: 170px; background: transparent; border: 0; outline: 0; color: var(--text); font: inherit; padding: 3px 6px; user-select: text; }
+    .gpanel label { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; color: var(--muted); cursor: pointer; }
+    .gpanel label:hover { color: var(--text); }
+    .gpanel input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+    .gpanel button { padding: 3px 9px; font-size: 12.5px; color: var(--muted); }
+    .gpanel button.on { background: var(--bg); color: var(--text); }
+    .gpanel button:hover { color: var(--text); }
+    #gstat { color: var(--muted); font-size: 12px; padding: 0 4px; }
+    #gtip { position: absolute; z-index: 3; pointer-events: none; padding: 6px 10px; border-radius: 9px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 6px 20px #0004; font-size: 12.5px; max-width: 280px; }
+    #gtip b { display: block; } #gtip span { color: var(--muted); }
+    #gempty { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; color: var(--muted); gap: 12px; }
+    #gempty button { justify-self: center; border: 1px solid var(--line); }
+    #splitbtn { color: var(--muted); font-size: 12.5px; }
+    #splitbtn.on { color: var(--text); background: var(--hover); }
+    .sugs { display: flex; flex-wrap: wrap; gap: 5px; }
+    .sugs button { padding: 1px 9px; font-size: 12px; border-radius: 999px; background: var(--tag); color: var(--text); }
+    .sugs h5 { flex: 0 0 100%; margin: 0; font-size: 11px; font-weight: 600; color: var(--muted); }
     footer { display: flex; gap: 14px; padding: 5px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; flex: none; }
     #msg { margin-left: auto; }
 
@@ -123,7 +167,7 @@
     body.dragging #drop { display: grid; }
   </style>
 </head>
-<body class="split">
+<body class="visual">
   <header>
     <button id="open" title="Open a Markdown file (⌘O)">Open…</button>
     <button id="openfolder" title="Open a whole folder">Open folder…</button>
@@ -131,8 +175,9 @@
     <span class="name" id="name"></span>
     <span class="sp"></span>
     <div class="seg" id="modes">
-      <button data-mode="edit">Edit</button><button data-mode="split">Split</button><button data-mode="view">View</button>
+      <button data-mode="visual" title="Edit the page itself: headings and tags are written as Markdown for you">Visual</button><button data-mode="code" title="Edit the Markdown text">Code</button><button data-mode="graph" title="See how the notes in the open folder link to each other">Graph</button>
     </div>
+    <button id="splitbtn" title="Show a live preview next to the code" hidden>Preview</button>
     <button id="sidebtn" title="Files and outline"></button>
     <button id="save" class="primary" title="Save (⌘S)">Save</button>
     <button id="saveas" title="Save a copy">Save as…</button>
@@ -140,6 +185,20 @@
   <div id="fmt"></div>
   <div id="tagbar"></div>
   <main>
+    <div id="visbox"><div id="vis" class="doc" contenteditable="true" spellcheck="true"></div></div>
+    <div id="graphbox">
+      <canvas id="gcanvas"></canvas>
+      <div id="gbar">
+        <div class="gpanel" id="gscope"><button data-s="all" class="on">All notes</button><button data-s="local" title="Only the open note and the notes around it">This note</button>
+          <span id="gdepth" hidden><button id="gdm" title="Fewer steps away">−</button><span id="gd">1</span><button id="gdp" title="More steps away">+</button></span></div>
+        <div class="gpanel" id="gfolderbox" hidden><select id="gfolder" title="Which loaded folder to show"></select></div>
+        <div class="gpanel"><input id="gsearch" type="search" placeholder="Find a note or #tag" spellcheck="false"></div>
+        <div class="gpanel"><label><input type="checkbox" id="g-tags"> Tags</label><label><input type="checkbox" id="g-ghost"> Unresolved links</label><label><input type="checkbox" id="g-orph" checked> Orphans</label></div>
+        <div class="gpanel"><button id="gfit" title="Fit everything on screen">Fit</button><button id="grefresh" title="Read the folder again">Refresh</button><span id="gstat"></span></div>
+      </div>
+      <div id="gempty" hidden><div><h2 style="margin:0 0 6px;color:var(--text);font-weight:600">No folder open</h2><p style="margin:0"></p></div><button id="gopen">Open folder…</button></div>
+      <div id="gtip" hidden></div>
+    </div>
     <textarea id="edit" spellcheck="true" placeholder="Start writing in Markdown…"></textarea>
     <div id="view"><div class="doc" id="doc"></div></div>
     <button id="edge" title="Show or hide the files and outline panel">‹</button>
@@ -153,7 +212,8 @@
           <button id="f-note" title="New note"></button>
           <button id="f-dir" title="New folder"></button>
           <button id="f-refresh" title="Refresh"></button>
-          <button id="f-open" title="Open a folder…"></button>
+          <button id="f-recent" title="Reload a recent folder"></button>
+          <button id="f-open" title="Load another folder…"></button>
         </div>
         <div id="tree"></div>
       </div>
@@ -171,8 +231,11 @@
     const safeImg = u => /^https?:\/\//i.test(u);
 
     function inline(src) {
-      const codes = [];
-      let t = src.replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
+      const codes = [], lits = [];
+      const lit = c => { lits.push(c); return `\u0001${lits.length - 1}\u0001`; };
+      let t = src.replace(/\\`/g, () => lit("`")); // an escaped backtick doesn't start a code span
+      t = t.replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
+      t = t.replace(/\\([\\*_~#>+\-.!|\[\]()<])/g, (_, c) => lit(c)); // \* \# … show the character itself
       t = esc(t);
       t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (m, alt, url) => safeImg(url) ? `<img src="${url}" alt="${alt}">` : alt);
       t = t.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (m, text, url) => safeLink(url) ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>` : text);
@@ -184,7 +247,7 @@
       // #tags in running text (never inside a tag's own attributes)
       t = t.split(/(<[^>]*>)/).map(seg => (seg.startsWith("<") ? seg : seg.replace(/(^|[\s(])#([A-Za-z][\w/-]{0,39})(?![\w/-])/g, '$1<span class="tag">#$2</span>'))).join("");
       t = t.replace(/ {2,}\n/g, "<br>");
-      return t.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${esc(codes[i])}</code>`);
+      return t.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${esc(codes[i])}</code>`).replace(/\u0001(\d+)\u0001/g, (_, i) => esc(lits[i]));
     }
 
     const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
@@ -242,7 +305,7 @@
           continue;
         }
         if (line.includes("|") && i + 1 < lines.length && TABLE_SEP(lines[i + 1])) {
-          const cells = l => l.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
+          const cells = l => l.trim().replace(/^\||\|$/g, "").split(/(?<!\\)\|/).map(c => c.trim().replace(/\\\|/g, "|"));
           const head = cells(line);
           const align = cells(lines[i + 1]).map(c => /^:-+:$/.test(c) ? "center" : /-:$/.test(c) ? "right" : /^:-/.test(c) ? "left" : "");
           const style = k => (align[k] ? ` style="text-align:${align[k]}"` : "");
@@ -302,11 +365,12 @@
     // ---- editor ----
     const $ = id => document.getElementById(id);
     const ta = $("edit");
+    const vis = $("vis");
     const bridge = window.alcoveMd; // only present inside Alcove
     const DRAFT = "alcove-md-draft", PREFS = "alcove-md-prefs";
     let file = { path: "", name: "Untitled.md" };
     let saved = "";
-    let mode = "split";
+    let mode = "visual"; // "visual" | "code" | "split" (code with a live preview)
     let msgTimer;
     let bodyLines = 0; // lines taken by front matter, so preview checkboxes map back to source lines
 
@@ -320,7 +384,8 @@
       ta.focus();
       ta.setSelectionRange(start, end);
       let ok = false;
-      try { ok = text === "" ? (start === end || document.execCommand("delete")) : document.execCommand("insertText", false, text); } catch {}
+      // the code view's textarea is hidden while the visual editor shows: never aim execCommand at the other editor
+      if (document.activeElement === ta) try { ok = text === "" ? (start === end || document.execCommand("delete")) : document.execCommand("insertText", false, text); } catch {}
       if (ta.value !== want) { ta.value = want; ta.dispatchEvent(new Event("input")); }
       const s = selStart ?? start + text.length;
       ta.setSelectionRange(s, selEnd ?? s);
@@ -354,7 +419,7 @@
       replaceRange(s, e, before + text + after, s + before.length, s + before.length + text.length);
     }
 
-    function currentBlock() {
+    function currentBlockCode() {
       const v = ta.value, s = ta.selectionStart;
       const a = v.lastIndexOf("\n", s - 1) + 1;
       let b = v.indexOf("\n", s);
@@ -372,7 +437,7 @@
       return "p";
     }
 
-    function setBlock(kind) {
+    function setBlockCode(kind) {
       if (kind === "code") {
         const [a, b] = lineRange();
         const text = ta.value.slice(a, b);
@@ -380,7 +445,7 @@
         else replaceRange(a, b, "```\n\n```", a + 4);
         return;
       }
-      const cur = currentBlock();
+      const cur = currentBlockCode();
       if (kind === cur && kind !== "p") kind = "p"; // choosing the same style again turns it off
       let n = 0;
       mapLines(l => {
@@ -407,7 +472,7 @@
 
     // Small form shown under the toolbar (this page can't use prompt())
     function ask(title, fields, anchor) {
-      const sel = [ta.selectionStart, ta.selectionEnd];
+      const restore = saveSel();
       return new Promise(resolve => {
         const pop = document.createElement("form");
         pop.className = "pop";
@@ -416,11 +481,23 @@
         const r = anchor.getBoundingClientRect();
         pop.style.top = `${r.bottom + 6}px`;
         pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - 290))}px`;
-        const done = values => { pop.remove(); document.removeEventListener("mousedown", away, true); ta.focus(); ta.setSelectionRange(sel[0], sel[1]); resolve(values); };
+        const done = values => { pop.remove(); document.removeEventListener("mousedown", away, true); restore(); resolve(values); };
         const away = e => { if (!pop.contains(e.target)) done(null); };
         pop.addEventListener("submit", e => { e.preventDefault(); done(fields.map((_, k) => pop.elements[`f${k}`].value.trim())); });
         pop.addEventListener("keydown", e => { if (e.key === "Escape") { e.stopPropagation(); done(null); } });
         pop.querySelector("[data-x]").onclick = () => done(null);
+        fields.forEach((f, k) => { // suggestions: click one to add it to the field
+          if (!f.suggest || !f.suggest.length) return;
+          const box = document.createElement("div");
+          box.className = "sugs";
+          box.append(Object.assign(document.createElement("h5"), { textContent: "Suggestions" }));
+          for (const w of f.suggest) {
+            const b = Object.assign(document.createElement("button"), { type: "button", textContent: w });
+            b.onclick = () => { const i = pop.elements[`f${k}`]; i.value = (i.value.trim() ? i.value.replace(/[,\s]*$/, "") + ", " : "") + w; i.focus(); };
+            box.append(b);
+          }
+          pop.insertBefore(box, pop.querySelector(".row"));
+        });
         document.body.append(pop);
         setTimeout(() => document.addEventListener("mousedown", away, true), 0);
         const first = pop.querySelector("input");
@@ -462,6 +539,491 @@
       say(msg);
     };
 
+    // ---- visual editor: a page you edit directly; every change is written back into the Markdown text ----
+    const visual = () => mode === "visual";
+    const inVis = () => { const sel = getSelection(); return !!sel.rangeCount && vis.contains(sel.anchorNode); };
+    try { document.execCommand("defaultParagraphSeparator", false, "p"); document.execCommand("styleWithCSS", false, false); } catch {}
+    const up = (node, re) => { for (let n = node; n && n !== vis; n = n.parentNode) if (n.nodeType === 1 && re.test(n.tagName)) return n; return null; };
+    const blockEl = node => up(node, /^(P|DIV|H[1-6]|LI|BLOCKQUOTE|PRE|TD|TH)$/);
+    function caretTo(node, atEnd) {
+      const r = document.createRange(), sel = getSelection();
+      r.selectNodeContents(node);
+      r.collapse(!atEnd);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+
+    // The cursor or selection of whichever editor is showing, so a popover can give it back afterwards
+    function saveSel() {
+      if (visual()) {
+        const sel = getSelection(), r = sel.rangeCount && vis.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null;
+        return () => { vis.focus(); if (r) { const s2 = getSelection(); s2.removeAllRanges(); s2.addRange(r); } };
+      }
+      const a = [ta.selectionStart, ta.selectionEnd];
+      return () => { ta.focus(); ta.setSelectionRange(a[0], a[1]); };
+    }
+
+    let visDirty = false, visTimer;
+    function enableBoxes() { // freshly rendered or inserted content: tick boxes work, tag chips are whole units
+      for (const b of vis.querySelectorAll("input[type=checkbox]")) { b.removeAttribute("disabled"); b.removeAttribute("data-line"); }
+      for (const c of vis.querySelectorAll("span.tag")) c.contentEditable = "false";
+    }
+    function renderVisual() {
+      const body = bodyOf(ta.value);
+      vis.innerHTML = body.trim() ? render(body) : "<p><br></p>";
+      enableBoxes();
+      vis.classList.toggle("is-empty", !body.trim());
+      visDirty = false;
+    }
+
+    // ---- page → Markdown ----
+    const BLOCK_TAGS = new Set(["P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI", "BLOCKQUOTE", "PRE", "HR", "TABLE", "THEAD", "TBODY", "TR", "FIGURE", "SECTION", "ARTICLE"]);
+    const isBlock = n => n.nodeType === 1 && BLOCK_TAGS.has(n.tagName);
+    const escText = t => t.replace(/\u00a0/g, " ").replace(/\u200b/g, "")
+      .replace(/\\(?=[\\`*_~#>+\-.!|\[\]()<])/g, "\\\\").replace(/([*`])/g, "\\$1")
+      .replace(/(^|[^\w])_|_(?=[^\w]|$)/g, m => m.replace("_", "\\_")).replace(/~~/g, "\\~\\~");
+    const escBlockStart = t => t.replace(/^(\s*)(#{1,6}(?=\s)|>|[-+](?=\s)|```|~~~)/gm, "$1\\$2").replace(/^(\s*\d+)([.)])(?=\s)/gm, "$1\\$2");
+    const mark = (m, t) => { if (!t.trim()) return t; return t.match(/^\s*/)[0] + m + t.trim() + m + t.match(/\s*$/)[0]; };
+    function codeSpan(text) {
+      const t = text.replace(/\u200b/g, "");
+      if (!t) return "";
+      const ticks = "`".repeat((t.match(/`+/g) || []).reduce((a, x) => Math.max(a, x.length), 0) + 1);
+      return ticks + (/^`|`$/.test(t) ? ` ${t} ` : t) + ticks;
+    }
+    const inlineKids = n => [...n.childNodes].map(inlineMd).join("");
+    function inlineMd(n) {
+      if (n.nodeType === 3) return escText(n.nodeValue);
+      if (n.nodeType !== 1) return "";
+      switch (n.tagName) {
+        case "B": case "STRONG": return mark("**", inlineKids(n));
+        case "I": case "EM": return mark("*", inlineKids(n));
+        case "S": case "STRIKE": case "DEL": return mark("~~", inlineKids(n));
+        case "CODE": return codeSpan(n.textContent);
+        case "A": { const h = n.getAttribute("href") || "", t = inlineKids(n); return /^(https?:\/\/|mailto:|#)/i.test(h) && t.trim() ? `[${t}](${h})` : t; }
+        case "IMG": { const src = n.getAttribute("src") || ""; return /^https?:\/\//i.test(src) ? `![${(n.getAttribute("alt") || "").replace(/[\[\]]/g, "")}](${src})` : ""; }
+        case "BR": return "  \n";
+        case "INPUT": return "";
+        case "SPAN": {
+          const st = n.style; let t = inlineKids(n);
+          if (+st.fontWeight >= 600 || st.fontWeight === "bold") t = mark("**", t);
+          if (st.fontStyle === "italic") t = mark("*", t);
+          if (/line-through/.test(st.textDecoration)) t = mark("~~", t);
+          return t;
+        }
+        default: return inlineKids(n);
+      }
+    }
+    function preText(n, keepEnd) {
+      let out = "";
+      const walk = x => {
+        if (x.nodeType === 3) out += x.nodeValue;
+        else if (x.nodeType === 1) {
+          if (x.tagName === "BR") out += "\n";
+          else { if (isBlock(x) && out && !out.endsWith("\n")) out += "\n"; [...x.childNodes].forEach(walk); }
+        }
+      };
+      [...n.childNodes].forEach(walk);
+      out = out.replace(/\u200b/g, "");
+      return keepEnd ? out : out.replace(/\n+$/, "");
+    }
+    function listMd(list) {
+      const ordered = list.tagName === "OL";
+      let i = Number(list.getAttribute("start")) || 1, pad = "  ";
+      const lines = [];
+      for (const c of list.childNodes) {
+        if (c.nodeType !== 1) continue;
+        if (c.tagName === "UL" || c.tagName === "OL") { lines.push(listMd(c).split("\n").map(l => pad + l).join("\n")); continue; } // a list sitting inside a list belongs to the item before it
+        if (c.tagName !== "LI") continue;
+        const box = [...c.childNodes].find(x => x.nodeType === 1 && x.tagName === "INPUT" && x.type === "checkbox");
+        const marker = ordered ? `${i++}.` : "-";
+        pad = " ".repeat(marker.length + 1);
+        const head = [], nested = [];
+        for (const x of c.childNodes) {
+          if (x === box) continue;
+          if (x.nodeType === 1 && (x.tagName === "UL" || x.tagName === "OL")) nested.push(listMd(x));
+          else head.push(isBlock(x) ? inlineKids(x) : inlineMd(x));
+        }
+        const text = head.join("").replace(/\u200b/g, "").trim();
+        lines.push(`${marker} ${box ? (box.checked ? "[x] " : "[ ] ") : ""}${text.split("\n").join("\n" + pad)}`);
+        for (const nl of nested) lines.push(nl.split("\n").map(l => pad + l).join("\n"));
+      }
+      return lines.join("\n");
+    }
+    function tableMd(t) {
+      const rows = [...t.rows];
+      if (!rows.length) return "";
+      const cell = c => inlineKids(c).replace(/\u200b/g, "").replace(/\s*\n\s*/g, " ").replace(/\|/g, "\\|").trim();
+      const cols = Math.max(...rows.map(r => r.cells.length));
+      const line = r => "| " + Array.from({ length: cols }, (_, k) => (r.cells[k] ? cell(r.cells[k]) : "")).join(" | ") + " |";
+      const align = k => { const c = rows[0].cells[k], a = c && (c.style.textAlign || c.getAttribute("align")); return a === "center" ? ":---:" : a === "right" ? "---:" : a === "left" ? ":---" : "---"; };
+      return [line(rows[0]), "| " + Array.from({ length: cols }, (_, k) => align(k)).join(" | ") + " |", ...rows.slice(1).map(line)].join("\n");
+    }
+    function blockMd(n) {
+      const t = n.tagName;
+      if (/^H[1-6]$/.test(t)) { const x = inlineKids(n).replace(/\u200b/g, "").trim(); return x ? ["#".repeat(+t[1]) + " " + x] : []; }
+      if (t === "UL" || t === "OL") return [listMd(n)];
+      if (t === "BLOCKQUOTE") { const inner = blocksOf(n).join("\n\n"); return inner ? [inner.split("\n").map(l => (l ? "> " + l : ">")).join("\n")] : []; }
+      if (t === "PRE") {
+        const text = preText(n), lang = ((n.querySelector("code") || n).className.match(/lang-([\w+-]+)/) || [])[1] || "";
+        const fence = text.includes("```") ? "~~~" : "```";
+        return [`${fence}${lang}\n${text}\n${fence}`];
+      }
+      if (t === "HR") return ["---"];
+      if (t === "TABLE") return [tableMd(n)];
+      return blocksOf(n);
+    }
+    function blocksOf(parent) {
+      const out = [];
+      let run = [];
+      const flush = () => {
+        if (!run.length) return;
+        const text = run.map(inlineMd).join("").replace(/\u200b/g, "").replace(/^(\s*\n)+|\s+$/g, "");
+        if (text.trim()) out.push(escBlockStart(text));
+        run = [];
+      };
+      for (const n of parent.childNodes) {
+        if (n.nodeType === 3 || (n.nodeType === 1 && !isBlock(n))) run.push(n);
+        else if (n.nodeType === 1) { flush(); out.push(...blockMd(n)); }
+      }
+      flush();
+      return out;
+    }
+    function domToMarkdown(root) {
+      const md = blocksOf(root).join("\n\n").trim();
+      return md ? md + "\n" : "";
+    }
+
+    function syncFromVisual() {
+      visDirty = false;
+      const t = ta.value, fm = splitFront(t);
+      const next = (fm ? t.slice(0, fm.len) : "") + domToMarkdown(vis);
+      vis.classList.toggle("is-empty", !vis.textContent.replace(/\u200b/g, "").trim() && !vis.querySelector("img,hr,table"));
+      if (next !== t) { ta.value = next; docChanged(); }
+    }
+    const syncSoon = () => { visDirty = true; clearTimeout(visTimer); visTimer = setTimeout(syncFromVisual, 150); };
+    function flushVisual() { if (visual() && visDirty) { clearTimeout(visTimer); syncFromVisual(); } }
+
+    // ---- visual editing commands ----
+    function vcmd(name, value) { vis.focus(); document.execCommand(name, false, value); syncSoon(); }
+    function vInsertHTML(html) { vis.focus(); document.execCommand("insertHTML", false, html); enableBoxes(); syncSoon(); }
+
+    function visualBlock() {
+      const sel = getSelection();
+      for (let n = sel.rangeCount ? sel.anchorNode : null; n && n !== vis; n = n.parentNode) {
+        if (n.nodeType !== 1) continue;
+        if (/^H[1-6]$/.test(n.tagName)) return "h" + n.tagName[1];
+        if (n.tagName === "PRE") return "code";
+        if (n.tagName === "LI") return n.classList.contains("task") ? "todo" : n.parentElement && n.parentElement.tagName === "OL" ? "ol" : "ul";
+        if (n.tagName === "BLOCKQUOTE") return "quote";
+      }
+      return "p";
+    }
+    function selectedItems() {
+      const sel = getSelection();
+      if (!sel.rangeCount) return [];
+      const r = sel.getRangeAt(0);
+      const lis = new Set([...vis.querySelectorAll("li")].filter(li => r.intersectsNode(li) || li.contains(sel.anchorNode) || li.contains(sel.focusNode)));
+      for (const [n, off] of [[sel.anchorNode, sel.anchorOffset], [sel.focusNode, sel.focusOffset]]) { // caret placed directly in the list: the item it sits at
+        if (n && n.nodeType === 1 && /^(UL|OL)$/.test(n.tagName) && n.children.length) { const c = n.children[Math.min(off, n.children.length - 1)]; if (c && c.tagName === "LI") lis.add(c); }
+      }
+      const all = [...lis];
+      return all.filter(li => !all.some(o => o !== li && li.contains(o)));
+    }
+    function toTask(li) {
+      if (li.classList.contains("task")) return;
+      li.classList.add("task");
+      const b = document.createElement("input");
+      b.type = "checkbox";
+      li.prepend(b);
+      const sel = getSelection();
+      if (sel.rangeCount && sel.isCollapsed && li.contains(sel.anchorNode)) {
+        const before = document.createRange();
+        before.setStart(li, 0);
+        before.setEnd(sel.anchorNode, sel.anchorOffset);
+        if (!before.toString().replace(/\u200b/g, "")) { // the caret was at the start of the item: keep it after the box
+          const r = document.createRange();
+          r.setStartAfter(b);
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+        }
+      }
+    }
+    // formatBlock leaves bare text inside a <blockquote>; keeping a paragraph in there lets Enter add a line to the same quote
+    function normalizeQuotes() {
+      const sel = getSelection(), an = sel.rangeCount ? sel.anchorNode : null, ao = sel.rangeCount ? sel.anchorOffset : 0;
+      for (const bq of vis.querySelectorAll("blockquote")) {
+        if ([...bq.children].some(c => isBlock(c))) continue;
+        const p = document.createElement("p");
+        p.append(...bq.childNodes);
+        if (!p.childNodes.length) p.innerHTML = "<br>";
+        bq.append(p);
+      }
+      if (an && vis.contains(an) && an.nodeType === 3) { const r = document.createRange(); r.setStart(an, Math.min(ao, an.nodeValue.length)); r.collapse(true); sel.removeAllRanges(); sel.addRange(r); }
+    }
+    function fromTask(li) {
+      li.classList.remove("task", "done");
+      [...li.children].find(c => c.tagName === "INPUT")?.remove();
+    }
+    // A whole flat list becomes one paragraph per item (the browser's own list toggle merges them); false if only part of it is selected
+    function unlistWhole() {
+      const items = selectedItems(), list = items[0] && items[0].parentElement;
+      if (!list || !/^(UL|OL)$/.test(list.tagName) || list.querySelector("li li")) return false;
+      const lis = [...list.children].filter(c => c.tagName === "LI");
+      if (!lis.length || !lis.every(li => items.includes(li))) return false;
+      const paras = lis.map(li => {
+        fromTask(li);
+        const p = document.createElement("p");
+        p.append(...[...li.childNodes].filter(n => !(n.nodeType === 1 && n.tagName === "BR" && n === li.lastChild && li.childNodes.length > 1)));
+        if (!p.childNodes.length) p.innerHTML = "<br>";
+        return p;
+      });
+      list.replaceWith(...paras);
+      const r = document.createRange(), sel = getSelection();
+      r.setStartBefore(paras[0]);
+      r.setEndAfter(paras[paras.length - 1]);
+      sel.removeAllRanges();
+      sel.addRange(r);
+      return true;
+    }
+    function vSetBlock(kind) {
+      vis.focus();
+      const cur = visualBlock();
+      if (kind === cur && kind !== "p") kind = "p"; // the same style again turns it off
+      const inList = cur === "ul" || cur === "ol" || cur === "todo";
+      if (kind === "todo") {
+        if (!inList || cur === "ol") document.execCommand("insertUnorderedList");
+        selectedItems().forEach(toTask);
+      } else if (kind === "ul") {
+        if (cur === "todo") selectedItems().forEach(fromTask); else document.execCommand("insertUnorderedList");
+      } else if (kind === "ol") {
+        if (cur === "todo") selectedItems().forEach(fromTask);
+        document.execCommand("insertOrderedList");
+      } else {
+        if (inList && !unlistWhole()) { selectedItems().forEach(fromTask); document.execCommand(cur === "ol" ? "insertOrderedList" : "insertUnorderedList"); }
+        if (cur === "quote" && kind !== "quote") document.execCommand("outdent");
+        document.execCommand("formatBlock", false, kind === "quote" ? "blockquote" : kind === "code" ? "pre" : kind);
+        if (kind === "quote") normalizeQuotes();
+      }
+      syncSoon();
+    }
+    function vCode() {
+      vis.focus();
+      const sel = getSelection();
+      if (!sel.rangeCount) return;
+      const inCode = up(sel.anchorNode, /^CODE$/);
+      if (inCode && !up(inCode, /^PRE$/)) { inCode.replaceWith(...inCode.childNodes); syncSoon(); return; } // already code: unwrap
+      vInsertHTML(`<code>${esc(sel.toString() || "code")}</code>\u200b`);
+    }
+
+    // A to-do item continues with a new to-do; an empty one ends the list
+    function taskEnter(li) {
+      const sel = getSelection(), r = sel.getRangeAt(0);
+      const box = [...li.children].find(c => c.tagName === "INPUT");
+      const nested = [...li.children].find(c => /^(UL|OL)$/.test(c.tagName));
+      const own = [...li.childNodes].filter(n => n !== box && n !== nested).map(n => n.textContent).join("").replace(/[\u200b\s]/g, "");
+      if (!own) { fromTask(li); document.execCommand("insertUnorderedList"); syncSoon(); return; }
+      const tail = document.createRange();
+      tail.setStart(r.endContainer, r.endOffset);
+      if (nested) tail.setEndBefore(nested); else tail.setEnd(li, li.childNodes.length);
+      const frag = tail.extractContents();
+      const li2 = document.createElement("li"), b2 = document.createElement("input");
+      li2.className = "task";
+      b2.type = "checkbox";
+      li2.append(b2, frag);
+      if (!li2.textContent.replace(/\u200b/g, "")) li2.append(document.createTextNode("\u200b"));
+      li.after(li2);
+      const rr = document.createRange();
+      rr.setStartAfter(b2);
+      rr.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(rr);
+      syncSoon();
+    }
+    // Enter inside a code block adds a line (a real newline character); Enter on an empty last line leaves the block
+    function preEnter(pre) {
+      const sel = getSelection(), r = sel.getRangeAt(0);
+      const tail = document.createRange();
+      tail.setStart(r.endContainer, r.endOffset);
+      tail.setEnd(pre, pre.childNodes.length);
+      const atEnd = !tail.toString().replace(/\u200b/g, "");
+      if (atEnd && /\n$/.test(preText(pre, true))) {
+        pre.querySelectorAll("br").forEach(b => b.remove());
+        const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+        let last = null;
+        while (walker.nextNode()) last = walker.currentNode;
+        if (last) last.nodeValue = last.nodeValue.replace(/[\n\u200b]+$/, "");
+        const p = document.createElement("p");
+        p.innerHTML = "<br>";
+        pre.after(p);
+        caretTo(p);
+        syncSoon();
+        return;
+      }
+      const ins = document.createTextNode(atEnd ? "\n\u200b" : "\n"); // the zero-width mark keeps a new last line visible
+      r.deleteContents();
+      r.insertNode(ins);
+      const rr = document.createRange();
+      rr.setStart(ins, ins.nodeValue.length);
+      rr.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(rr);
+      syncSoon();
+    }
+    // Enter on an empty line inside a quote steps out of the quote
+    function quoteExit(bq, unit) {
+      const p = document.createElement("p");
+      p.innerHTML = "<br>";
+      if (unit !== bq) unit.remove();
+      if (!bq.textContent.replace(/\u200b/g, "").trim() && !bq.querySelector("img,table,pre")) bq.replaceWith(p); else bq.after(p);
+      caretTo(p);
+      syncSoon();
+    }
+    function nextCell(cell, back) {
+      const table = cell.closest("table");
+      let cells = [...table.querySelectorAll("th,td")];
+      let i = cells.indexOf(cell) + (back ? -1 : 1);
+      if (i >= cells.length) {
+        const tr = document.createElement("tr");
+        for (let k = 0; k < cell.parentNode.children.length; k++) { const td = document.createElement("td"); td.innerHTML = "<br>"; tr.append(td); }
+        (table.tBodies[0] || table).append(tr);
+        cells = [...table.querySelectorAll("th,td")];
+        syncSoon();
+      }
+      if (cells[i]) caretTo(cells[i]);
+    }
+
+    // #word followed by a space becomes a tag chip as you type
+    function autoTag(e) {
+      if (e.inputType !== "insertText" || e.data !== " ") return;
+      const sel = getSelection();
+      if (!sel.rangeCount || !sel.isCollapsed || sel.anchorNode.nodeType !== 3) return;
+      const node = sel.anchorNode;
+      if (up(node, /^(PRE|CODE|A)$/) || (node.parentElement && node.parentElement.classList.contains("tag"))) return;
+      const off = sel.anchorOffset, m = node.nodeValue.slice(0, off).match(/(^|\s)#([A-Za-z][\w/-]{0,39})\s$/);
+      if (!m) return;
+      const start = m.index + m[1].length;
+      const head = document.createTextNode(node.nodeValue.slice(0, start));
+      const chip = Object.assign(document.createElement("span"), { className: "tag", textContent: "#" + m[2] });
+      chip.contentEditable = "false";
+      const tail = document.createTextNode("\u00a0" + node.nodeValue.slice(off)); // the space just typed (a plain trailing space would be collapsed away), then whatever followed
+      node.replaceWith(head, chip, tail);
+      const place = () => { const r = document.createRange(), s2 = getSelection(); r.setStart(tail, Math.min(1, tail.nodeValue.length)); r.collapse(true); s2.removeAllRanges(); s2.addRange(r); };
+      place();
+      setTimeout(() => { // the editor can move the caret back once the typing command finishes
+        const s2 = getSelection();
+        const fine = s2.rangeCount && s2.anchorNode === tail && s2.anchorOffset >= 1;
+        const stray = !s2.rangeCount || !vis.contains(s2.anchorNode) || s2.anchorNode === head || s2.anchorNode === chip || chip.contains(s2.anchorNode) || s2.anchorNode === chip.parentNode || (s2.anchorNode === tail && s2.anchorOffset === 0);
+        if (!fine && stray) place();
+      }, 0);
+    }
+
+    vis.addEventListener("input", e => {
+      if (!vis.firstElementChild) { vis.innerHTML = "<p><br></p>"; caretTo(vis.firstChild); }
+      else if (inVis() && !blockEl(getSelection().anchorNode)) document.execCommand("formatBlock", false, "p"); // text typed straight into the page
+      autoTag(e);
+      syncSoon();
+    });
+    vis.addEventListener("change", e => { // ticking a to-do
+      if (e.target.matches && e.target.matches("input[type=checkbox]")) { const li = e.target.closest("li"); if (li) li.classList.toggle("done", e.target.checked); syncSoon(); }
+    });
+    vis.addEventListener("click", e => { // links open with ⌘/Ctrl-click
+      const a = e.target.closest && e.target.closest("a[href]");
+      if (a && (e.metaKey || e.ctrlKey)) { e.preventDefault(); window.open(a.href, "_blank"); }
+    });
+    vis.addEventListener("keydown", e => {
+      const sel = getSelection();
+      if (!sel.rangeCount || e.isComposing) return;
+      const meta = e.metaKey || e.ctrlKey, node = sel.anchorNode;
+      const li = up(node, /^LI$/), pre = up(node, /^PRE$/), blk = up(node, /^(P|DIV)$/);
+      if (e.key === "Enter" && !e.shiftKey && !meta && !e.altKey && sel.isCollapsed) {
+        if (li && li.classList.contains("task")) { e.preventDefault(); taskEnter(li); return; }
+        if (pre) { e.preventDefault(); preEnter(pre); return; }
+        const bq = up(node, /^BLOCKQUOTE$/);
+        if (bq && !li) {
+          const unit = blk && bq.contains(blk) ? blk : bq;
+          if (!unit.textContent.replace(/\u200b/g, "").trim()) { e.preventDefault(); quoteExit(bq, unit); return; }
+          const tailR = document.createRange();
+          tailR.setStart(sel.anchorNode, sel.anchorOffset);
+          tailR.setEnd(unit, unit.childNodes.length);
+          if (unit !== bq && !tailR.toString().replace(/\u200b/g, "")) { // at the end of a paragraph in the quote: a new paragraph in the same quote
+            e.preventDefault();
+            const p = document.createElement("p");
+            p.innerHTML = "<br>";
+            unit.after(p);
+            caretTo(p);
+            syncSoon();
+            return;
+          }
+        }
+        if (blk && !li && !up(node, /^(TD|TH)$/)) {
+          const text = blk.textContent.replace(/\u200b/g, "").trim(), fence = text.match(/^```([\w+-]*)$/);
+          if (fence) { // ```js then Enter starts a code block
+            e.preventDefault();
+            const code = Object.assign(document.createElement("code"), { className: fence[1] ? `lang-${fence[1]}` : "" });
+            code.append(document.createTextNode("\u200b"));
+            const p = document.createElement("pre");
+            p.append(code);
+            blk.replaceWith(p);
+            caretTo(code, true);
+            syncSoon();
+            return;
+          }
+          if (/^(---|\*\*\*|___)$/.test(text)) { // --- then Enter is a divider
+            e.preventDefault();
+            const hr = document.createElement("hr"), p = document.createElement("p");
+            p.innerHTML = "<br>";
+            blk.replaceWith(hr, p);
+            caretTo(p);
+            syncSoon();
+            return;
+          }
+        }
+      }
+      if (e.key === "Backspace" && li && li.classList.contains("task") && sel.isCollapsed) {
+        const r0 = document.createRange();
+        r0.setStart(li, 0);
+        r0.setEnd(node, sel.anchorOffset);
+        if (!r0.toString().replace(/\u200b/g, "")) { e.preventDefault(); fromTask(li); caretTo(li); syncSoon(); return; } // at the start: no longer a to-do
+      }
+      if (e.key === "Tab" && !meta && !e.altKey) {
+        e.preventDefault();
+        const cell = up(node, /^(TD|TH)$/);
+        if (cell) nextCell(cell, e.shiftKey);
+        else if (li) { document.execCommand(e.shiftKey ? "outdent" : "indent"); syncSoon(); }
+        return;
+      }
+      if (e.key === " " && !meta && !e.altKey && sel.isCollapsed && blk && !up(node, /^(LI|PRE|TD|TH|H[1-6])$/)) {
+        // Markdown shortcuts: "# " heading, "- " list, "1. " numbered list, "[] " to-do, "> " quote
+        const r0 = document.createRange();
+        r0.setStart(blk, 0);
+        r0.setEnd(node, sel.anchorOffset);
+        const typed = r0.toString().replace(/\u200b/g, ""), whole = blk.textContent.replace(/\u200b/g, "");
+        let kind = null;
+        if (typed === whole) {
+          if (/^#{1,6}$/.test(typed)) kind = "h" + typed.length;
+          else if (/^[-*+]$/.test(typed)) kind = "ul";
+          else if (/^\d+[.)]$/.test(typed)) kind = "ol";
+          else if (typed === ">") kind = "quote";
+          else if (/^\[[ x]?\]$/.test(typed)) kind = "todo";
+        }
+        if (kind) { e.preventDefault(); blk.innerHTML = "<br>"; caretTo(blk); vSetBlock(kind); return; }
+      }
+      if (meta) shortcut(e);
+    });
+    vis.addEventListener("paste", e => {
+      e.preventDefault(); // pasted formatting from other pages is dropped; Markdown text is converted
+      const text = (e.clipboardData && e.clipboardData.getData("text/plain")) || "";
+      if (!text) return;
+      const picked = getSelection().toString();
+      if (picked && !picked.includes("\n") && /^https?:\/\/\S+$/.test(text.trim())) { vcmd("createLink", text.trim()); return; }
+      if (/\n/.test(text) && /^(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|```|\|.*\|)/m.test(text)) { vInsertHTML(render(text, false)); return; }
+      vcmd("insertText", text);
+    });
+
+    function currentBlock() { return visual() ? visualBlock() : currentBlockCode(); }
+    function setBlock(kind) { return visual() ? vSetBlock(kind) : setBlockCode(kind); }
+
     // ---- tags ----
     function setTags(tags) {
       const t = ta.value, fm = splitFront(t), s0 = ta.selectionStart;
@@ -479,8 +1041,23 @@
       if (fm && !block && t.slice(old).startsWith("\n")) old++; // dropping the whole block: also drop the blank line after it
       replaceRange(0, old, block, Math.max(0, s0 + block.length - old));
     }
+    const STOP = new Set("this that with from have your about there their would which what when will were been they them then than into also more some such only over just like make made using used each other these those where while after before because should could does doing being very much many most".split(" "));
+    // Words worth tagging: #tags already in the text, words from headings, and words used often
+    function suggestTags() {
+      flushVisual();
+      const t = ta.value, fm = splitFront(t), body = fm ? t.slice(fm.len) : t;
+      const have = new Set(fm ? frontTags(fm.front).map(x => x.toLowerCase()) : []);
+      const out = [];
+      const add = w => { w = w.toLowerCase(); if (w.length >= 4 && !STOP.has(w) && !have.has(w) && !out.includes(w)) out.push(w); };
+      for (const x of inlineTags(body)) add(x);
+      for (const h of headings()) for (const w of h.text.match(/[A-Za-z][A-Za-z-]{3,}/g) || []) add(w);
+      const freq = {};
+      for (const w of body.toLowerCase().match(/[a-z][a-z-]{4,}/g) || []) if (!STOP.has(w)) freq[w] = (freq[w] || 0) + 1;
+      Object.entries(freq).filter(([, n]) => n >= 3).sort((a, b) => b[1] - a[1]).slice(0, 8).forEach(([w]) => add(w));
+      return out.slice(0, 14);
+    }
     async function addTag(anchor) {
-      const r = await ask("Add tags", [{ label: "Tags, separated by commas", placeholder: "weekly, amazon, ideas" }], anchor);
+      const r = await ask("Add tags", [{ label: "Tags, separated by commas", placeholder: "weekly, amazon, ideas", suggest: suggestTags() }], anchor);
       if (!r || !r[0]) return;
       const fm = splitFront(ta.value);
       const have = fm ? frontTags(fm.front) : [];
@@ -489,7 +1066,7 @@
     }
 
     // ---- preferences: text size and font ----
-    const prefs = (() => { try { return { size: "m", font: "sans", ...JSON.parse(localStorage.getItem(PREFS) || "{}") }; } catch { return { size: "m", font: "sans" }; } })();
+    const prefs = (() => { const d = { size: "m", font: "sans", mode: "visual", split: true }; try { return { ...d, ...JSON.parse(localStorage.getItem(PREFS) || "{}") }; } catch { return d; } })();
     function applyPrefs() {
       const size = { s: 14, m: 15, l: 17, xl: 19 }[prefs.size] || 15;
       const font = { sans: '-apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif', serif: 'Georgia, "Iowan Old Style", "Times New Roman", serif', mono: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace' }[prefs.font];
@@ -519,10 +1096,12 @@
       folderPlus: I('<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
       folder: I('<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'),
       refresh: I('<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/>'),
+      clock: I('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
     };
     const BLOCKS = [["p", "Paragraph"], ["h1", "Heading 1"], ["h2", "Heading 2"], ["h3", "Heading 3"], ["h4", "Heading 4"], ["h5", "Heading 5"], ["h6", "Heading 6"],
       ["quote", "Quote"], ["ul", "Bulleted list"], ["ol", "Numbered list"], ["todo", "To-do list"], ["code", "Code block"]];
     const mod = /Mac/.test(navigator.userAgent) ? "⌘" : "Ctrl+";
+    const bodyOf = t => { const fm = splitFront(t); return fm ? t.slice(fm.len) : t; };
 
     const TEMPLATES = {
       "Meeting notes": d => `# Meeting notes: ${d}\n\n**Attendees:** \n**Goal:** \n\n## Agenda\n- \n\n## Notes\n- \n\n## Decisions\n- \n\n## Action items\n- [ ] Owner: task (due )\n`,
@@ -532,30 +1111,66 @@
     const todayStr = () => new Date().toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
 
     async function askLink(anchor) {
-      const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
+      const isVis = visual();
+      const sel = isVis ? getSelection().toString() : ta.value.slice(ta.selectionStart, ta.selectionEnd);
       const r = await ask("Insert link", [{ label: "Text", value: sel }, { label: "Address", placeholder: "https://" }], anchor);
-      if (r && r[1]) replaceRange(ta.selectionStart, ta.selectionEnd, `[${r[0] || r[1]}](${r[1]})`);
+      if (!r || !r[1]) return;
+      if (!isVis) return replaceRange(ta.selectionStart, ta.selectionEnd, `[${r[0] || r[1]}](${r[1]})`);
+      const url = /^(https?:\/\/|mailto:)/i.test(r[1]) ? r[1] : "https://" + r[1];
+      if (sel && r[0] === sel) vcmd("createLink", url);
+      else vInsertHTML(`<a href="${esc(url)}">${esc(r[0] || url)}</a>`);
     }
     async function askImage(anchor) {
-      const r = await ask("Insert image", [{ label: "Description", value: ta.value.slice(ta.selectionStart, ta.selectionEnd) }, { label: "Image address", placeholder: "https://…/photo.jpg" }], anchor);
-      if (r && r[1]) replaceRange(ta.selectionStart, ta.selectionEnd, `![${r[0]}](${r[1]})`);
+      const isVis = visual();
+      const r = await ask("Insert image", [{ label: "Description", value: isVis ? getSelection().toString() : ta.value.slice(ta.selectionStart, ta.selectionEnd) }, { label: "Image address", placeholder: "https://…/photo.jpg" }], anchor);
+      if (!r || !r[1]) return;
+      if (!isVis) return replaceRange(ta.selectionStart, ta.selectionEnd, `![${r[0]}](${r[1]})`);
+      if (!/^https?:\/\//i.test(r[1])) return say("Images need an http or https address.", 4000);
+      vInsertHTML(`<img src="${esc(r[1])}" alt="${esc(r[0])}">`);
     }
     async function askTable(anchor) {
       const r = await ask("Insert table", [{ label: "Columns", type: "number", value: "3", min: 1, max: 12 }, { label: "Rows", type: "number", value: "3", min: 1, max: 50 }], anchor);
       if (!r) return;
       const cols = Math.min(12, Math.max(1, +r[0] || 3)), rows = Math.min(50, Math.max(1, +r[1] || 3));
+      if (visual()) {
+        const cells = Array.from({ length: cols }, () => "<td><br></td>").join("");
+        return vInsertHTML(`<table><thead><tr>${Array.from({ length: cols }, (_, k) => `<th>Column ${k + 1}</th>`).join("")}</tr></thead><tbody>${`<tr>${cells}</tr>`.repeat(rows)}</tbody></table><p><br></p>`);
+      }
       const row = fill => "| " + Array.from({ length: cols }, (_, k) => fill(k)).join(" | ") + " |";
       const head = row(k => `Column ${k + 1}`);
       insertBlock([head, row(() => "---"), ...Array.from({ length: rows }, () => row(() => " "))].join("\n"), [2, 10]);
+    }
+    const insertDivider = () => (visual() ? vcmd("insertHorizontalRule") : insertBlock("---"));
+    const undoRedo = kind => { (visual() ? vis : ta).focus(); document.execCommand(kind); if (visual()) syncSoon(); };
+    function inlineFmt(kind) {
+      if (!visual()) return wrap({ bold: "**", italic: "*", strike: "~~", code: "`" }[kind]);
+      if (kind === "code") return vCode();
+      vcmd({ bold: "bold", italic: "italic", strike: "strikeThrough" }[kind]);
+    }
+    function shortcut(e) { // shared by the code and visual editors
+      const k = e.key.toLowerCase();
+      let kind = null, fmt = null;
+      if (!e.shiftKey && !e.altKey && k === "b") fmt = "bold";
+      else if (!e.shiftKey && !e.altKey && k === "i") fmt = "italic";
+      else if (!e.shiftKey && !e.altKey && k === "e") fmt = "code";
+      else if (e.shiftKey && !e.altKey && e.code === "KeyX") fmt = "strike";
+      else if (e.altKey && /^Digit[0-6]$/.test(e.code)) kind = e.code === "Digit0" ? "p" : "h" + e.code[5];
+      else if (e.shiftKey && !e.altKey && e.code === "Digit8") kind = "ul";
+      else if (e.shiftKey && !e.altKey && e.code === "Digit7") kind = "ol";
+      else if (e.shiftKey && !e.altKey && e.code === "Digit9") kind = "todo";
+      else return false;
+      e.preventDefault();
+      if (fmt) inlineFmt(fmt); else setBlock(kind);
+      return true;
     }
 
     const TOOLS = [
       { type: "select" },
       { bar: 1 },
-      { cls: "g", html: "B", tip: `Bold (${mod}B)`, run: () => wrap("**") },
-      { cls: "gi", html: "I", tip: `Italic (${mod}I)`, run: () => wrap("*") },
-      { cls: "gs", html: "S", tip: `Strikethrough (${mod}⇧X)`, run: () => wrap("~~") },
-      { cls: "gm", html: "&lt;/&gt;", tip: `Inline code (${mod}E)`, run: () => wrap("`") },
+      { cls: "g", html: "B", tip: `Bold (${mod}B)`, run: () => inlineFmt("bold") },
+      { cls: "gi", html: "I", tip: `Italic (${mod}I)`, run: () => inlineFmt("italic") },
+      { cls: "gs", html: "S", tip: `Strikethrough (${mod}⇧X)`, run: () => inlineFmt("strike") },
+      { cls: "gm", html: "&lt;/&gt;", tip: `Inline code (${mod}E)`, run: () => inlineFmt("code") },
       { bar: 1 },
       { html: ICON.link, tip: "Link", run: b => askLink(b) },
       { html: ICON.image, tip: "Image", run: b => askImage(b) },
@@ -566,23 +1181,23 @@
       { bar: 1 },
       { html: ICON.quote, tip: "Quote", run: () => setBlock("quote") },
       { html: ICON.code, tip: "Code block", run: () => setBlock("code") },
-      { html: ICON.hr, tip: "Divider", run: () => insertBlock("---") },
+      { html: ICON.hr, tip: "Divider", run: () => insertDivider() },
       { html: ICON.table, tip: "Table", run: b => askTable(b) },
       { bar: 1 },
       { cls: "gt", html: "# Tag", tip: "Add tags", run: b => addTag(b) },
-      { html: ICON.undo, tip: `Undo (${mod}Z)`, run: () => { ta.focus(); document.execCommand("undo"); } },
-      { html: ICON.redo, tip: `Redo (${mod}⇧Z)`, run: () => { ta.focus(); document.execCommand("redo"); } },
+      { html: ICON.undo, tip: `Undo (${mod}Z)`, run: () => undoRedo("undo") },
+      { html: ICON.redo, tip: `Redo (${mod}⇧Z)`, run: () => undoRedo("redo") },
       { bar: 1 },
       { cls: "gt", html: "Aa", tip: "Text size and font", run: b => menu([
         { head: "Text size" }, ...[["s", "Small"], ["m", "Medium"], ["l", "Large"], ["xl", "Extra large"]].map(([k, l]) => ({ label: l, on: prefs.size === k, run: () => { prefs.size = k; applyPrefs(); } })),
         "-", { head: "Font" }, ...[["sans", "Sans"], ["serif", "Serif"], ["mono", "Mono"]].map(([k, l]) => ({ label: l, on: prefs.font === k, run: () => { prefs.font = k; applyPrefs(); } })),
       ], b) },
       { cls: "gt", html: "More ▾", tip: "More options", run: b => menu([
-        { label: "Insert today's date", run: () => replaceRange(ta.selectionStart, ta.selectionEnd, todayStr()) },
-        "-", { head: "Insert template" }, ...Object.entries(TEMPLATES).map(([k, f]) => ({ label: k, run: () => insertBlock(f(todayStr())) })),
-        "-", { label: "Copy as HTML", run: () => copyText($("doc").innerHTML, "HTML copied") },
-        { label: "Copy Markdown", run: () => copyText(ta.value, "Markdown copied") },
-        { label: "Select all", keys: `${mod}A`, run: () => { ta.focus(); ta.select(); } },
+        { label: "Insert today's date", run: () => (visual() ? vcmd("insertText", todayStr()) : replaceRange(ta.selectionStart, ta.selectionEnd, todayStr())) },
+        "-", { head: "Insert template" }, ...Object.entries(TEMPLATES).map(([k, f]) => ({ label: k, run: () => (visual() ? vInsertHTML(render(f(todayStr()), false) + "<p><br></p>") : insertBlock(f(todayStr()))) })),
+        "-", { label: "Copy as HTML", run: () => { flushVisual(); copyText(render(bodyOf(ta.value)), "HTML copied"); } },
+        { label: "Copy Markdown", run: () => { flushVisual(); copyText(ta.value, "Markdown copied"); } },
+        { label: "Select all", keys: `${mod}A`, run: () => { if (visual()) { vis.focus(); document.execCommand("selectAll"); } else { ta.focus(); ta.select(); } } },
       ], b) },
     ];
 
@@ -595,7 +1210,9 @@
           s.id = "block";
           s.title = "Paragraph style";
           s.innerHTML = BLOCKS.map(([k, l]) => `<option value="${k}">${l}</option>`).join("");
-          s.onchange = () => { setBlock(s.value); ta.focus(); };
+          let snap = null; // the select takes focus, so remember where the cursor was
+          s.addEventListener("mousedown", () => { snap = saveSel(); });
+          s.onchange = () => { (snap || saveSel())(); snap = null; setBlock(s.value); };
           bar.append(s);
           continue;
         }
@@ -612,9 +1229,9 @@
     }
 
     // ---- side panel: the files of an opened folder, and the outline of this document ----
-    const SIDE = "alcove-md-side", FOLDER = "alcove-md-folder";
+    const SIDE = "alcove-md-side", FOLDER = "alcove-md-folder", FOLDERS = "alcove-md-folders"; // FOLDER: the older single-folder key
     let side = (() => { try { return { open: false, tab: "files", ...JSON.parse(localStorage.getItem(SIDE) || "{}") }; } catch { return { open: false, tab: "files" }; } })();
-    let folder = null;          // { root, name } while a folder is open
+    const folders = [];         // { root, name } for every folder that's loaded, in the order they were loaded
     const dirCache = new Map(); // directory path -> its folders and files
     const expanded = new Set(); // folders shown open
     let pickedDir = "";         // where "New note" goes: the folder last clicked
@@ -644,6 +1261,7 @@
     }
     function paintOutline() {
       if (!side.open || side.tab !== "outline") return;
+      flushVisual();
       const hs = headings(), box = $("outlinelist");
       box.replaceChildren();
       if (!hs.length) { box.append(Object.assign(document.createElement("div"), { className: "side-empty", textContent: "Headings show up here." })); return; }
@@ -653,8 +1271,8 @@
         b.append(Object.assign(document.createElement("span"), { textContent: h.text }));
         b.onclick = () => {
           const pos = ta.value.split("\n").slice(0, h.line).reduce((n, l) => n + l.length + 1, 0);
-          if (mode !== "view") { ta.focus(); ta.setSelectionRange(pos, pos); ta.scrollTop = Math.max(0, (h.line - 2) * parseFloat(getComputedStyle(ta).lineHeight)); }
-          $("doc").querySelectorAll("h1,h2,h3,h4,h5,h6")[k]?.scrollIntoView({ block: "start", behavior: "smooth" });
+          if (mode !== "visual") { ta.focus(); ta.setSelectionRange(pos, pos); ta.scrollTop = Math.max(0, (h.line - 2) * parseFloat(getComputedStyle(ta).lineHeight)); }
+          (mode === "visual" ? vis : $("doc")).querySelectorAll("h1,h2,h3,h4,h5,h6")[k]?.scrollIntoView({ block: "start", behavior: "smooth" });
         };
         box.append(b);
       });
@@ -669,20 +1287,31 @@
       return entries;
     }
 
+    const persistFolders = () => { try { localStorage.setItem(FOLDERS, JSON.stringify(folders.map(f => f.root))); } catch {} };
+    const under = (p, dir) => p === dir || p.startsWith(dir + "/") || p.startsWith(dir + "\\");
+
     function renderTree() {
       const box = $("tree");
       box.replaceChildren();
-      $("fname").textContent = folder ? folder.name : "No folder open";
-      $("fname").title = folder ? folder.root : "";
-      for (const id of ["f-note", "f-dir", "f-refresh"]) $(id).disabled = !folder;
-      if (!folder) {
+      $("fname").textContent = folders.length ? (folders.length === 1 ? "1 folder" : `${folders.length} folders`) : "No folder open";
+      $("fname").title = "";
+      for (const id of ["f-note", "f-dir", "f-refresh"]) $(id).disabled = !folders.length;
+      if (!folders.length) {
         const e = document.createElement("div");
         e.className = "side-empty";
-        e.append("Open a folder to browse and edit all the Markdown files in it.", document.createElement("br"));
-        const b = Object.assign(document.createElement("button"), { textContent: "Open folder…" });
+        e.append("Load a folder to browse and edit all the Markdown files in it. You can load several at once.", document.createElement("br"));
+        const b = Object.assign(document.createElement("button"), { textContent: "Load folder…" });
         b.onclick = chooseFolder;
         e.append(b);
         box.append(e);
+        if (bridge) bridge.recentFolders().then(list => {
+          if (!list || !list.length || folders.length) return;
+          const r = document.createElement("div");
+          r.className = "recents";
+          r.append(Object.assign(document.createElement("h5"), { textContent: "Recent" }));
+          for (const d of list) { const rb = Object.assign(document.createElement("button"), { textContent: base(d), title: d }); rb.onclick = () => restoreFolders([d], false); r.append(rb); }
+          e.append(r);
+        });
         return;
       }
       const walk = (dir, depth) => {
@@ -709,19 +1338,52 @@
           if (en.dir && expanded.has(en.path)) walk(en.path, depth + 1);
         }
       };
-      walk(folder.root, 0);
-      if (!(dirCache.get(folder.root) || []).length) box.append(Object.assign(document.createElement("div"), { className: "side-empty", textContent: "No Markdown files here yet. Use New note to start one." }));
+      for (const f of folders) {
+        const open = expanded.has(f.root);
+        const head = Object.assign(document.createElement("div"), { className: "rootrow" });
+        const b = document.createElement("button");
+        b.className = "root" + (pickedDir === f.root ? " pick" : "");
+        b.title = f.root;
+        b.append(Object.assign(document.createElement("span"), { className: "chev", textContent: open ? "▾" : "▸" }), Object.assign(document.createElement("span"), { textContent: f.name }));
+        b.onclick = async () => {
+          pickedDir = f.root;
+          if (open) expanded.delete(f.root);
+          else { expanded.add(f.root); await loadDir(f.root); }
+          renderTree();
+        };
+        const x = Object.assign(document.createElement("button"), { className: "unload", textContent: "×", title: "Unload this folder. Its files stay where they are." });
+        x.onclick = e => { e.stopPropagation(); unloadFolder(f.root); };
+        head.append(b, x);
+        box.append(head);
+        if (open) {
+          walk(f.root, 1);
+          if (!(dirCache.get(f.root) || []).length) box.append(Object.assign(document.createElement("div"), { className: "side-empty", textContent: "No Markdown files here yet. Use New note to start one." }));
+        }
+      }
     }
 
-    function adoptFolder(r) { // r: { root, entries }
-      folder = { root: r.root, name: base(r.root) };
-      dirCache.clear();
-      expanded.clear();
+    // quiet: a folder coming back at start-up shouldn't force the panel open
+    function adoptFolder(r, quiet) { // r: { root, entries }
+      if (!folders.some(f => f.root === r.root)) { folders.push({ root: r.root, name: base(r.root) }); persistFolders(); }
       dirCache.set(r.root, r.entries || []);
       expanded.add(r.root);
       pickedDir = r.root;
-      try { localStorage.setItem(FOLDER, r.root); } catch {}
-      setSide(true, "files");
+      G.raw = G.data = null;
+      if (mode === "graph") loadGraph(true);
+      if (quiet) renderTree(); else setSide(true, "files");
+    }
+    function unloadFolder(dir) {
+      const i = folders.findIndex(f => f.root === dir);
+      if (i < 0) return;
+      folders.splice(i, 1);
+      persistFolders();
+      for (const k of [...dirCache.keys()]) if (under(k, dir)) dirCache.delete(k);
+      for (const k of [...expanded]) if (under(k, dir)) expanded.delete(k);
+      if (under(pickedDir, dir)) pickedDir = folders[0] ? folders[0].root : "";
+      G.raw = G.data = null;
+      if (mode === "graph") loadGraph(true);
+      renderTree();
+      say(`Unloaded ${base(dir)}`);
     }
     async function chooseFolder() {
       if (!bridge) return say("Open this page in Alcove to use folders.");
@@ -730,21 +1392,24 @@
       if (r.error) return say(r.error, 5000);
       adoptFolder(r);
     }
-    async function restoreFolder(path) {
-      const r = bridge && await bridge.folder(path);
-      if (r && !r.error) adoptFolder(r);
-      else { try { localStorage.removeItem(FOLDER); } catch {} }
+    async function restoreFolders(paths, quiet = true) {
+      for (const path of paths) {
+        const r = bridge && await bridge.folder(path);
+        if (r && !r.error) adoptFolder(r, quiet);
+      }
+      persistFolders(); // folders that have gone missing drop out of the list
     }
     async function refreshTree() {
-      if (!folder) return;
-      const shown = [folder.root, ...expanded];
+      if (!folders.length) return;
+      G.raw = G.data = null; // the notes may have changed
+      const shown = [...expanded];
       dirCache.clear();
       for (const d of shown) await loadDir(d, true);
       renderTree();
     }
     async function newInFolder(kind, anchor) {
-      if (!folder || !confirmDiscard()) return; // the new note replaces what's open
-      const dir = pickedDir || folder.root;
+      if (!folders.length || !confirmDiscard()) return; // the new note replaces what's open
+      const dir = pickedDir || folders[0].root;
       const r = await ask(kind === "file" ? "New note" : "New folder", [{ label: `In ${base(dir)}`, placeholder: kind === "file" ? "Untitled" : "Folder name" }], anchor);
       if (!r || !r[0]) return;
       const made = await (kind === "file" ? bridge.newFile(dir, r[0]) : bridge.newFolder(dir, r[0]));
@@ -755,12 +1420,313 @@
       if (kind === "file") openFile(made.path, true, true);
     }
 
+    // ---- graph view: notes are nodes, links between notes are lines ----
+    const G = { raw: null, only: "", data: null, nodes: [], links: [], pos: new Map(), view: { x: 0, y: 0, k: 1 }, alpha: 0, hover: null, drag: null, pan: null, raf: 0,
+      scope: "all", depth: 1, opts: { tags: false, ghost: false, orph: true }, query: "", w: 0, h: 0, dpr: 1 };
+    const gcv = $("gcanvas"), gctx = gcv.getContext("2d");
+    const hueOf = str => { let h = 0; for (const c of str) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+    const isDark = () => matchMedia("(prefers-color-scheme: dark)").matches;
+
+    // Every loaded folder is scanned on its own and the results are joined; "only" narrows it to one folder.
+    function mergeGraphs(parts) {
+      const out = { nodes: [], edges: [], ghosts: [], truncated: false };
+      for (const r of parts) {
+        const off = out.nodes.length;
+        for (const n of r.nodes) out.nodes.push({ ...n, root: r.root });
+        for (const [a, b] of r.edges) out.edges.push([a + off, b + off]);
+        for (const g of r.ghosts) out.ghosts.push({ name: g.name, from: g.from.map(i => i + off), root: r.root });
+        out.truncated = out.truncated || r.truncated;
+      }
+      return out;
+    }
+    function pickData() {
+      const raw = G.raw;
+      if (!G.only || !folders.some(f => f.root === G.only)) { G.only = ""; return raw; }
+      const map = new Map(), nodes = [];
+      raw.nodes.forEach((n, i) => { if (n.root === G.only) { map.set(i, nodes.length); nodes.push(n); } });
+      return {
+        nodes,
+        edges: raw.edges.filter(([a, b]) => map.has(a) && map.has(b)).map(([a, b]) => [map.get(a), map.get(b)]),
+        ghosts: raw.ghosts.filter(g => g.root === G.only).map(g => ({ name: g.name, root: g.root, from: g.from.map(i => map.get(i)).filter(i => i != null) })),
+        truncated: raw.truncated,
+      };
+    }
+    function fillFolderPicker() {
+      $("gfolderbox").hidden = folders.length < 2;
+      const sel = $("gfolder");
+      sel.replaceChildren(new Option("All folders", ""), ...folders.map(f => new Option(f.name, f.root)));
+      sel.value = folders.some(f => f.root === G.only) ? G.only : "";
+    }
+
+    async function loadGraph(force) {
+      const empty = $("gempty");
+      if (!folders.length) {
+        G.raw = G.data = null; G.nodes = []; G.links = [];
+        empty.hidden = false;
+        empty.querySelector("h2").textContent = "No folder loaded";
+        empty.querySelector("p").textContent = "Load a folder to see how its notes link to each other.";
+        $("gfolderbox").hidden = true;
+        $("gstat").textContent = "";
+        return draw();
+      }
+      empty.hidden = true;
+      if (!G.raw || force) {
+        $("gstat").textContent = "Reading notes…";
+        const parts = bridge ? await Promise.all(folders.map(f => bridge.graph(f.root))) : [{ error: "Open this page in Alcove to use folders." }];
+        const bad = parts.find(r => r.error);
+        if (bad) { $("gstat").textContent = ""; return say(bad.error, 5000); }
+        G.raw = mergeGraphs(parts);
+      }
+      fillFolderPicker();
+      G.data = pickData();
+      buildGraph(true);
+    }
+
+    function buildGraph(refit) {
+      const d = G.data;
+      if (!d) return;
+      for (const n of G.nodes) G.pos.set(n.id, { x: n.x, y: n.y }); // keep what's already laid out where it is
+      const cur = d.nodes.findIndex(n => n.path === file.path);
+      const all = [], idOf = new Map();
+      const add = (id, o) => { const prev = G.pos.get(id); idOf.set(id, all.length); all.push({ id, x: prev ? prev.x : NaN, y: prev ? prev.y : NaN, vx: 0, vy: 0, deg: 0, ...o }); };
+      d.nodes.forEach((n, i) => add("n" + i, { type: "note", label: n.name, path: n.path, folder: n.folder, root: n.root, tags: n.tags, words: n.words, cur: i === cur }));
+      const links = d.edges.map(([x, y]) => [idOf.get("n" + x), idOf.get("n" + y)]);
+      if (G.opts.ghost) d.ghosts.forEach((g, gi) => { add("g" + gi, { type: "ghost", label: g.name, root: g.root, tags: [], folder: "" }); for (const f of g.from) links.push([idOf.get("n" + f), idOf.get("g" + gi)]); });
+      if (G.opts.tags) {
+        const tags = new Map();
+        d.nodes.forEach((n, i) => n.tags.forEach(t => { if (!tags.has(t)) tags.set(t, []); tags.get(t).push(i); }));
+        for (const [t, from] of tags) { add("t" + t, { type: "tag", label: "#" + t, tags: [], folder: "" }); for (const f of from) links.push([idOf.get("n" + f), idOf.get("t" + t)]); }
+      }
+      const deg = new Array(all.length).fill(0);
+      for (const [x, y] of links) { deg[x]++; deg[y]++; }
+      let keep = new Set(all.keys());
+      if (G.scope === "local" && cur >= 0) { // the open note and everything within `depth` steps
+        const near = new Map(all.map((_, i) => [i, []]));
+        for (const [x, y] of links) { near.get(x).push(y); near.get(y).push(x); }
+        keep = new Set([idOf.get("n" + cur)]);
+        let edge = [...keep];
+        for (let step = 0; step < G.depth; step++) { const nxt = []; for (const i of edge) for (const j of near.get(i)) if (!keep.has(j)) { keep.add(j); nxt.push(j); } edge = nxt; }
+      }
+      if (!G.opts.orph) all.forEach((n, i) => { if (n.type === "note" && deg[i] === 0) keep.delete(i); });
+      const remap = new Map();
+      G.nodes = [];
+      all.forEach((n, i) => { if (keep.has(i)) { remap.set(i, G.nodes.length); n.i = G.nodes.length; G.nodes.push(n); } });
+      G.links = links.filter(([x, y]) => keep.has(x) && keep.has(y)).map(([x, y]) => [remap.get(x), remap.get(y)]);
+      for (const n of G.nodes) n.deg = 0;
+      for (const [x, y] of G.links) { G.nodes[x].deg++; G.nodes[y].deg++; }
+      G.nodes.forEach((n, i) => {
+        n.r = n.type === "tag" ? 4 + Math.sqrt(n.deg) * 1.6 : 3.2 + Math.min(Math.sqrt(n.deg) * 1.9, 11) + (n.cur ? 2 : 0);
+        n.hue = n.type === "tag" ? 275 : n.type === "ghost" ? 0 : folders.length > 1 && n.root ? hueOf(base(n.root)) : n.folder ? hueOf(n.folder.split("/")[0]) : 215; // with several folders, colour by folder
+        if (Number.isNaN(n.x)) { const a2 = i * 2.4, rad = 16 * Math.sqrt(i + 1); n.x = Math.cos(a2) * rad; n.y = Math.sin(a2) * rad; }
+      });
+      $("gstat").textContent = `${G.nodes.filter(n => n.type === "note").length} notes · ${G.links.length} links${G.data.truncated ? " (first 3000 notes)" : ""}`;
+      G.alpha = 1;
+      const warm = G.nodes.length > 1200 ? 40 : 160;
+      for (let i = 0; i < warm; i++) step();
+      if (refit) fitGraph();
+      run();
+    }
+
+    function step() {
+      const ns = G.nodes, a = G.alpha, C = 90, grid = new Map();
+      for (const n of ns) { const key = Math.floor(n.x / C) + "," + Math.floor(n.y / C); let b = grid.get(key); if (!b) grid.set(key, b = []); b.push(n); }
+      for (const n of ns) {
+        const cx = Math.floor(n.x / C), cy = Math.floor(n.y / C);
+        for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+          const cell = grid.get((cx + ox) + "," + (cy + oy));
+          if (!cell) continue;
+          for (const m of cell) {
+            if (m.i <= n.i) continue;
+            let dx = n.x - m.x, dy = n.y - m.y, d2 = dx * dx + dy * dy;
+            if (d2 > 4 * C * C) continue;
+            if (d2 < 0.01) { dx = Math.random() - .5; dy = Math.random() - .5; d2 = dx * dx + dy * dy + .01; }
+            const d = Math.sqrt(d2), f = 1500 / (d2 + 120);
+            n.vx += dx / d * f; n.vy += dy / d * f; m.vx -= dx / d * f; m.vy -= dy / d * f;
+          }
+        }
+      }
+      for (const [x, y] of G.links) {
+        const p = ns[x], q = ns[y], dx = q.x - p.x, dy = q.y - p.y, d = Math.sqrt(dx * dx + dy * dy) || 1, f = (d - 58) * 0.035;
+        p.vx += dx / d * f; p.vy += dy / d * f; q.vx -= dx / d * f; q.vy -= dy / d * f;
+      }
+      for (const n of ns) {
+        if (n.fixed) { n.vx = n.vy = 0; continue; }
+        n.vx -= n.x * 0.0028; n.vy -= n.y * 0.0028; // gentle pull to the middle keeps loose notes from drifting away
+        n.vx *= 0.78; n.vy *= 0.78;
+        n.x += n.vx * Math.max(a, 0.25); n.y += n.vy * Math.max(a, 0.25);
+      }
+      G.alpha = G.drag ? Math.max(G.alpha * 0.99, 0.35) : G.alpha * 0.985;
+    }
+
+    function fitGraph() {
+      const ns = G.nodes;
+      if (!ns.length || !G.w) return;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const n of ns) { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x); y1 = Math.max(y1, n.y); }
+      const k = Math.min(2, Math.max(0.1, Math.min(G.w / (x1 - x0 + 120), G.h / (y1 - y0 + 160))));
+      G.view = { k, x: G.w / 2 - (x0 + x1) / 2 * k, y: G.h / 2 + 20 - (y0 + y1) / 2 * k };
+      G.moved = false;
+    }
+
+    const matches = n => { const q = G.query; return !q || (q.startsWith("#") ? n.tags.some(t => ("#" + t.toLowerCase()).includes(q)) || n.label.toLowerCase().includes(q) : n.label.toLowerCase().includes(q)); };
+    function neighbours(i) { const out = new Set([i]); for (const [x, y] of G.links) { if (x === i) out.add(y); else if (y === i) out.add(x); } return out; }
+
+    function draw() {
+      const w = G.w, h = G.h, dpr = G.dpr, v = G.view, ns = G.nodes, dark = isDark();
+      gctx.setTransform(1, 0, 0, 1, 0, 0);
+      gctx.clearRect(0, 0, gcv.width, gcv.height);
+      if (!ns.length) return;
+      gctx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.x, dpr * v.y);
+      const ink = dark ? "255,255,255" : "20,20,30";
+      const focus = G.hover != null ? neighbours(G.hover) : null;
+      const searching = !!G.query;
+      // links
+      gctx.lineWidth = 1 / v.k;
+      for (const [x, y] of G.links) {
+        const p = ns[x], q = ns[y], hot = focus && focus.has(x) && focus.has(y) && (x === G.hover || y === G.hover);
+        const dim = (focus && !hot) || (searching && !(matches(p) || matches(q)));
+        gctx.strokeStyle = hot ? `hsla(${p.hue},80%,${dark ? 70 : 45}%,.9)` : `rgba(${ink},${dim ? 0.04 : 0.17})`;
+        gctx.lineWidth = (hot ? 1.8 : 1) / v.k;
+        gctx.beginPath(); gctx.moveTo(p.x, p.y); gctx.lineTo(q.x, q.y); gctx.stroke();
+      }
+      // nodes
+      const glow = dark && ns.length <= 700;
+      for (const n of ns) {
+        const lit = (!focus || focus.has(n.i)) && (!searching || matches(n));
+        const alpha = lit ? 1 : 0.18;
+        const col = n.type === "ghost" ? `rgba(${ink},${0.45 * alpha})` : `hsla(${n.hue},${n.type === "tag" ? 70 : 62}%,${dark ? 66 : 48}%,${alpha})`;
+        if (glow && lit) {
+          const g = gctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 3.4);
+          g.addColorStop(0, `hsla(${n.hue},80%,65%,.34)`); g.addColorStop(1, `hsla(${n.hue},80%,65%,0)`);
+          gctx.fillStyle = g; gctx.beginPath(); gctx.arc(n.x, n.y, n.r * 3.4, 0, 6.2832); gctx.fill();
+        }
+        gctx.beginPath(); gctx.arc(n.x, n.y, n.r, 0, 6.2832);
+        if (n.type === "ghost") { gctx.strokeStyle = col; gctx.lineWidth = 1.2 / v.k; gctx.stroke(); } else { gctx.fillStyle = col; gctx.fill(); }
+        if (n.cur) { gctx.strokeStyle = `rgba(${ink},.9)`; gctx.lineWidth = 2 / v.k; gctx.beginPath(); gctx.arc(n.x, n.y, n.r + 3 / v.k, 0, 6.2832); gctx.stroke(); }
+      }
+      // labels: all of them when zoomed in, otherwise the big ones, the open note, and whatever is hovered or matched
+      gctx.font = `${12 / v.k}px -apple-system, "Segoe UI", system-ui, sans-serif`;
+      gctx.textAlign = "center";
+      gctx.lineJoin = "round";
+      for (const n of ns) {
+        const lit = (!focus || focus.has(n.i)) && (!searching || matches(n));
+        const show = n.i === G.hover || (focus && focus.has(n.i)) || n.cur || (searching && matches(n)) || (lit && (v.k > 1.1 || (v.k > 0.5 && n.deg >= 6)));
+        if (!show) continue;
+        const y = n.y + n.r + 12 / v.k;
+        gctx.lineWidth = 3 / v.k;
+        gctx.strokeStyle = dark ? "rgba(20,20,26,.85)" : "rgba(255,255,255,.85)";
+        gctx.strokeText(n.label, n.x, y);
+        gctx.fillStyle = `rgba(${ink},${lit ? 0.9 : 0.35})`;
+        gctx.fillText(n.label, n.x, y);
+      }
+    }
+
+    function run() { if (!G.raf) G.raf = requestAnimationFrame(frame); }
+    function frame() {
+      G.raf = 0;
+      if (mode !== "graph") return;
+      if (G.alpha > 0.02 || G.drag) { step(); step(); }
+      draw();
+      if (G.alpha > 0.02 || G.drag) run();
+    }
+    function sizeGraph() {
+      const r = $("graphbox").getBoundingClientRect();
+      if (!r.width) return;
+      G.dpr = devicePixelRatio || 1;
+      G.w = r.width; G.h = r.height;
+      gcv.width = Math.round(r.width * G.dpr); gcv.height = Math.round(r.height * G.dpr);
+      draw();
+    }
+    new ResizeObserver(() => { if (mode === "graph") { sizeGraph(); if (!G.moved) { fitGraph(); run(); } } }).observe($("graphbox"));
+
+    const toWorld = (cx, cy) => { const r = gcv.getBoundingClientRect(); return [(cx - r.left - G.view.x) / G.view.k, (cy - r.top - G.view.y) / G.view.k]; };
+    function nodeAt(cx, cy) {
+      const [wx, wy] = toWorld(cx, cy);
+      for (let i = G.nodes.length - 1; i >= 0; i--) { const n = G.nodes[i]; if (Math.hypot(n.x - wx, n.y - wy) <= n.r + 3 / G.view.k) return n; }
+      return null;
+    }
+    function tip(n, e) {
+      const t = $("gtip");
+      if (!n) { t.hidden = true; return; }
+      t.replaceChildren(Object.assign(document.createElement("b"), { textContent: n.label }));
+      const bits = n.type === "note" ? [(folders.length > 1 ? base(n.root) + (n.folder ? "/" + n.folder : "") : n.folder) || "top level", `${n.words} words`, `${n.deg} link${n.deg === 1 ? "" : "s"}`, n.tags.length ? n.tags.map(x => "#" + x).join(" ") : ""] : [n.type === "tag" ? `${n.deg} note${n.deg === 1 ? "" : "s"}` : "Linked, but no note has this name yet. Click to create it."];
+      t.append(Object.assign(document.createElement("span"), { textContent: bits.filter(Boolean).join(" · ") }));
+      const r = $("graphbox").getBoundingClientRect();
+      t.hidden = false;
+      t.style.left = `${Math.min(e.clientX - r.left + 14, r.width - t.offsetWidth - 8)}px`;
+      t.style.top = `${Math.min(e.clientY - r.top + 14, r.height - t.offsetHeight - 8)}px`;
+    }
+    async function openGraphNode(n) {
+      if (n.type === "note") return openFile(n.path, true);
+      if (n.type === "tag") { $("gsearch").value = n.label; G.query = n.label.toLowerCase(); return run(); }
+      const made = await bridge.newFile(n.root || folders[0].root, n.label); // an unresolved link: create the note it points at
+      if (made.error) return say(made.error, 5000);
+      G.raw = G.data = null;
+      await refreshTree();
+      openFile(made.path, true, true);
+    }
+
+    let gdown = null;
+    gcv.addEventListener("pointerdown", e => {
+      gcv.setPointerCapture(e.pointerId);
+      const n = nodeAt(e.clientX, e.clientY);
+      gdown = { x: e.clientX, y: e.clientY, n, moved: false };
+      if (n) { G.drag = n; n.fixed = true; } else G.pan = { x: e.clientX - G.view.x, y: e.clientY - G.view.y };
+      run();
+    });
+    gcv.addEventListener("pointermove", e => {
+      if (gdown && Math.hypot(e.clientX - gdown.x, e.clientY - gdown.y) > 4) gdown.moved = true;
+      if (G.drag) { [G.drag.x, G.drag.y] = toWorld(e.clientX, e.clientY); run(); }
+      else if (G.pan) { G.view.x = e.clientX - G.pan.x; G.view.y = e.clientY - G.pan.y; G.moved = true; run(); }
+      else {
+        const n = nodeAt(e.clientX, e.clientY);
+        const i = n ? n.i : null;
+        if (i !== G.hover) { G.hover = i; gcv.style.cursor = n ? "pointer" : "grab"; run(); }
+        tip(n, e);
+      }
+    });
+    gcv.addEventListener("pointerup", e => {
+      const hit = gdown && !gdown.moved && gdown.n;
+      if (G.drag) { G.drag.fixed = false; G.drag = null; }
+      G.pan = null;
+      gdown = null;
+      if (hit) openGraphNode(hit);
+    });
+    gcv.addEventListener("pointerleave", () => { if (!G.drag && !G.pan) { G.hover = null; tip(null); run(); } });
+    gcv.addEventListener("wheel", e => {
+      e.preventDefault();
+      const [wx, wy] = toWorld(e.clientX, e.clientY);
+      const k = Math.min(6, Math.max(0.08, G.view.k * Math.exp(-e.deltaY * 0.0016)));
+      const r = gcv.getBoundingClientRect();
+      G.view = { k, x: e.clientX - r.left - wx * k, y: e.clientY - r.top - wy * k };
+      G.moved = true;
+      run();
+    }, { passive: false });
+    gcv.addEventListener("dblclick", e => { if (!nodeAt(e.clientX, e.clientY)) { fitGraph(); run(); } });
+
+    $("gsearch").addEventListener("input", e => { G.query = e.target.value.trim().toLowerCase(); run(); });
+    $("gsearch").addEventListener("keydown", e => { if (e.key === "Escape") { e.target.value = ""; G.query = ""; run(); } });
+    for (const [id, key] of [["g-tags", "tags"], ["g-ghost", "ghost"], ["g-orph", "orph"]]) $(id).addEventListener("change", e => { G.opts[key] = e.target.checked; buildGraph(false); });
+    $("gscope").addEventListener("click", e => {
+      const sc = e.target.dataset.s;
+      if (!sc) return;
+      G.scope = sc;
+      for (const b of $("gscope").querySelectorAll("[data-s]")) b.classList.toggle("on", b.dataset.s === sc);
+      $("gdepth").hidden = sc !== "local";
+      buildGraph(true);
+    });
+    $("gdm").onclick = () => { G.depth = Math.max(1, G.depth - 1); $("gd").textContent = G.depth; buildGraph(true); };
+    $("gdp").onclick = () => { G.depth = Math.min(6, G.depth + 1); $("gd").textContent = G.depth; buildGraph(true); };
+    $("gfolder").addEventListener("change", e => { G.only = e.target.value; G.data = pickData(); buildGraph(true); });
+    $("gfit").onclick = () => { fitGraph(); run(); };
+    $("grefresh").onclick = () => loadGraph(true);
+    $("gopen").onclick = chooseFolder;
+
     // ---- painting ----
     function paintTags(front, inl) {
       const bar = $("tagbar");
       bar.replaceChildren();
       const soft = inl.filter(t => !front.includes(t));
-      if (!front.length && !soft.length && mode === "view") return;
       for (const t of front) {
         const c = document.createElement("span");
         c.className = "chip";
@@ -769,10 +1735,15 @@
         x.textContent = "×";
         x.title = "Remove tag";
         x.onclick = () => setTags(front.filter(y => y !== t));
-        if (mode !== "view") c.append(x); else c.style.paddingRight = "9px";
+        c.append(x);
         bar.append(c);
       }
-      for (const t of [...new Set(soft)]) bar.append(Object.assign(document.createElement("span"), { className: "chip soft", textContent: `#${t}`, title: "Found in the text" }));
+      for (const t of [...new Set(soft)]) {
+        const c = Object.assign(document.createElement("span"), { className: "chip soft", textContent: `#${t}`, title: "Typed in the text. Click to save it as a tag of this note." });
+        c.style.cursor = "pointer";
+        c.onclick = () => setTags([...front, t]);
+        bar.append(c);
+      }
       const add = document.createElement("button");
       add.className = "addtag";
       add.textContent = "+ Tag";
@@ -788,7 +1759,7 @@
       const front = fm ? frontTags(fm.front) : [];
       const inl = inlineTags(body);
       const chips = [...front, ...inl.filter(x => !front.includes(x))];
-      $("doc").innerHTML = body.trim() || front.length
+      if (mode === "split") $("doc").innerHTML = body.trim() || front.length
         ? (chips.length ? `<div class="tags">${[...new Set(chips)].map(x => `<span class="tag">#${esc(x)}</span>`).join("")}</div>` : "") + render(body)
         : `<div class="empty"><h2>Nothing to show yet</h2><p>Write something on the left, or open a Markdown file.</p></div>`;
       const words = (body.match(/\S+/g) || []).length;
@@ -809,25 +1780,33 @@
     function syncBlock() {
       if (syncQueued) return;
       syncQueued = true;
-      requestAnimationFrame(() => { syncQueued = false; const s = $("block"); if (s && document.activeElement === ta) s.value = currentBlock(); });
+      requestAnimationFrame(() => { syncQueued = false; const s = $("block"); if (s && (visual() ? inVis() : document.activeElement === ta)) s.value = currentBlock(); });
     }
     document.addEventListener("selectionchange", syncBlock);
 
-    function setMode(m) {
+    function setMode(m, force) {
+      const was = mode;
+      if (was === "visual" && m !== "visual") flushVisual();
       mode = m;
       document.body.className = m;
-      for (const b of document.querySelectorAll("#modes button")) b.classList.toggle("on", b.dataset.mode === m);
-      if (m !== "view") ta.focus();
+      const seg = m === "visual" ? "visual" : m === "graph" ? "graph" : "code";
+      for (const b of document.querySelectorAll("#modes button")) b.classList.toggle("on", b.dataset.mode === seg);
+      $("splitbtn").hidden = m === "visual" || m === "graph";
+      $("splitbtn").classList.toggle("on", m === "split");
+      if (m === "visual" && (was !== "visual" || force)) renderVisual();
       paint();
+      if (m === "graph") { sizeGraph(); loadGraph(); } else (m === "visual" ? vis : ta).focus();
     }
 
-    // next: "view" to read, "keep" to stay in the current mode (switching files in a folder), else a writing mode
+    // next: "keep" to stay in the current view (switching files in a folder); anything else opens in the view
+    // last chosen (Visual unless Code was picked)
     function load(f, text, next) {
       file = f;
       ta.value = text;
       saved = text;
       history.replaceState(null, "", f.path ? `?file=${encodeURIComponent(f.path)}` : location.pathname);
-      setMode(next === "view" ? "view" : next === "keep" ? mode : (innerWidth > 900 ? "split" : "edit"));
+      const chosen = prefs.mode === "code" ? (prefs.split && innerWidth > 900 ? "split" : "code") : "visual";
+      setMode(next === "keep" && mode !== "graph" ? mode : chosen, true); // opening a note from the graph leaves the graph
       renderTree();
     }
 
@@ -847,6 +1826,7 @@
 
     async function save(as) {
       if (!bridge) return say("Open this page in Alcove to save files.");
+      flushVisual();
       const text = ta.value;
       const r = !as && file.path ? await bridge.save(file.path, text) : await bridge.saveAs(file.name, text);
       if (!r) return;
@@ -857,7 +1837,7 @@
       localStorage.removeItem(DRAFT);
       paint();
       say("Saved");
-      if (folder) refreshTree(); // a new file may have landed in the folder
+      if (folders.length) refreshTree(); // a new file may have landed in a folder
     }
 
     $("open").onclick = () => openFile();
@@ -873,16 +1853,36 @@
     $("f-dir").innerHTML = ICON.folderPlus;
     $("f-refresh").innerHTML = ICON.refresh;
     $("f-open").innerHTML = ICON.folder;
+    $("f-recent").innerHTML = ICON.clock;
     $("f-note").onclick = e => newInFolder("file", e.currentTarget);
     $("f-dir").onclick = e => newInFolder("dir", e.currentTarget);
     $("f-refresh").onclick = refreshTree;
     $("f-open").onclick = chooseFolder;
-    $("modes").onclick = e => { if (e.target.dataset.mode) setMode(e.target.dataset.mode); };
+    $("f-recent").onclick = async e => {
+      const anchor = e.currentTarget; // gone once the await below finishes
+      const list = (bridge && await bridge.recentFolders()) || [];
+      const items = list.filter(d => !folders.some(f => f.root === d)).map(d => ({ label: base(d), run: () => restoreFolders([d], false) }));
+      menu(items.length ? [{ head: "Load a recent folder" }, ...items] : [{ head: "No other recent folders" }], anchor);
+    };
+    $("modes").onclick = e => {
+      const m = e.target.dataset.mode;
+      if (!m) return;
+      if (m === "graph") return setMode("graph"); // a place to look from; opening a note goes back to the last editor
+      prefs.mode = m;
+      applyPrefs();
+      setMode(m === "visual" ? "visual" : prefs.split ? "split" : "code");
+    };
+    $("splitbtn").onclick = () => {
+      prefs.split = mode !== "split";
+      applyPrefs();
+      setMode(prefs.split ? "split" : "code");
+    };
 
-    ta.addEventListener("input", () => {
+    function docChanged() {
       paintSoon();
       if (!file.path) { try { localStorage.setItem(DRAFT, ta.value); } catch {} } // untitled drafts survive closing the tab
-    });
+    }
+    ta.addEventListener("input", docChanged);
 
     // Ticking a to-do in the preview edits the matching line in the text
     $("doc").addEventListener("change", e => {
@@ -925,15 +1925,7 @@
         return;
       }
       if (!m) return;
-      const k = e.key.toLowerCase();
-      if (!e.shiftKey && !e.altKey && k === "b") { e.preventDefault(); wrap("**"); }
-      else if (!e.shiftKey && !e.altKey && k === "i") { e.preventDefault(); wrap("*"); }
-      else if (!e.shiftKey && !e.altKey && k === "e") { e.preventDefault(); wrap("`"); }
-      else if (e.shiftKey && !e.altKey && e.code === "KeyX") { e.preventDefault(); wrap("~~"); }
-      else if (e.altKey && /^Digit[0-6]$/.test(e.code)) { e.preventDefault(); setBlock(e.code === "Digit0" ? "p" : "h" + e.code[5]); }
-      else if (e.shiftKey && !e.altKey && e.code === "Digit8") { e.preventDefault(); setBlock("ul"); }
-      else if (e.shiftKey && !e.altKey && e.code === "Digit7") { e.preventDefault(); setBlock("ol"); }
-      else if (e.shiftKey && !e.altKey && e.code === "Digit9") { e.preventDefault(); setBlock("todo"); }
+      shortcut(e);
     });
     ta.addEventListener("paste", e => {
       const text = e.clipboardData && e.clipboardData.getData("text/plain").trim();
@@ -970,15 +1962,18 @@
       } else {
         let draft = ""; try { draft = localStorage.getItem(DRAFT) || ""; } catch {}
         load({ path: "", name: "Untitled.md" }, "", undefined);
-        if (draft) { ta.value = draft; paint(); say("Restored your last draft"); }
+        if (draft) { ta.value = draft; if (visual()) renderVisual(); paint(); say("Restored your last draft"); }
         if (location.hash === "#open") { history.replaceState(null, "", location.pathname); openFile(); }
         else if (location.hash === "#folder") { history.replaceState(null, "", location.pathname); chooseFolder(); }
       }
-      const last = dir || (!q && !location.hash ? localStorage.getItem(FOLDER) : "");
-      if (last && !folder) {
-        if (dir) setSide(true, "files");
-        await restoreFolder(last);
+      let remembered = [];
+      if (!q && !location.hash) {
+        try { remembered = JSON.parse(localStorage.getItem(FOLDERS) || "[]"); } catch {}
+        const old = localStorage.getItem(FOLDER); // from before several folders could be loaded
+        if (!remembered.length && old) remembered = [old];
       }
+      await restoreFolders([...new Set(remembered)].filter(d => d !== dir));
+      if (dir) { setSide(true, "files"); await restoreFolders([dir], false); }
     })();
   </script>
 </body>

@@ -4,16 +4,71 @@
 // saved state back, so there is a single writer. Everything stays on this device.
 // Runs after app.js and uses its helpers ($, read, write, call, toast, space, activeTab, findTab, hostOf, …).
 (() => {
-  const { KEY, TIME_KEY, CTX_KEY, POMO, loadState, today, clock, swMs, timerLeft, pomoLeft, amazonInfo, cleanLink } = ToolsShared;
+  const { KEY, TIME_KEY, CTX_KEY, pomoMins, repeatKind, alarmDue, loadState, today, pad, clock, swMs, timerLeft, pomoLeft, amazonInfo, cleanLink } = ToolsShared;
 
   const st = loadState();
   const save = () => write(KEY, st);
   const now = () => Date.now();
 
-  const notify = (title, body) => {
+  // ---- sound: short synthesized chimes, nothing to download ----
+
+  let audioCtx = null, ringTimer = 0, ringStop = 0;
+  function tone(freq, t0, dur, vol) {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "sine";
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(vol, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(t0);
+    o.stop(t0 + dur + 0.05);
+  }
+  function chime(kind) {
+    if (!st.sound) return;
+    try {
+      audioCtx ||= new AudioContext();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      const t = audioCtx.currentTime + 0.02;
+      const seq = kind === "alarm" ? [[880, 0], [1175, .16], [1480, .32], [1175, .48], [880, .64], [1175, .8]]
+        : kind === "pomo" ? [[660, 0], [880, .22], [1100, .44]] : [[988, 0], [988, .24], [988, .48]];
+      for (const [f, d] of seq) tone(f, t + d, kind === "alarm" ? 0.22 : 0.3, kind === "alarm" ? 0.35 : 0.28);
+    } catch {}
+  }
+  const stopRinging = () => { clearInterval(ringTimer); clearTimeout(ringStop); };
+  function startRinging() {
+    stopRinging();
+    chime("alarm");
+    ringTimer = setInterval(() => chime("alarm"), 1800);
+    ringStop = setTimeout(stopRinging, 60000); // an alarm nobody answers goes quiet after a minute
+  }
+
+  const notify = (title, body, kind = "timer") => {
     call("notify", { title, body });
     toast(body ? `${title}: ${body}` : title, 6000);
+    chime(kind);
   };
+
+  // ---- alarms ----
+
+  function checkAlarms() {
+    const d = new Date(), hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`, stamp = `${today()} ${hhmm}`;
+    for (const a of st.alarms) {
+      if (!a.on || a.time !== hhmm || a.last === stamp) continue;
+      if (!alarmDue(a, d)) continue;
+      a.last = stamp;
+      if (repeatKind(a) === "once") a.on = false; // a one-off alarm switches itself off
+      st.ringing = { id: a.id, label: a.label || "Alarm", time: a.time, at: now() };
+      if (a.snooze) st.alarms = st.alarms.filter(x => x !== a);
+      save();
+      call("notify", { title: a.label || "Alarm", body: `It's ${a.time}` });
+      startRinging();
+      call("open_tools", { tab: "alarms" }); // an alarm should be hard to miss
+      break;
+    }
+  }
+  const newId = () => Math.random().toString(36).slice(2, 9);
+  const cleanTime = t => (/^([01]\d|2[0-3]):[0-5]\d$/.test(String(t)) ? String(t) : null);
 
   // ---- timers ----
 
@@ -22,20 +77,22 @@
     save();
   }
   function pomoFinished() {
+    const m = pomoMins(st);
     if (st.pomo.phase === "work") {
       if (st.pomoDone.date !== today()) st.pomoDone = { date: today(), n: 0 };
       st.pomoDone.n++;
       const long = st.pomoDone.n % 4 === 0;
-      notify("Focus session done", `Take a ${long ? POMO.long : POMO.short} minute break`);
-      startPomo("break", long ? POMO.long : POMO.short);
+      notify("Focus session done", `Take a ${long ? m.long : m.short} minute break`, "pomo");
+      startPomo("break", long ? m.long : m.short);
     } else {
-      notify("Break over", "Ready for the next session?");
+      notify("Break over", "Ready for the next session?", "pomo");
       st.pomo = { phase: "", end: 0, left: 0, total: 0 };
       save();
     }
   }
 
   function chipText() {
+    if (st.ringing) return "Alarm";
     if (st.pomo.phase && st.pomo.end) return clock(pomoLeft(st));
     if (st.timer.end) return clock(timerLeft(st));
     if (st.sw.start) return clock(swMs(st));
@@ -46,6 +103,7 @@
   function updateChip() {
     const t = chipText();
     $("open-tools").classList.toggle("running", !!t);
+    $("open-tools").classList.toggle("ringing", !!st.ringing);
     $("tools-chip").textContent = t;
   }
 
@@ -60,8 +118,9 @@
     if (st.focusUntil && t >= st.focusUntil) {
       st.focusUntil = 0;
       save();
-      notify("Focus mode ended", "Blocked sites are open again");
+      notify("Focus mode ended", "Blocked sites are open again", "pomo");
     }
+    checkAlarms();
     updateChip();
     publishCtx();
   }
@@ -143,18 +202,51 @@
   const endFocus = () => { call("focus_mode", { minutes: 0 }); st.focusUntil = 0; save(); updateChip(); };
 
   const ops = {
-    "sw-start": () => { st.sw = { start: now(), acc: st.sw.acc }; },
-    "sw-pause": () => { st.sw = { start: 0, acc: swMs(st) }; },
-    "sw-reset": () => { st.sw = { start: 0, acc: 0 }; },
+    "sw-start": () => { st.sw = { ...st.sw, start: now() }; },
+    "sw-pause": () => { st.sw = { ...st.sw, start: 0, acc: swMs(st) }; },
+    "sw-reset": () => { st.sw = { start: 0, acc: 0, laps: [] }; },
+    "sw-lap": () => { if (st.sw.start) st.sw = { ...st.sw, laps: [...(st.sw.laps || []), swMs(st)].slice(-200) }; },
     "timer-start": m => { st.timer = { end: now() + m * 60000, left: 0, total: m * 60000 }; },
+    "timer-add": m => {
+      const ms = Math.max(1, Math.min(600, Number(m) || 1)) * 60000;
+      if (st.timer.end) st.timer = { ...st.timer, end: st.timer.end + ms, total: st.timer.total + ms };
+      else if (st.timer.left) st.timer = { ...st.timer, left: st.timer.left + ms, total: st.timer.total + ms };
+    },
     "timer-pause": () => { st.timer = { end: 0, left: timerLeft(st), total: st.timer.total }; },
     "timer-resume": () => { st.timer = { end: now() + st.timer.left, left: 0, total: st.timer.total }; },
     "timer-cancel": () => { st.timer = { end: 0, left: 0, total: 0 }; },
-    "pomo-start": () => { if (!st.pomo.phase) startPomo("work", POMO.work); },
+    "pomo-start": () => { if (!st.pomo.phase) startPomo("work", pomoMins(st).work); },
+    "pomo-cfg": c => {
+      const n = (v, lo, hi, d) => Math.min(hi, Math.max(lo, Math.round(Number(v)) || d));
+      st.pomoCfg = { work: n(c && c.work, 1, 180, 25), short: n(c && c.short, 1, 60, 5), long: n(c && c.long, 1, 90, 15) };
+    },
+    "alarm-add": a => {
+      const time = cleanTime(a && a.time);
+      if (!time) return;
+      const repeat = ["once", "daily", "weekly", "monthly"].includes(a.repeat) ? a.repeat : "once";
+      let days = [...new Set((Array.isArray(a.days) ? a.days : []).map(Number).filter(d => d >= 0 && d <= 6))];
+      if (repeat !== "weekly") days = [];
+      else if (!days.length) days = [new Date().getDay()];
+      const dom = repeat === "monthly" ? (a.dom === "last" ? "last" : Math.min(31, Math.max(1, Math.round(Number(a.dom)) || new Date().getDate()))) : null;
+      st.alarms = [...st.alarms, { id: newId(), time, label: String((a && a.label) || "").slice(0, 60), repeat, days, dom, on: true, last: "" }].slice(0, 50);
+    },
+    "alarm-toggle": id => { const a = st.alarms.find(x => x.id === id); if (a) { a.on = !a.on; a.last = ""; } },
+    "alarm-delete": id => { st.alarms = st.alarms.filter(x => x.id !== id); },
+    "alarm-dismiss": () => { st.ringing = null; stopRinging(); },
+    "alarm-snooze": m => {
+      const r = st.ringing;
+      st.ringing = null;
+      stopRinging();
+      if (!r) return;
+      const d = new Date(now() + (Number(m) || 5) * 60000);
+      st.alarms = [...st.alarms, { id: newId(), time: `${pad(d.getHours())}:${pad(d.getMinutes())}`, label: r.label, repeat: "once", days: [], on: true, last: "", snooze: true }];
+    },
+    "sound-toggle": () => { st.sound = !st.sound; },
+    "sound-test": () => chime("alarm"),
     "pomo-pause": () => { st.pomo = { ...st.pomo, end: 0, left: pomoLeft(st) }; },
     "pomo-resume": () => { st.pomo = { ...st.pomo, end: now() + st.pomo.left, left: 0 }; },
     "pomo-skip": () => {
-      if (st.pomo.phase === "work") startPomo("break", POMO.short); // skipping doesn't count as a finished session
+      if (st.pomo.phase === "work") startPomo("break", pomoMins(st).short); // skipping doesn't count as a finished session
       else st.pomo = { phase: "", end: 0, left: 0, total: 0 };
     },
     "pomo-stop": () => { st.pomo = { phase: "", end: 0, left: 0, total: 0 }; },
@@ -191,7 +283,7 @@
 
   // Commands from ⌘K and the menu
   window.Tools = {
-    pomodoro: () => { if (!st.pomo.phase) { startPomo("work", POMO.work); updateChip(); toast(`Pomodoro started: ${POMO.work} min`); } else toast("A Pomodoro is already running"); },
+    pomodoro: () => { if (!st.pomo.phase) { const w = pomoMins(st).work; startPomo("work", w); updateChip(); toast(`Pomodoro started: ${w} min`); } else toast("A Pomodoro is already running"); },
     focus: (m = 25) => startFocus(m).then(r => { if (r) toast(`Focus mode on for ${m} min`); }),
     stopFocus: () => { endFocus(); toast("Focus mode ended"); },
     colorPicker: () => { const t = activeTab(); if (!t || !opened.has(t.id)) return toast("Open a page first"); call("eyedropper", { id: t.id }); }, // the app shows the toasts

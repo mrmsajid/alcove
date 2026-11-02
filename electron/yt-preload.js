@@ -130,14 +130,18 @@ if (window === window.top && location.protocol === "file:" && /\/ui\/markdown\.h
     openFolder: () => md("openFolder"),
     folder: p => md("folder", p),
     list: p => md("list", p),
+    recentFolders: () => md("recentFolders"),
     newFile: (dir, name) => md("newFile", dir, name),
     newFolder: (dir, name) => md("newFolder", dir, name),
+    graph: p => md("graph", p),
   });
   // A file dropped on the page opens in the editor (the page gets the path, never the File object).
-  window.addEventListener("dragover", e => e.preventDefault(), true);
+  const hasFiles = e => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+  window.addEventListener("dragover", e => { if (hasFiles(e)) e.preventDefault(); }, true);
   window.addEventListener("drop", e => {
+    if (!hasFiles(e)) return;
     e.preventDefault();
-    const f = e.dataTransfer && e.dataTransfer.files[0];
+    const f = e.dataTransfer.files[0];
     if (f) window.postMessage({ __alcoveMdDrop: webUtils.getPathForFile(f) }, "*");
   }, true);
 }
