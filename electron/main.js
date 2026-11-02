@@ -1877,28 +1877,56 @@ function findBinary(name, envVar) {
 
 const videoTools = () => ({ ytdlp: findBinary("yt-dlp", "ALCOVE_YTDLP"), ffmpeg: findBinary("ffmpeg", "ALCOVE_FFMPEG") });
 
-// One-time download of the official yt-dlp release into Alcove's own data folder.
+// These two tools are downloaded when the user sets up video download, then run. Both downloads are checked against a
+// SHA-256 before anything is written, and written to a temporary file that is renamed into place, so a corrupt, cut-off
+// or swapped download is never kept or run.
+const sha256 = buf => require("crypto").createHash("sha256").update(buf).digest("hex");
+function installExecutable(dest, data) {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const tmp = `${dest}.${require("crypto").randomBytes(6).toString("hex")}.tmp`;
+  try {
+    fs.writeFileSync(tmp, data, { mode: 0o755, flag: "wx" });
+    fs.renameSync(tmp, dest);
+  } catch (e) { try { fs.rmSync(tmp, { force: true }); } catch {} throw e; }
+}
+async function fetchBuffer(url) {
+  const res = await net.fetch(url, { redirect: "follow" });
+  if (!res.ok) throw new Error(`download failed (${res.status})`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+// yt-dlp: the official release, checked against the SHA2-256SUMS file published with it. (That guards against a corrupt
+// or cut-off download and a swapped file on the way; the release itself is trusted. It changes often, so it is not pinned.)
 async function installDownloader() {
   const asset = { darwin: "yt-dlp_macos", win32: "yt-dlp.exe" }[process.platform] || "yt-dlp";
-  const res = await net.fetch(`https://github.com/yt-dlp/yt-dlp/releases/latest/download/${asset}`, { redirect: "follow" });
-  if (!res.ok) throw new Error(`download failed (${res.status})`);
-  fs.mkdirSync(binDir(), { recursive: true });
-  const dest = path.join(binDir(), exeName("yt-dlp"));
-  fs.writeFileSync(dest, Buffer.from(await res.arrayBuffer()), { mode: 0o755 });
+  const base = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/";
+  const sums = (await fetchBuffer(`${base}SHA2-256SUMS`)).toString("utf8");
+  const line = sums.split(/\r?\n/).map(l => l.trim().split(/\s+/)).find(f => f.length === 2 && f[1].replace(/^\*/, "") === asset);
+  if (!line || !/^[0-9a-f]{64}$/i.test(line[0])) throw new Error("couldn't find the published checksum for the download");
+  const data = await fetchBuffer(base + asset);
+  if (sha256(data) !== line[0].toLowerCase()) throw new Error("the download didn't match its published checksum; try again");
+  installExecutable(path.join(binDir(), exeName("yt-dlp")), data);
   return true;
 }
 
 // YouTube only serves separate video and audio streams, so video needs ffmpeg to merge them.
+// ffmpeg: release b6.1.1 of eugeneware/ffmpeg-static, pinned. These are the SHA-256 values GitHub reports for each
+// archive of that release (an ia32 build for Windows doesn't exist there). Bump the tag and the table together.
+const FFMPEG_TAG = "b6.1.1";
+const FFMPEG_SHA256 = {
+  "darwin-arm64": "8923876afa8db5585022d7860ec7e589af192f441c56793971276d450ed3bbfa",
+  "darwin-x64": "929b375c1182d956c51f7ac25e0b2b0411fb01f6f407aa15c9758efeb4242106",
+  "win32-x64": "8883a3dffbd0a16cf4ef95206ea05283f78908dbfb118f73c83f4951dcc06d77",
+  "linux-x64": "bfe8a8fc511530457b528c48d77b5737527b504a3797a9bc4866aeca69c2dffa",
+  "linux-arm64": "754a678672298bc68156adff58aa7385a592c2b30b1d0ae8750c45c915c4bac0",
+};
 async function installFfmpeg() {
-  const plat = process.platform;
-  const asset = `ffmpeg-${plat}-${process.arch}.gz`;
-  const supported = ["darwin-arm64", "darwin-x64", "win32-x64", "win32-ia32", "linux-x64", "linux-arm64"];
-  if (!supported.includes(`${plat}-${process.arch}`)) throw new Error(`no ffmpeg build for ${plat} ${process.arch}`);
-  const res = await net.fetch(`https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/${asset}`, { redirect: "follow" });
-  if (!res.ok) throw new Error(`ffmpeg download failed (${res.status})`);
-  fs.mkdirSync(binDir(), { recursive: true });
-  const dest = path.join(binDir(), exeName("ffmpeg"));
-  fs.writeFileSync(dest, require("zlib").gunzipSync(Buffer.from(await res.arrayBuffer())), { mode: 0o755 });
+  const plat = `${process.platform}-${process.arch}`;
+  const want = FFMPEG_SHA256[plat];
+  if (!want) throw new Error(`no ffmpeg build for ${process.platform} ${process.arch}`);
+  const archive = await fetchBuffer(`https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_TAG}/ffmpeg-${plat}.gz`);
+  if (sha256(archive) !== want) throw new Error("the ffmpeg download didn't match its checksum; try again");
+  installExecutable(path.join(binDir(), exeName("ffmpeg")), require("zlib").gunzipSync(archive));
 }
 
 // Installs whichever of yt-dlp and ffmpeg is missing.

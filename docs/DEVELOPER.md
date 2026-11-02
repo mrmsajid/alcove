@@ -373,7 +373,11 @@ web session (`applyBlocking`).
 
 - **Extensions** load into the web session with `ses.extensions.loadExtension`; Web Store pages get an
   "Add to Alcove" button injected (`injectStoreFixes`), and installs unpack the CRX with `adm-zip`.
-- **Video download** drives the open-source `yt-dlp` (and `ffmpeg`), downloaded once into `<userData>/bin`.
+- **Video download** drives the open-source `yt-dlp` (and `ffmpeg`), downloaded once into `<userData>/bin`. Both are
+  verified before they are kept: yt-dlp against the `SHA2-256SUMS` file of the same release (it changes often, so it
+  is not pinned), ffmpeg against a SHA-256 pinned in `FFMPEG_SHA256` for release `FFMPEG_TAG` (bump them together: the
+  values are the `digest` fields of `gh api repos/eugeneware/ffmpeg-static/releases/tags/<tag>`). The file is written to
+  a temporary name and renamed, so a bad or cut-off download is never run. yt-dlp is not updated after install.
   Alcove implements no extraction itself.
 - **Screenshots**: visible area, full page (DevTools protocol, capped for very tall pages) and region
   (`region.html` overlay), each ending in the `shot.html` save popup.
