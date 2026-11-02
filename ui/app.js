@@ -1184,6 +1184,7 @@ async function installExtension(input, tabId) {
   toast("Installing extension…", 8000);
   try {
     const x = await invoke("install_extension", { input });
+    if (x && x.cancelled) { toast("Not added", 2000); renderExtensions(); return; } // the user said no in the review
     if (tabId) call("store_button", { id: tabId, folder: x.folder }); // flips the store page's button to "Added"
     $("panel-search").value = "";
     toast(`Added ${x.name}`, 3000);

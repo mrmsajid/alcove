@@ -2,6 +2,7 @@ const {
   app, BaseWindow, BrowserWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net, nativeImage, systemPreferences, Notification, powerMonitor,
 } = require("electron");
 const AdmZip = require("adm-zip");
+const { crxToZip, verifyCrx } = require("./crx");
 const { spawn, execFileSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
@@ -2081,13 +2082,66 @@ async function loadProfileExtensions(profileId, ses) {
   }
 }
 
-// A .crx is a zip with a header in front; skip the header to get the zip.
-function crxToZip(buf) {
-  if (buf.subarray(0, 4).toString() !== "Cr24") return buf;
-  const version = buf.readUInt32LE(4);
-  if (version === 3) return buf.subarray(12 + buf.readUInt32LE(8));
-  if (version === 2) return buf.subarray(16 + buf.readUInt32LE(8) + buf.readUInt32LE(12));
-  throw new Error("unsupported CRX version");
+// What an extension asks for, in plain words, for the review before it is added.
+const PERMISSION_TEXT = {
+  tabs: "See the addresses and titles of your tabs", history: "Read and change your browsing history", bookmarks: "Read and change your bookmarks",
+  cookies: "Read and change your cookies", webRequest: "See your web requests", webRequestBlocking: "Block or change your web requests",
+  declarativeNetRequest: "Block or change content on pages", declarativeNetRequestWithHostAccess: "Block or change content on pages",
+  activeTab: "Use the page you are on when you click its button", scripting: "Run code on pages", userScripts: "Run custom scripts on pages",
+  downloads: "Manage your downloads", clipboardRead: "Read what you copy", clipboardWrite: "Write to your clipboard",
+  nativeMessaging: "Talk to programs on your computer", management: "See and manage your other extensions", proxy: "Control your network proxy",
+  privacy: "Change your privacy settings", debugger: "Debug pages (full access to them)", geolocation: "Know your location",
+  notifications: "Show notifications", contextMenus: "Add items to the right-click menu", webNavigation: "See where you navigate",
+  identity: "Use your accounts to sign in", topSites: "See your most visited sites", tabCapture: "Capture the contents of tabs",
+  desktopCapture: "Capture your screen", pageCapture: "Save pages", browsingData: "Clear your browsing data", sessions: "See your recently closed tabs",
+};
+const QUIET_PERMISSIONS = new Set(["storage", "unlimitedStorage", "alarms", "offscreen", "idle", "sidePanel", "fontSettings", "i18n", "theme", "action"]);
+
+// The extension's name, resolving a "__MSG_name__" placeholder from its default locale.
+function manifestName(zip, m) {
+  const name = String(m.name || "");
+  const ph = /^__MSG_(.+)__$/.exec(name);
+  if (!ph) return name;
+  try {
+    const entry = zip.getEntry(`_locales/${m.default_locale || "en"}/messages.json`);
+    const msgs = JSON.parse(entry.getData().toString("utf8").replace(/^\uFEFF/, ""));
+    const hit = Object.entries(msgs).find(([k]) => k.toLowerCase() === ph[1].toLowerCase());
+    return (hit && hit[1] && hit[1].message) || name;
+  } catch { return name; }
+}
+
+// { name, version, lines } for the review dialog, from the extension's manifest.
+function describeExtension(zipBuf, id) {
+  const zip = new AdmZip(zipBuf);
+  const entry = zip.getEntry("manifest.json");
+  if (!entry) throw new Error("no manifest.json found in that extension");
+  const m = JSON.parse(entry.getData().toString("utf8").replace(/^\uFEFF/, ""));
+  const perms = (Array.isArray(m.permissions) ? m.permissions : []).map(String);
+  const isHost = p => p === "<all_urls>" || p.includes("://");
+  const hosts = [...(Array.isArray(m.host_permissions) ? m.host_permissions : []).map(String), ...perms.filter(isHost),
+    ...(Array.isArray(m.content_scripts) ? m.content_scripts : []).flatMap(c => (c && Array.isArray(c.matches) ? c.matches.map(String) : []))];
+  const lines = [];
+  if (hosts.some(h => h === "<all_urls>" || /^(\*|https?):\/\/\*\/\*/.test(h))) lines.push("Read and change everything on every website you visit");
+  else if (hosts.length) {
+    const names = [...new Set(hosts.map(h => (h.match(/^[^:]+:\/\/([^/]+)/) || [])[1] || h))];
+    lines.push(`Read and change your data on ${names.slice(0, 4).join(", ")}${names.length > 4 ? ` and ${names.length - 4} more` : ""}`);
+  }
+  for (const p of perms) {
+    if (isHost(p) || QUIET_PERMISSIONS.has(p)) continue;
+    lines.push(PERMISSION_TEXT[p] || `Permission: ${p}`);
+  }
+  return { id, name: manifestName(zip, m) || id, version: String(m.version || ""), lines: [...new Set(lines)] };
+}
+
+let testReview = ""; // tests only (debug_review_answer): "add" or "cancel" answers the review without a dialog
+async function confirmExtension(info) {
+  if (testReview) return testReview === "add";
+  const { response } = await dialog.showMessageBox(win, {
+    type: "question", buttons: ["Add extension", "Cancel"], defaultId: 1, cancelId: 1,
+    message: `Add “${info.name.slice(0, 80)}” to Alcove?`,
+    detail: `${info.version ? `Version ${info.version}\n\n` : ""}${info.lines.length ? `It can:\n${info.lines.slice(0, 10).map(l => `• ${l}`).join("\n")}` : "It asks for no special access."}\n\nOnly add extensions you trust.`,
+  });
+  return response === 0;
 }
 
 function summarize(ext) {
@@ -2140,7 +2194,10 @@ async function installFromStore(input) {
   const url = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=${process.versions.chrome}&acceptformat=crx2,crx3&x=${x}`;
   const res = await net.fetch(url, { redirect: "follow" });
   if (!res.ok) throw new Error(`download failed (${res.status})`);
-  return installCrx(Buffer.from(await res.arrayBuffer()), id);
+  // The package must be signed by the key the ID comes from, and the user sees what it asks for before it is added.
+  const zip = verifyCrx(Buffer.from(await res.arrayBuffer()), id);
+  if (!(await confirmExtension(describeExtension(zip, id)))) return { cancelled: true };
+  return installCrx(zip, id);
 }
 
 async function installUnpacked() {
@@ -2539,6 +2596,11 @@ const commands = {
     const item = find(Menu.getApplicationMenu().items);
     if (item) item.click();
     return !!item;
+  },
+  debug_review_answer: ({ answer }) => { if (process.env.ALCOVE_TEST === "1") testReview = answer === "add" || answer === "cancel" ? answer : ""; },
+  debug_describe_extension: ({ path: file }) => { // test hook: the review text for a package on disk
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    return describeExtension(crxToZip(fs.readFileSync(file)), "test");
   },
   debug_leave_answer: ({ answer }) => { if (process.env.ALCOVE_TEST === "1") testLeave = answer === "leave" || answer === "stay" ? answer : ""; },
   debug_destroy_view: ({ what, id }) => { // test hook: a page destroying its own view, as window.close() does

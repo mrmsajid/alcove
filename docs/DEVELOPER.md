@@ -235,7 +235,7 @@ call commands. If you add a new view that needs commands, add it to that list.
 | Markdown | `md_url` `md_recent` `md_recent_folders` (the editor itself uses its own bridge, see 6.6) |
 | Start page | `add_shortcut` (the start page itself uses its own bridge, see 6.7) |
 | Misc | `reveal` |
-| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` `debug_resize` `debug_leave_answer` `debug_destroy_view` `debug_throw` `debug_windows` `debug_focus_popup` `debug_menu` |
+| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` `debug_resize` `debug_leave_answer` `debug_destroy_view` `debug_throw` `debug_windows` `debug_focus_popup` `debug_menu` `debug_review_answer` `debug_describe_extension` |
 
 ### 4.5 Events sent to the sidebar
 
@@ -372,7 +372,13 @@ web session (`applyBlocking`).
 ### 6.3 Extensions, downloads, screenshots, import
 
 - **Extensions** load into the web session with `ses.extensions.loadExtension`; Web Store pages get an
-  "Add to Alcove" button injected (`injectStoreFixes`), and installs unpack the CRX with `adm-zip`.
+  "Add to Alcove" button injected (`injectStoreFixes`), and installs unpack the CRX with `adm-zip`. A store install first
+  checks the package with `electron/crx.js` (`verifyCrx`: the CRX must be signed by the key its 32-letter ID is derived
+  from, CRX2 and CRX3), then shows a review (`describeExtension`, `confirmExtension`: name, version and what it can do in
+  plain words, Cancel is the default), and only then unpacks and loads it. Cancelling returns `{ cancelled: true }`.
+  The page can still ask for an install (its button logs a marker that `openTab` turns into `store-install`), but nothing
+  is added without the review. Unpacked folders chosen by the user skip it. Installed extensions are not updated.
+  Tested against a synthetic CRX2/CRX3 set and one real store package.
 - **Video download** drives the open-source `yt-dlp` (and `ffmpeg`), downloaded once into `<userData>/bin`. Both are
   verified before they are kept: yt-dlp against the `SHA2-256SUMS` file of the same release (it changes often, so it
   is not pinned), ffmpeg against a SHA-256 pinned in `FFMPEG_SHA256` for release `FFMPEG_TAG` (bump them together: the
