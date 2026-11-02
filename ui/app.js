@@ -186,15 +186,29 @@ async function goToTab(id) {
   await activate(id);
 }
 
+const closing = new Set(); // tab ids being closed, so a second Cmd+W (or a key repeat) can't close the neighbour too
 async function closeTab(id) {
+  if (closing.has(id)) return;
   const s = space();
-  const i = s.tabs.findIndex(t => t.id === id);
+  const t = s.tabs.find(t => t.id === id);
+  if (!t) return;
+  closing.add(id);
+  try {
+    // The page may ask "Leave this page?" (unsaved Markdown edits, a form half filled in): if the user stays, the tab stays.
+    if (opened.has(id) && (await invoke("close_tab", { id }).catch(() => true)) === false) return;
+    opened.delete(id);
+    if (inSplit(id)) s.split = null;
+    const el = document.querySelector(`.tab[data-id="${id}"]`);
+    if (el && !t.pinned) { el.classList.add("leaving"); await sleep(150); }
+    await finishClose(s, t);
+  } finally { closing.delete(id); }
+}
+
+// The tab's page is gone: take its row out (a pinned tab stays, unloaded) and show the next one.
+async function finishClose(s, t) {
+  const id = t.id;
+  const i = s.tabs.indexOf(t); // looked up now: the list may have changed while the row faded out
   if (i < 0) return;
-  const t = s.tabs[i];
-  if (inSplit(id)) s.split = null;
-  const el = document.querySelector(`.tab[data-id="${id}"]`);
-  if (el && !t.pinned) { el.classList.add("leaving"); await sleep(150); }
-  if (opened.delete(id)) await invoke("close_tab", { id });
   if (t.pinned) {
     t.url = t.pinUrl || t.url; // pinned tabs unload instead of disappearing
   } else {
@@ -209,6 +223,15 @@ async function closeTab(id) {
     render();
   }
 }
+
+// A page closed itself (window.close(), an OAuth "you can close this window" page): its view is already gone.
+listen("tab-closed", ({ payload }) => {
+  const id = payload.id;
+  if (closing.has(id) || !opened.delete(id)) return; // closed from here, or already handled
+  const t = findTab(id);
+  const s = t && state.spaces.find(sp => sp.tabs.includes(t));
+  if (s) finishClose(s, t);
+});
 
 async function reopenClosed(url) {
   const list = read(CLOSED_KEY, []);
@@ -966,7 +989,7 @@ function spaceInput(i, field) {
 async function deleteSpace(i) {
   const sp = state.spaces[i];
   if (state.spaces.length < 2 || !confirm(`Delete “${sp.name}” and close its ${sp.tabs.length} tabs?`)) return;
-  for (const t of sp.tabs) if (opened.delete(t.id)) await invoke("close_tab", { id: t.id });
+  for (const t of sp.tabs) if (opened.delete(t.id)) await invoke("close_tab", { id: t.id, force: true });
   state.spaces.splice(i, 1);
   if (state.space === i) state.space = 0;
   else if (state.space > i) state.space -= 1;

@@ -8,6 +8,11 @@ const fs = require("fs");
 const { pathToFileURL, fileURLToPath } = require("url");
 const { searchUrl } = require(path.join(__dirname, "ui", "engines.js"));
 
+// A bug in one place must not put Electron's native error dialog in front of the user (a page closing itself while a timer
+// still holds its view, for one): log it and carry on.
+process.on("uncaughtException", err => console.error("uncaught exception:", (err && err.stack) || err));
+process.on("unhandledRejection", err => console.error("unhandled rejection:", (err && err.stack) || err));
+
 const SIDEBAR_W = 280;
 const PRELOAD = path.join(__dirname, "preload.js");
 const COLORS = ["#7c8cff", "#ff7c9c", "#5fd6a0", "#ffb86b", "#c27cff"];
@@ -116,6 +121,8 @@ const uiPartition = id => (id === "default" ? undefined : `persist:ui-${id}`);
 let win;
 let ui;
 let palette = null;
+// A view whose page has been destroyed (it closed itself, or was closed) has no webContents any more.
+const deadView = v => !v || !v.webContents || v.webContents.isDestroyed();
 const tabs = new Map();      // tab id -> WebContentsView
 const wcToTab = new Map();   // webContents id -> tab id
 const lastFind = new Map();
@@ -136,7 +143,7 @@ let peekHoldUntil = 0; // keeps the startup peek on screen briefly
 let dragTimer = null;
 
 const send = (name, payload) => {
-  if (ui && !ui.webContents.isDestroyed()) ui.webContents.send("event", name, payload);
+  if (!deadView(ui)) ui.webContents.send("event", name, payload);
 };
 
 // ---- layout / sliding sidebar ----
@@ -221,7 +228,7 @@ function sendInset(c) {
   const inset = insetFor(c);
   for (const v of tabs.values()) {
     const wc = v.webContents;
-    if (wc.isDestroyed() || insetSent.get(wc) === inset || !wc.getURL().startsWith(NEWTAB_PAGE)) continue;
+    if (!wc || wc.isDestroyed() || insetSent.get(wc) === inset || !wc.getURL().startsWith(NEWTAB_PAGE)) continue;
     insetSent.set(wc, inset);
     wc.send("alcove-inset", inset);
   }
@@ -249,7 +256,7 @@ function createCaption() {
   caption.webContents.loadFile(uiFile("caption.html"));
   win.contentView.addChildView(caption);
   caption.setVisible(false);
-  const state = () => { if (caption && !caption.webContents.isDestroyed()) caption.webContents.send("event", "window-state", { maximized: win.isMaximized() }); };
+  const state = () => { if (!deadView(caption)) caption.webContents.send("event", "window-state", { maximized: win.isMaximized() }); };
   caption.webContents.on("did-finish-load", state);
   win.on("maximize", state);
   win.on("unmaximize", state);
@@ -267,7 +274,7 @@ async function updateBackdrop() {
   if (backdropBusy || !win || win.isDestroyed() || !ui || !S().glass) return;
   if (!floating() || (collapsed && !peeking) || Math.abs(sidebarX) > 1 || !win.isVisible() || win.isMinimized()) return;
   const v = tabs.get(shownId);
-  if (!v) return;
+  if (deadView(v)) return;
   backdropBusy = true;
   try {
     const b = v.getBounds();
@@ -344,6 +351,7 @@ function toggleSidebar() {
 // Cursor polling is simpler and more reliable than a transparent hot-zone view over the page.
 function watchCursor() {
   setInterval(() => {
+    if (extPopup && deadView(extPopup)) closeExtPopup();
     if (extPopup) {
       if (extPopup.webContents.isFocused()) extPopupFocused = true;
       else if (extPopupFocused) closeExtPopup();
@@ -767,6 +775,8 @@ function openTab(id, url) {
   const wc = view.webContents;
   tabs.set(id, view);
   wcToTab.set(wc.id, id);
+  wc.once("destroyed", () => { dropTab(id); send("tab-closed", { id }); });
+  wc.on("will-prevent-unload", e => askLeave(id, view, wc, e));
   win.contentView.addChildView(view);
   if (floating()) raiseUi();
   layout();
@@ -871,7 +881,7 @@ function placePeek() {
   peekView.setBounds({ x: c.x + Math.round((c.w - pw) / 2), y: c.y + 48, width: Math.max(pw, 200), height: Math.max(c.h - 68, 200) });
 }
 
-const peekInfo = info => { if (peekBackdrop) peekBackdrop.webContents.send("event", "peek-info", info); };
+const peekInfo = info => { if (!deadView(peekBackdrop)) peekBackdrop.webContents.send("event", "peek-info", info); };
 
 function openPeek(url) {
   closePeek();
@@ -888,6 +898,8 @@ function openPeek(url) {
   placePeek();
   peekBackdrop.webContents.loadFile(uiFile("peek.html")).then(() => peekInfo({ url })).catch(() => {});
   const pwc = peekView.webContents;
+  const thisPeek = peekView;
+  pwc.once("destroyed", () => { if (peekView === thisPeek) closePeek(); }); // the previewed page closed itself
   pwc.on("before-input-event", (e, input) => {
     if (input.type !== "keyDown") return;
     if (input.key === "Escape") { e.preventDefault(); closePeek(); }
@@ -904,8 +916,8 @@ function openPeek(url) {
 function closePeek() {
   for (const v of [peekView, peekBackdrop]) {
     if (!v) continue;
-    win.contentView.removeChildView(v);
-    v.webContents.close();
+    try { win.contentView.removeChildView(v); } catch {}
+    if (!deadView(v)) v.webContents.close();
   }
   peekView = peekBackdrop = null;
 }
@@ -1124,16 +1136,46 @@ function pageMenu(tabId, wc, p) {
   return Menu.buildFromTemplate(items);
 }
 
-function closeTab(id) {
+// Forget a tab's view and bookkeeping. Runs when its page is destroyed, whoever closed it (the sidebar, or the page itself
+// with window.close(), as OAuth "you can close this window" pages do), and is safe to run twice.
+function dropTab(id) {
   const v = tabs.get(id);
   if (!v) return;
   if (split && (split.left === id || split.right === id)) setSplit(null);
-  win.contentView.removeChildView(v);
-  wcToTab.delete(v.webContents.id);
-  v.webContents.close();
+  try { win.contentView.removeChildView(v); } catch {}
+  for (const [wcId, t] of wcToTab) if (t === id) wcToTab.delete(wcId);
   tabs.delete(id);
   lastFind.delete(id);
   blocked.delete(id);
+}
+
+// Close a tab after giving its page the chance to say no: a page with unsaved work asks "Leave this page?" (the Markdown
+// editor does, for a saved file with changes). Resolves true once the tab is gone, false if the user chose to stay.
+// force skips the question (switching profiles, deleting a space).
+function closeTab(id, force) {
+  const v = tabs.get(id);
+  if (!v) return Promise.resolve(true);
+  const wc = v.webContents;
+  if (deadView(v)) { dropTab(id); return Promise.resolve(true); }
+  if (force) { wc.close(); return Promise.resolve(true); }
+  return new Promise(resolve => {
+    v.alcoveClosing = ok => { v.alcoveClosing = null; resolve(ok); };
+    wc.once("destroyed", () => v.alcoveClosing && v.alcoveClosing(true));
+    wc.close({ waitForBeforeUnload: true });
+  });
+}
+
+// "Leave this page?" for a tab whose page asked to be asked (an unload guard), whether it is being closed or navigated away.
+let testLeave = ""; // tests only (debug_leave_answer): "leave" or "stay" answers the question without a dialog
+function askLeave(id, v, wc, e) {
+  const title = (wc.getTitle() || wc.getURL() || "this page").slice(0, 80);
+  const choice = testLeave ? (testLeave === "leave" ? 0 : 1) : dialog.showMessageBoxSync(win, {
+    type: "question", buttons: ["Leave", "Stay"], defaultId: 1, cancelId: 1,
+    message: `Leave “${title}”?`, detail: "Changes you made may not be saved.",
+  });
+  if (choice === 0) { e.preventDefault(); return; } // preventDefault ignores the page's guard and lets it go
+  if (v.alcoveClosing) v.alcoveClosing(false);        // staying: the close is cancelled
+  send("tab-url", { id, url: wc.getURL() });          // a navigation that was cancelled leaves the address bar as it was
 }
 
 // ---- Markdown viewer / editor (Tools panel) ----
@@ -1444,7 +1486,7 @@ ipcMain.handle("alcove-start", async (e, op, a, b) => {
   if (op === "inset") { const n = insetFor(contentRect()); insetSent.set(e.sender, n); return n; } // current value; later changes are pushed
   if (op === "settings") return { searchEngine: S().searchEngine, customSearch: S().customSearch, accent: S().accent };
   if (op === "tools-data") { // the Tools engine's state, time tracking, to-dos and to-do tallies: JSON text, or null
-    if (!ui || ui.webContents.isDestroyed()) return null;
+    if (deadView(ui)) return null;
     const keys = ["alcove-tools-v1", "alcove-time-v1", "alcove-todos-v1", "alcove-done-v1"];
     return ui.webContents.executeJavaScript(`JSON.stringify(${JSON.stringify(keys)}.map(k => localStorage.getItem(k)))`).catch(() => null);
   }
@@ -2019,8 +2061,8 @@ let extPopupFocused = false;
 
 function closeExtPopup() {
   if (!extPopup) return;
-  win.contentView.removeChildView(extPopup);
-  extPopup.webContents.close();
+  try { win.contentView.removeChildView(extPopup); } catch {}
+  if (!deadView(extPopup)) extPopup.webContents.close();
   extPopup = null;
 }
 
@@ -2041,6 +2083,8 @@ function openExtPopup(id) {
     height: Math.max(Math.min(560, height - 24), 200),
   });
   extPopupFocused = false;
+  const thisPopup = extPopup;
+  thisPopup.webContents.once("destroyed", () => { if (extPopup === thisPopup) closeExtPopup(); }); // it closed itself (window.close())
   win.contentView.addChildView(extPopup);
   extPopup.webContents.loadURL(`chrome-extension://${id}/${page}`).catch(() => {});
   extPopup.webContents.focus();
@@ -2296,7 +2340,7 @@ function switchProfile(id) {
   closeRegion();
   closeShotPopup();
   closeExtPopup();
-  for (const tabId of [...tabs.keys()]) closeTab(tabId);
+  for (const tabId of [...tabs.keys()]) closeTab(tabId, true);
   const old = ui;
   config.activeProfile = id;
   saveConfig();
@@ -2328,13 +2372,13 @@ async function deleteProfile(id) {
 
 // ---- IPC ----
 
-const wcOf = id => tabs.get(id)?.webContents;
+const wcOf = id => { const wc = tabs.get(id)?.webContents; return wc && !wc.isDestroyed() ? wc : undefined; };
 const fxCache = new Map();
 
 const commands = {
   open_tab: ({ id, url }) => openTab(id, url),
   switch_tab: ({ id }) => showOnly(id),
-  close_tab: ({ id }) => closeTab(id),
+  close_tab: ({ id, force }) => closeTab(id, !!force), // true once closed; false if the page asked "Leave this page?" and the user stayed
   navigate: ({ id, url }) => { if (!isOwnSource(url)) wcOf(id)?.loadURL(url).catch(() => {}); },
   nav_action: ({ id, action }) => {
     const wc = wcOf(id);
@@ -2368,6 +2412,20 @@ const commands = {
     if (process.env.ALCOVE_TEST !== "1") return null;
     const b = v => (v ? v.getBounds() : null);
     return { win: win.getContentBounds(), ui: b(ui), strip: b(strip), caption: b(caption), captionVisible: caption ? caption.getVisible() : null, page: contentRect(), tab: b(tabs.get(shownId)), tools: b(toolsView), settings: b(settingsView), palette: b(palette), maximized: win.isMaximized(), IS_WIN };
+  },
+  debug_leave_answer: ({ answer }) => { if (process.env.ALCOVE_TEST === "1") testLeave = answer === "leave" || answer === "stay" ? answer : ""; },
+  debug_destroy_view: ({ what, id }) => { // test hook: a page destroying its own view, as window.close() does
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    const v = what === "peek" ? peekView : what === "ext" ? extPopup : tabs.get(id);
+    if (deadView(v)) return false;
+    v.webContents.close();
+    return true;
+  },
+  debug_throw: () => { // test hook: an uncaught exception and an unhandled rejection in the main process
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    setTimeout(() => { throw new Error("test: uncaught exception"); }, 0);
+    setTimeout(() => { Promise.reject(new Error("test: unhandled rejection")); }, 0);
+    return true;
   },
   debug_resize: ({ w, h }) => { // test hook: set the window's content size
     if (process.env.ALCOVE_TEST !== "1") return null;

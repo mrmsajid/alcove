@@ -235,7 +235,7 @@ call commands. If you add a new view that needs commands, add it to that list.
 | Markdown | `md_url` `md_recent` `md_recent_folders` (the editor itself uses its own bridge, see 6.6) |
 | Start page | `add_shortcut` (the start page itself uses its own bridge, see 6.7) |
 | Misc | `reveal` |
-| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` `debug_resize` |
+| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` `debug_resize` `debug_leave_answer` `debug_destroy_view` `debug_throw` |
 
 ### 4.5 Events sent to the sidebar
 
@@ -329,6 +329,13 @@ web session (`applyBlocking`).
   and tracks which one is on screen in `shownId`.
 - **Split view** shows two tab views side by side with a draggable `divider` view; `layout()` handles the bounds.
 - **Peek** (Shift-click a link) is a floating preview window with a backdrop.
+- **Closing a tab** goes through `closeTab` in `main.js`, which calls `webContents.close({ waitForBeforeUnload: true })`:
+  a page with unsaved work (the Markdown editor, for a saved file with changes) asks "Leave this page?"
+  (`will-prevent-unload`, `askLeave`), and if the user stays the call resolves `false` and the sidebar keeps the tab.
+  The same question appears when a navigation would leave such a page. Switching profile and deleting a space close
+  tabs with `force`. Whoever closes a view (the sidebar, or the page itself with `window.close()`), its `destroyed`
+  event runs `dropTab` and sends `tab-closed`, so the sidebar drops the row. A view whose page is gone has no
+  `webContents`: use `deadView(v)` before touching one. `uncaughtException` and `unhandledRejection` are logged, not shown.
 - **Links and `window.open`** are routed by `setWindowOpenHandler` in `openTab`: Cmd/Ctrl+click opens a background
   tab, Shift+click opens Peek, and everything else becomes a tab, **except a popup that asks for a size**
   (`window.open(url, name, "width=500,height=600")`). That one gets a real child window in the same session
