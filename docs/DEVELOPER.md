@@ -235,7 +235,7 @@ call commands. If you add a new view that needs commands, add it to that list.
 | Markdown | `md_url` `md_recent` `md_recent_folders` (the editor itself uses its own bridge, see 6.6) |
 | Start page | `add_shortcut` (the start page itself uses its own bridge, see 6.7) |
 | Misc | `reveal` |
-| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` `debug_resize` `debug_leave_answer` `debug_destroy_view` `debug_throw` |
+| Tests only | `debug_window_buttons` `debug_page_menu` `debug_open_devtools` `debug_layout` `debug_resize` `debug_leave_answer` `debug_destroy_view` `debug_throw` `debug_windows` `debug_focus_popup` `debug_menu` |
 
 ### 4.5 Events sent to the sidebar
 
@@ -341,7 +341,11 @@ web session (`applyBlocking`).
   (`window.open(url, name, "width=500,height=600")`). That one gets a real child window in the same session
   (`popupWindow`, `popupCreated`), because sign-in popups ("Sign in with Google", most OAuth flows) report back to
   their opener with `postMessage` and then call `window.close()`. A tab made from just the popup's URL has no opener,
-  so the sign-in ended on a blank page. A popup's own links open as tabs.
+  so the sign-in ended on a blank page. A popup's own links open as tabs. Like Chromium's popup blocker, a popup needs a
+  click or key press in the opener within five seconds (`view.alcoveGesture`, set from `input-event` and
+  `before-input-event`), one gesture opens one popup, and a tab keeps at most two. The popup window's title is its
+  host, never the page's title. Menu shortcuts are app-wide, so `item()` in the menu sends close and reload to a focused
+  popup (`BrowserWindow.getFocusedWindow()`; the app's own window is a `BaseWindow`, so it never matches) instead of to the tab behind it.
 - **Palette** (`ui/palette.js`; its view is a fresh one on every open, positioned by `placePalette()`, which `layout()` calls so it
   stays centred as the window resizes): fuzzy and frecency ranking, site shortcuts (`yt …`), calculator, unit and
   currency conversion, ASIN links, QR code, page actions. A new command needs a row in `COMMANDS`
@@ -548,6 +552,11 @@ the page only sends ops.
 - **The Markdown bridge is narrow**: exists only on one `file://` page, checks the sender's URL, reads only
   Markdown/text files, writes only to paths the session opened or the user chose in a dialog, lists only inside
   folders the user mounted, and never returns file contents it was not asked for.
+- **Site permissions** (`askPermission`): one dialog at a time and one per site and permission; **Block** is the default
+  button and "Remember" starts unticked, so a stray Enter cannot grant camera, microphone, location or notifications.
+  The check handler answers `true` only for the permissions the request handler allows outright (`ALWAYS_ALLOWED`).
+- **HTTPS-Only** leaves plain http alone for local addresses only (`isLocalHttp` parses the host: loopback, private
+  ranges, `.local`, `.test`; `localhost.evil.com` and `10.evil.com` are not local).
 - **Settings** are validated per key (`SETTING_RULES`); arguments to commands are validated in the handler.
 - **Content from files or pages is data.** The Markdown renderer escapes first; the Tools page and sidebar build
   DOM with `textContent` and elements rather than HTML strings wherever the text is not ours.

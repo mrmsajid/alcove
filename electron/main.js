@@ -1,5 +1,5 @@
 const {
-  app, BaseWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net, nativeImage, systemPreferences, Notification, powerMonitor,
+  app, BaseWindow, BrowserWindow, WebContentsView, Menu, ipcMain, shell, session, screen, nativeTheme, clipboard, ClipboardItem, dialog, net, nativeImage, systemPreferences, Notification, powerMonitor,
 } = require("electron");
 const AdmZip = require("adm-zip");
 const { spawn, execFileSync } = require("child_process");
@@ -555,7 +555,16 @@ function installBlockerHooks(ses) {
 // The single request filter for a web session: upgrades page loads to HTTPS when asked to, then lets the
 // ad blocker decide (unless the site is exempt). Re-installed after the blocker is switched on or off,
 // because the blocker replaces the session's handler.
-const LOCAL_HTTP = /^http:\/\/(localhost|127\.|\[::1\]|10\.|192\.168\.|[^/]*\.local\b|[^/]*\.test\b)/i;
+// HTTPS-Only leaves plain http alone for local addresses: loopback, private ranges, and .local / .test names. The host is
+// parsed, not matched against the URL's text, so "localhost.evil.com", "10.evil.com" and "x.test@evil.com" don't count.
+function isLocalHttp(url) {
+  let h;
+  try { h = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, ""); } catch { return false; }
+  if (h === "localhost" || h.endsWith(".localhost") || h === "::1") return true;
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (m) { const a = +m[1], b = +m[2]; return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254); }
+  return /\.(local|test)$/.test(h);
+}
 // Focus mode (Tools panel): while it's on, new page loads for the chosen sites are refused and the tab
 // shows ui/blocked.html instead. Pages that are already open are left alone until they navigate.
 let focus = null; // { until, sites }
@@ -569,7 +578,7 @@ const focusBlocks = url => {
 function installRequestFilter(ses) {
   ses.webRequest.onBeforeRequest({ urls: ["<all_urls>"] }, (details, callback) => {
     if (details.resourceType === "mainFrame" && focusBlocks(details.url)) return callback({ cancel: true });
-    if (S().httpsOnly && details.resourceType === "mainFrame" && /^http:\/\//i.test(details.url) && !LOCAL_HTTP.test(details.url)) {
+    if (S().httpsOnly && details.resourceType === "mainFrame" && /^http:\/\//i.test(details.url) && !isLocalHttp(details.url)) {
       return callback({ redirectURL: details.url.replace(/^http:/i, "https:") });
     }
     const filtering = blocker && blocker.isBlockingEnabled(ses);
@@ -618,19 +627,35 @@ function permissionText(permission, details) {
   return ASKABLE[permission];
 }
 
-async function askPermission(wc, permission, details) {
+// One question at a time, and one per site and permission: a page that fires several requests (or the same one in a
+// loop) gets a single dialog, not a stack of them.
+const pendingPermission = new Map(); // "origin permission" -> the question being asked
+let permissionChain = Promise.resolve();
+function askPermission(wc, permission, details) {
   let origin;
-  try { origin = new URL(details.requestingUrl || wc.getURL()).origin; } catch { return false; }
+  try { origin = new URL(details.requestingUrl || wc.getURL()).origin; } catch { return Promise.resolve(false); }
   const key = permKey(origin, permission);
-  if (key in config.sitePermissions) return config.sitePermissions[key];
+  if (key in config.sitePermissions) return Promise.resolve(config.sitePermissions[key]);
+  if (pendingPermission.has(key)) return pendingPermission.get(key);
+  const answer = permissionChain
+    .then(() => (key in config.sitePermissions ? config.sitePermissions[key] : askPermissionNow(origin, key, permission, details)))
+    .finally(() => pendingPermission.delete(key));
+  permissionChain = answer.catch(() => {});
+  pendingPermission.set(key, answer);
+  return answer;
+}
+
+async function askPermissionNow(origin, key, permission, details) {
+  // Block is the default button and "Remember" starts unticked: an Enter pressed while the page asks (it can do so at
+  // any moment) must never grant access, let alone for good.
   const { response, checkboxChecked } = await dialog.showMessageBox(win, {
     type: "question",
     buttons: ["Allow", "Block"],
-    defaultId: 0,
+    defaultId: 1,
     cancelId: 1,
     message: `${new URL(origin).host} wants to ${permissionText(permission, details)}`,
     checkboxLabel: "Remember for this site",
-    checkboxChecked: true,
+    checkboxChecked: false,
   });
   const ok = response === 0;
   if (checkboxChecked) { config.sitePermissions[key] = ok; saveConfig(); }
@@ -660,7 +685,7 @@ function ensureSession(profileId) {
     askPermission(wc, permission, details).then(cb, () => cb(false));
   });
   ses.setPermissionCheckHandler((_wc, permission, origin) => {
-    if (!ASKABLE[permission]) return true;
+    if (!ASKABLE[permission]) return ALWAYS_ALLOWED.includes(permission); // the same list the request handler allows
     let o; try { o = new URL(origin).origin; } catch { return false; } // Electron passes it with a trailing slash
     return config.sitePermissions[permKey(o, permission)] === true;
   });
@@ -744,7 +769,12 @@ async function initBlocker() {
 // opener (postMessage) and closes itself (window.close()). A tab made from just the popup's URL has no opener, so
 // "Sign in with Google" (ClickUp, and most sites) ended on a blank page. The popup is a small window in the same
 // session (the same cookies), centred on the app, with no menu bar.
-function popupWindow(features) {
+function popupWindow(features, view) {
+  // Like Chromium's own popup blocker: a popup needs a click or key press behind it (within five seconds, the length of
+  // a user activation), one gesture opens one popup, and a tab keeps at most two open. Without this any page could
+  // flood the screen with windows, or put up a convincing fake sign-in.
+  if (Date.now() - (view.alcoveGesture || 0) > 5000 || (view.alcovePopups || 0) >= 2) return { action: "deny" };
+  view.alcoveGesture = 0;
   const n = k => { const m = new RegExp(`(?:^|[,\\s])${k}\\s*=\\s*(\\d+)`, "i").exec(features); return m ? Number(m[1]) : 0; };
   const width = Math.min(Math.max(n("width") || 500, 360), 1100);
   const height = Math.min(Math.max(n("height") || 650, 320), 900);
@@ -757,10 +787,18 @@ function popupWindow(features) {
     },
   };
 }
-function popupCreated(popup) {
+function popupCreated(popup, view) {
   popup.setMenuBarVisibility(false);
   popup.center();
-  popup.webContents.setWindowOpenHandler(({ url: u }) => { send("new-tab-request", { url: u }); return { action: "deny" }; });
+  view.alcovePopups = (view.alcovePopups || 0) + 1;
+  popup.once("closed", () => { view.alcovePopups = Math.max(0, (view.alcovePopups || 1) - 1); });
+  const wc = popup.webContents;
+  // The window's title says where it is, not what the page claims, so it can't pose as an Alcove dialog.
+  const where = () => { try { return new URL(wc.getURL()).host || "Sign in"; } catch { return "Sign in"; } };
+  popup.on("page-title-updated", e => e.preventDefault()); // (the window's event: the page's title doesn't reach the title bar)
+  wc.on("did-navigate", () => popup.setTitle(where()));
+  popup.setTitle(where());
+  wc.setWindowOpenHandler(({ url: u }) => { send("new-tab-request", { url: u }); return { action: "deny" }; });
 }
 
 function openTab(id, url) {
@@ -812,13 +850,16 @@ function openTab(id, url) {
   // for a size ("Sign in with Google" and other sign-in flows) gets a real window (see popupWindow); other links
   // and window.open calls become tabs.
   wc.setWindowOpenHandler(({ url: u, disposition, features }) => {
-    if (disposition === "new-window" && features) return popupWindow(features);
+    if (disposition === "new-window" && features) return popupWindow(features, view);
     if (disposition === "background-tab") send("new-tab-request", { url: u, background: true, from: id });
     else if (disposition === "new-window") openPeek(u);
     else send("new-tab-request", { url: u, from: id });
     return { action: "deny" };
   });
-  wc.on("did-create-window", popupCreated);
+  wc.on("did-create-window", w => popupCreated(w, view));
+  const gesture = () => { view.alcoveGesture = Date.now(); };
+  wc.on("before-input-event", (_e, input) => { if (input.type === "keyDown") gesture(); });
+  wc.on("input-event", (_e, ev) => { if (/^(mouseDown|mouseUp|rawKeyDown|keyDown|touchEnd|gestureTap)$/.test(ev.type)) gesture(); });
   wc.on("context-menu", (_e, p) => { const menu = pageMenu(id, wc, p); if (menu.items.length) menu.popup(); });
   wc.on("devtools-opened", () => { if (isOwnPage(wc.getURL())) wc.closeDevTools(); });
   wc.on("will-navigate", (e, u) => { if (isOwnSource(u)) e.preventDefault(); });
@@ -2413,6 +2454,24 @@ const commands = {
     const b = v => (v ? v.getBounds() : null);
     return { win: win.getContentBounds(), ui: b(ui), strip: b(strip), caption: b(caption), captionVisible: caption ? caption.getVisible() : null, page: contentRect(), tab: b(tabs.get(shownId)), tools: b(toolsView), settings: b(settingsView), palette: b(palette), maximized: win.isMaximized(), IS_WIN };
   },
+  debug_windows: () => { // test hook: the popup windows (real windows besides the app's own)
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    return BrowserWindow.getAllWindows().map(w => ({ title: w.getTitle(), url: w.webContents.getURL(), focused: w.isFocused(), w: w.getBounds().width, h: w.getBounds().height }));
+  },
+  debug_focus_popup: () => { // test hook: focus the first popup window
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    const w = BrowserWindow.getAllWindows()[0];
+    if (!w) return false;
+    app.focus({ steal: true }); w.focus();
+    return w.isFocused();
+  },
+  debug_menu: ({ label }) => { // test hook: click a menu item by its label, as its accelerator would
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    const find = items => { for (const i of items) { if (i.label === label) return i; const f = i.submenu && find(i.submenu.items); if (f) return f; } return null; };
+    const item = find(Menu.getApplicationMenu().items);
+    if (item) item.click();
+    return !!item;
+  },
   debug_leave_answer: ({ answer }) => { if (process.env.ALCOVE_TEST === "1") testLeave = answer === "leave" || answer === "stay" ? answer : ""; },
   debug_destroy_view: ({ what, id }) => { // test hook: a page destroying its own view, as window.close() does
     if (process.env.ALCOVE_TEST !== "1") return null;
@@ -2699,7 +2758,13 @@ ipcMain.on("emit", (e, name, payload) => {
 
 // Native accelerators keep shortcuts working while a web page has keyboard focus.
 function buildMenu() {
-  const item = (id, label, accelerator) => ({ label, accelerator, click: () => send("shortcut", id) });
+  const item = (id, label, accelerator) => ({ label, accelerator, click: () => {
+    // Menu shortcuts are app-wide. A sign-in popup is its own window, so a key pressed there acts on it (close, reload), never
+    // on the tab behind it (Cmd+W there used to close the page that was waiting for the sign-in).
+    const popup = BrowserWindow.getFocusedWindow();
+    if (popup) { if (id === "close-tab") popup.close(); else if (id === "reload") popup.webContents.reload(); return; }
+    send("shortcut", id);
+  } });
   const mac = process.platform === "darwin";
   return Menu.buildFromTemplate([
     ...(mac ? [{ label: app.name, submenu: [
