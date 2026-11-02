@@ -103,7 +103,7 @@
     .chips button:hover { background: color-mix(in srgb, var(--accent) 30%, var(--active)); }
 
     /* add / edit a shortcut */
-    dialog { width: 360px; max-width: calc(100vw - 32px); padding: 20px; border-radius: 18px; border: 1px solid var(--border); background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+    dialog { left: var(--inset, 0px); /* centred in the space the sidebar leaves */ width: 360px; max-width: calc(100vw - var(--inset, 0px) - 32px); padding: 20px; border-radius: 18px; border: 1px solid var(--border); background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
     dialog::backdrop { background: #0000006b; }
     dialog h3 { margin: 0 0 14px; font-size: 15px; }
     dialog label { display: block; margin-bottom: 12px; font-size: 12.5px; color: var(--muted); }
@@ -191,7 +191,9 @@
     input.addEventListener("keydown", e => { if (e.key === "Escape") input.value = ""; });
     // Typing anywhere starts a search.
     window.addEventListener("keydown", e => {
-      if (dlg.open || e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1 || /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+      const a = document.activeElement;
+      // Not while a control has the focus: Space presses the button or tile that has it, it doesn't start a search.
+      if (dlg.open || e.metaKey || e.ctrlKey || e.altKey || e.key.length !== 1 || /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(a.tagName) || a.getAttribute("role") === "link") return;
       input.focus();
     });
     Promise.resolve(bridge.settings && bridge.settings()).then(s => {

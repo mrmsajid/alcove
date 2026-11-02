@@ -8,6 +8,20 @@
   <style>
     html, body { display: block; height: 100%; margin: 0; padding: 0; background: var(--bg) !important; user-select: none; }
     .shell { display: grid; grid-template-columns: 210px 1fr; height: 100%; }
+    /* Narrow (this page sits beside the sidebar, so it can be about 340 px): the sections become a row of chips on top, and
+       each setting's control wraps below its label. */
+    @media (max-width: 640px) {
+      .shell { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+      nav { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--border); overflow: visible; }
+      nav h1 { width: 100%; margin: 0 6px 4px; font-size: 16px; }
+      nav a { padding: 6px 10px; }
+      main { padding: 14px 16px 48px; }
+      .row { flex-wrap: wrap; gap: 8px 16px; }
+      .row .what { flex: 1 1 200px; }
+      .ctl { flex-wrap: wrap; }
+      .checks { grid-template-columns: 1fr; }
+      .path { max-width: 100%; }
+    }
     nav { padding: 20px 12px; border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
     nav h1 { font-size: 18px; margin: 4px 10px 14px; }
     nav a { display: block; padding: 8px 10px; border-radius: 10px; color: var(--text); text-decoration: none; cursor: pointer; }

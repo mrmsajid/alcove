@@ -20,7 +20,7 @@
     button:disabled { opacity: .4; cursor: default; }
     svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
-    header { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex: none; }
+    header { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex: none; } /* wraps rather than pushing buttons off a narrow window */
     header .name { font-weight: 600; margin: 0 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     header .name i { color: var(--muted); font-style: normal; font-weight: 400; }
     header .sp { flex: 1; }

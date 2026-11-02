@@ -370,7 +370,7 @@ function peek(on) {
   if (!collapsed || peeking === on) return;
   peeking = on;
   if (on) raiseUi();
-  animate(on ? 0 : HIDE_X, contentLeft, 180);
+  animate(on ? 0 : HIDE_X, contentLeft, 180, coverTarget()); // a peek is an overlay: the start page does not move for it (cover stays 0 while hidden)
   sidebarState();
 }
 
@@ -2639,7 +2639,7 @@ const commands = {
   debug_layout: () => { // test hook: where the views are
     if (process.env.ALCOVE_TEST !== "1") return null;
     const b = v => (v ? v.getBounds() : null);
-    return { win: win.getContentBounds(), ui: b(ui), strip: b(strip), caption: b(caption), captionVisible: caption ? caption.getVisible() : null, page: contentRect(), tab: b(tabs.get(shownId)), tools: b(toolsView), settings: b(settingsView), palette: b(palette), extPopup: deadView(extPopup) ? null : b(extPopup), maximized: win.isMaximized(), IS_WIN };
+    return { win: win.getContentBounds(), ui: b(ui), strip: b(strip), caption: b(caption), captionVisible: caption ? caption.getVisible() : null, page: contentRect(), tab: b(tabs.get(shownId)), tools: b(toolsView), settings: b(settingsView), palette: b(palette), sideCover: Math.round(sideCover), extPopup: deadView(extPopup) ? null : b(extPopup), maximized: win.isMaximized(), IS_WIN };
   },
   debug_windows: () => { // test hook: the popup windows (real windows besides the app's own)
     if (process.env.ALCOVE_TEST !== "1") return null;
@@ -2668,6 +2668,7 @@ const commands = {
     if (process.env.ALCOVE_TEST !== "1") return null;
     return installFromDir(String(dir), `local-test-${path.basename(String(dir)).replace(/[^\w.-]+/g, "_")}`);
   },
+  debug_peek: ({ on }) => { if (process.env.ALCOVE_TEST === "1") peek(!!on); return process.env.ALCOVE_TEST === "1"; }, // test hook: as the cursor at the left edge would
   debug_quit: () => { if (process.env.ALCOVE_TEST === "1") setImmediate(() => app.quit()); return process.env.ALCOVE_TEST === "1"; }, // test hook: as Cmd+Q would
   debug_quit_answer: ({ answer }) => { if (process.env.ALCOVE_TEST === "1") testQuit = answer === "quit" || answer === "cancel" ? answer : ""; },
   debug_close_window: () => { if (process.env.ALCOVE_TEST === "1") win.close(); return process.env.ALCOVE_TEST === "1"; }, // test hook: as the close button would
