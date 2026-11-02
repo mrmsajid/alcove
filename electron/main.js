@@ -1157,6 +1157,11 @@ const mdAllowed = new Set(); // files this session opened or saved: the only one
 const mdRoots = new Set();
 const MD_SKIP = /^(\.|node_modules$|__pycache__$)/;
 const mdInside = p => [...mdRoots].some(r => p === r || p.startsWith(r + path.sep));
+const realPath = p => { try { return fs.realpathSync(p); } catch { return p; } };
+// What the editor page may read: a file this session opened or saved, one from the recent list, or one inside an open
+// folder (judged by where it really is, so a link inside the folder can't lead out of it). The file a tab was opened
+// on and a file dropped on the editor are allowed where they come in (see the "alcove-md" handler).
+const mdReadable = p => mdAllowed.has(p) || (config.recentMd || []).includes(p) || mdInside(realPath(p));
 const mdName = (s, ext) => {
   const n = String(s || "").replace(/[\\/:*?"<>|\u0000-\u001f]+/g, "-").replace(/^\.+/, "").trim().slice(0, 100);
   return n ? (ext && !MD_EXT.test(n) ? n + ext : n) : "";
@@ -1361,7 +1366,7 @@ async function mdGraph(rootDir) {
 }
 
 function mdAdoptRoot(p) {
-  const rootDir = path.resolve(p);
+  const rootDir = realPath(path.resolve(p)); // roots are kept as real paths so mdInside can't be fooled by a link
   mdRoots.add(rootDir);
   config.recentMdFolders = [rootDir, ...(config.recentMdFolders || []).filter(x => x !== rootDir)].slice(0, 20);
   saveConfig();
@@ -1373,9 +1378,10 @@ const mdRemember = p => {
   saveConfig();
 };
 
-function mdRead(p) {
+function mdRead(p, trusted) {
   p = path.resolve(String(p || ""));
   if (!MD_EXT.test(p)) return { error: "Only Markdown or text files can be opened here." };
+  if (!trusted && !mdReadable(p)) return { error: "Open this file with Open… or drop it on the editor first." };
   try {
     const st = fs.statSync(p);
     if (!st.isFile()) return { error: "That isn't a file." };
@@ -1391,14 +1397,25 @@ function mdRead(p) {
 
 function mdWrite(p, text) {
   if (typeof text !== "string" || text.length > 2 * MD_MAX) return { error: "Nothing to save, or the document is too large." };
+  let tmp = "";
   try {
-    const tmp = `${p}.alcove-tmp`;
-    fs.writeFileSync(tmp, text, "utf8");
-    fs.renameSync(tmp, p); // never leaves a half-written file behind
+    // A note that is a link is saved through to the file it points at (so a notes folder synced by links keeps working),
+    // but only if that is a Markdown or text file too.
+    const target = fs.existsSync(p) ? fs.realpathSync(p) : p;
+    if (!MD_EXT.test(target)) return { error: "This file is a link to something that isn't a Markdown or text file." };
+    const mode = fs.existsSync(target) ? fs.statSync(target).mode & 0o777 : 0o644; // keep the file's permissions
+    // The temporary file has a random name and is created exclusively ("wx"), so a link planted at a guessable name
+    // can't redirect the write; the rename then swaps it in whole, so a crash never leaves half a note.
+    tmp = path.join(path.dirname(target), `.${path.basename(target)}.${require("crypto").randomBytes(6).toString("hex")}.alcove-tmp`);
+    fs.writeFileSync(tmp, text, { encoding: "utf8", flag: "wx", mode });
+    fs.renameSync(tmp, target);
     mdAllowed.add(p);
     mdRemember(p);
     return { path: p };
-  } catch { return { error: "Couldn't save the file. Check that the folder is writable." }; }
+  } catch {
+    if (tmp) { try { fs.rmSync(tmp, { force: true }); } catch {} }
+    return { error: "Couldn't save the file. Check that the folder is writable." };
+  }
 }
 
 // The start page (ui/newtab.html, what a new tab shows) reads the Tools engine's saved state from the sidebar and
@@ -1442,7 +1459,16 @@ ipcMain.handle("alcove-start", async (e, op, a, b) => {
 
 ipcMain.handle("alcove-md", async (e, op, a, b) => {
   if (!e.senderFrame || e.senderFrame.url.split(/[?#]/)[0] !== MD_PAGE) throw new Error("forbidden");
-  if (op === "read") return mdRead(a);
+  if (op === "read") { // the file this tab was opened on (?file=…) is allowed; anything else must have been opened, dropped or mounted
+    let own = null;
+    try { own = new URL(e.senderFrame.url).searchParams.get("file"); } catch {}
+    return mdRead(a, !!own && path.resolve(String(a || "")) === path.resolve(own));
+  }
+  if (op === "allow") { // sent by the preload for a file the user dropped on the editor; the page itself can't call this
+    const f = path.resolve(String(a || ""));
+    if (MD_EXT.test(f)) mdAllowed.add(f);
+    return true;
+  }
   if (op === "openFolder") {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, { properties: ["openDirectory", "createDirectory"], defaultPath: app.getPath("documents") });
     return canceled || !filePaths[0] ? null : mdAdoptRoot(filePaths[0]);
@@ -1472,7 +1498,7 @@ ipcMain.handle("alcove-md", async (e, op, a, b) => {
   if (op === "graph") return mdGraph(a);
   if (op === "search") return mdSearch(a || {});
   if (op === "newFile" || op === "newFolder") {
-    const dir = path.resolve(String(a || ""));
+    const dir = realPath(path.resolve(String(a || "")));
     if (!mdInside(dir)) return { error: "That folder isn't open." };
     const name = mdName(b || "Untitled", op === "newFile" ? ".md" : "");
     if (!name) return { error: "Give it a name." };
@@ -1486,7 +1512,7 @@ ipcMain.handle("alcove-md", async (e, op, a, b) => {
   }
   if (op === "open") {
     const { canceled, filePaths } = await dialog.showOpenDialog(win, { properties: ["openFile"], filters: MD_FILTERS, defaultPath: app.getPath("documents") });
-    return canceled || !filePaths[0] ? null : mdRead(filePaths[0]);
+    return canceled || !filePaths[0] ? null : mdRead(filePaths[0], true);
   }
   if (op === "save") {
     const p = path.resolve(String(a || ""));

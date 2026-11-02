@@ -4,6 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Markdown</title>
+  <!-- A note is untrusted text: if anything in it ever got past the renderer it still could not call out (no fetch,
+       XHR, sockets, frames, plugins or form posts). Images may come from https: and data: only. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <style>
     :root { color-scheme: dark light; --bg: #1d1d20; --surface: #26262a; --text: #ededf0; --muted: #8e8e97; --line: #ffffff17; --accent: #76767f; --code: #ffffff0f; --link: #8ab4ff; --hover: #ffffff10; --tag: #ffffff14; }
     @media (prefers-color-scheme: light) { :root { --bg: #fbfbfc; --surface: #f1f1f4; --text: #1c1c1f; --muted: #6e6e78; --line: #0000001a; --code: #0000000a; --link: #1a5fd0; --hover: #0000000a; --tag: #0000000d; } }
@@ -269,23 +272,30 @@
     const safeImg = u => /^https?:\/\//i.test(u);
 
     function inline(src) {
-      const codes = [], lits = [];
+      const codes = [], lits = [], tags = [];
       const lit = c => { lits.push(c); return `\u0001${lits.length - 1}\u0001`; };
-      let t = src.replace(/\\`/g, () => lit("`")); // an escaped backtick doesn't start a code span
+      // A tag built here is set aside as a placeholder, so the passes after it (autolinks, emphasis, #tags) only ever see
+      // text and can never rewrite the inside of a tag's attributes. (A bare URL in an image's alt text used to turn into
+      // a link inside the attribute, which let a document add an onerror attribute.) The placeholders use control
+      // characters, so they are removed from the source first.
+      const tag = html => { tags.push(html); return `\u0002${tags.length - 1}\u0002`; };
+      let t = src.replace(/[\u0000-\u0002]/g, "").replace(/\\`/g, () => lit("`")); // an escaped backtick doesn't start a code span
       t = t.replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
       t = t.replace(/\\([\\*_~#>+\-.!|\[\]()<])/g, (_, c) => lit(c)); // \* \# … show the character itself
       t = esc(t);
-      t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (m, alt, url) => safeImg(url) ? `<img src="${url}" alt="${alt}">` : alt);
-      t = t.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (m, text, url) => safeLink(url) ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>` : text);
-      t = t.replace(/&lt;(https?:\/\/[^\s&]+)&gt;/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
-      t = t.replace(/(^|[\s(])(https?:\/\/[^\s<]*[^\s<.,;:!?)\]])/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+      t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (m, alt, url) => safeImg(url) ? tag(`<img src="${url}" alt="${alt}">`) : alt);
+      const open = url => tag(`<a href="${url}" target="_blank" rel="noopener noreferrer">`);
+      // URLs never contain a placeholder (\u0002): one would end up inside an href and carry its quotes with it.
+      t = t.replace(/\[([^\]]+)\]\(([^)\s\u0002]+)(?:\s+&quot;[^&]*&quot;)?\)/g, (m, text, url) => safeLink(url) ? `${open(url)}${text}</a>` : text);
+      t = t.replace(/&lt;(https?:\/\/[^\s&\u0002]+)&gt;/g, (m, url) => `${open(url)}${url}</a>`);
+      t = t.replace(/(^|[\s(])(https?:\/\/[^\s<\u0002]*[^\s<\u0002.,;:!?)\]])/g, (m, pre, url) => `${pre}${open(url)}${url}</a>`);
       t = t.replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, "<strong>$1</strong>").replace(/(^|\W)__(?=\S)(.+?)(?<=\S)__(?!\w)/g, "$1<strong>$2</strong>");
       t = t.replace(/(^|[^*])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?!\*)/g, "$1<em>$2</em>").replace(/(^|\W)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)/g, "$1<em>$2</em>");
       t = t.replace(/~~(?=\S)(.+?)(?<=\S)~~/g, "<del>$1</del>");
       // #tags in running text (never inside a tag's own attributes)
       t = t.split(/(<[^>]*>)/).map(seg => (seg.startsWith("<") ? seg : seg.replace(/(^|[\s(])#([A-Za-z][\w/-]{0,39})(?![\w/-])/g, '$1<span class="tag">#$2</span>'))).join("");
       t = t.replace(/ {2,}\n/g, "<br>");
-      return t.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${esc(codes[i])}</code>`).replace(/\u0001(\d+)\u0001/g, (_, i) => esc(lits[i]));
+      return t.replace(/\u0002(\d+)\u0002/g, (_, i) => tags[i]).replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${esc(codes[i])}</code>`).replace(/\u0001(\d+)\u0001/g, (_, i) => esc(lits[i]));
     }
 
     const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;

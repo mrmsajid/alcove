@@ -165,6 +165,8 @@ if (window === window.top && location.protocol === "file:" && /\/ui\/markdown\.h
     if (!hasFiles(e)) return;
     e.preventDefault();
     const f = e.dataTransfer.files[0];
-    if (f) window.postMessage({ __alcoveMdDrop: webUtils.getPathForFile(f) }, "*");
+    const dropped = f ? webUtils.getPathForFile(f) : ""; // empty for a File a script made up
+    // Tell the app first: it only lets the editor read files it knows the user opened or dropped.
+    if (dropped) md("allow", dropped).then(() => window.postMessage({ __alcoveMdDrop: dropped }, "*"));
   }, true);
 }
