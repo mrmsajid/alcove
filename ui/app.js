@@ -1007,6 +1007,10 @@ async function deleteSpace(i) {
   if (state.spaces.length < 2 || !confirm(`Delete “${sp.name}” and close its ${sp.tabs.length} tabs?`)) return;
   for (const t of sp.tabs) if (opened.delete(t.id)) await invoke("close_tab", { id: t.id, force: true });
   state.spaces.splice(i, 1);
+  for (const key of ["alcove-todos-v1", "alcove-notes-v1"]) { // its to-dos and notes would otherwise sit unreachable (and still count as "open")
+    const d = read(key, {});
+    if (sp.id in d) { delete d[sp.id]; write(key, d); }
+  }
   if (state.space === i) state.space = 0;
   else if (state.space > i) state.space -= 1;
   await activate(space().active);
@@ -1578,8 +1582,10 @@ $("panel-search").addEventListener("keydown", e => {
 });
 $("panel-clear").addEventListener("click", () => {
   if (panel === "extensions") return loadUnpacked();
-  write(panel === "history" ? HIST_KEY : DL_KEY, []);
+  const key = panel === "history" ? HIST_KEY : DL_KEY, before = read(key, []);
+  write(key, []);
   renderPanel();
+  if (before.length) toast(`${panel === "history" ? "History" : "Download list"} cleared`, 7000, [{ label: "Undo", fn: () => { write(key, before); renderPanel(); } }]);
 });
 
 $("find-input").addEventListener("input", () => doFind(false));

@@ -18,9 +18,13 @@ const op = (name, ...args) => invoke("tools_op", { op: name, args }).catch(() =>
 const call = (cmd, args) => invoke(cmd, args).catch(() => null);
 
 let toastTimer;
-function toast(msg, ms = 2200) {
+function toast(msg, ms = 2200, undo = null) { // undo: a function that takes the action back, offered as a button
   const t = $("toast");
   t.textContent = msg;
+  if (undo) {
+    const b = el("button", { type: "button", on: { click: () => { t.hidden = true; clearTimeout(toastTimer); undo(); } } }, "Undo");
+    t.append(" ", b);
+  }
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, ms);
@@ -311,7 +315,11 @@ function trackView() {
       note("Counted while Alcove is in front and you're active. Stored on this device only."),
       el("div", { class: "t-btns" },
         btn(st.trackPaused ? "Resume tracking" : "Pause tracking", () => op("track-toggle")),
-        btn("Clear today", () => op("track-clear-today").then(() => render())))),
+        btn("Clear today", () => {
+          const before = (read(TIME_KEY, { days: {} }).days || {})[today()];
+          op("track-clear-today").then(() => render());
+          if (before) toast("Today's tracked time cleared", 7000, () => op("track-restore-today", before).then(() => render()));
+        }))),
     card("Task timer",
       st.task ? [el("div", { class: "t-sub" }, st.task.name), liveText("t-big", () => clock(Date.now() - st.task.start)),
         el("div", { class: "t-btns" }, btn("Stop", () => op("task-stop"), "primary"))]
@@ -320,7 +328,11 @@ function trackView() {
         el("div", { class: "t-bars" }, ...log.map(x => el("div", { class: "t-bar plain" }, el("span", { class: "n" }, x.name), el("span", { class: "v" }, human(x.sec))))),
         el("div", { class: "t-btns" },
           btn("Copy log", () => copy(log.map(x => `${x.name}: ${human(x.sec)}`).concat(`Total: ${human(logTotal)}`).join("\n"), "Task log copied")),
-          btn("Clear", () => op("task-clear-log")))] : null),
+          btn("Clear", () => {
+            const before = (st.log[today()] || []).map(x => ({ ...x }));
+            op("task-clear-log");
+            toast("Task log cleared", 7000, () => op("task-restore-log", before));
+          }))] : null),
   ];
 }
 
@@ -372,6 +384,13 @@ function clocksView() {
 const TODO_KEY = "alcove-todos-v1"; // { spaceId: [{ id, text, done, doneOn }] }, written by this page
 const DONE_KEY = "alcove-done-v1";  // { "2026-11-02": { todos: n } }: to-dos ticked per day, for the start page's daily report
 let refocusTodo = false;
+const todosOf = space => read(TODO_KEY, {})[space] || [];
+function setTodos(space, list) {
+  const all = read(TODO_KEY, {});
+  all[space] = list;
+  try { localStorage.setItem(TODO_KEY, JSON.stringify(all)); } catch {}
+  render();
+}
 
 // Ticking counts toward that day; unticking takes the count back off the day it was ticked. Clearing done items keeps it.
 function tallyTodo(it, done) {
@@ -423,14 +442,21 @@ function todoCard() {
         commit(items.map(x => (x.id === it.id ? { ...x, done, doneOn: done ? today() : undefined } : x)));
       } } }),
       text,
-      el("button", { class: "icon sm", title: "Delete", on: { click: () => commit(items.filter(x => x.id !== it.id)) } }, "×"));
+      el("button", { class: "icon sm", title: "Delete", on: { click: () => {
+        const at = items.findIndex(x => x.id === it.id);
+        commit(items.filter(x => x.id !== it.id));
+        toast("To-do deleted", 7000, () => { const cur = todosOf(space); cur.splice(Math.min(at, cur.length), 0, it); setTodos(space, cur); });
+      } } }, "×"));
   };
   const open = items.filter(x => !x.done), done = items.filter(x => x.done);
   return card(`To-do · ${ctx.space.name || "this space"}`, form,
     items.length ? el("div", { class: "todos" }, ...open.map(row), ...done.map(row)) : note("Nothing on the list. Add what you need to do in this space."),
     items.length ? el("div", { class: "t-btns" },
       el("span", { class: "t-sub", style: "flex:1;align-self:center" }, `${open.length} open · ${done.length} done`),
-      done.length ? btn("Clear done", () => commit(open)) : null) : null);
+      done.length ? btn("Clear done", () => {
+        commit(open);
+        toast(`Cleared ${done.length} done`, 7000, () => setTodos(space, [...todosOf(space), ...done]));
+      }) : null) : null);
 }
 
 // ---- notes (one scratchpad per space) ----

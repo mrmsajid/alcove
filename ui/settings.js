@@ -199,7 +199,7 @@ function rangeSlider(key, low, high) {
 }
 
 function clearDataCard() {
-  const opts = [["history", "Browsing history", true], ["downloads", "Download list", true], ["closed", "Recently closed tabs", true], ["cookies", "Cookies and site data (signs you out of sites)", false], ["cache", "Cached images and files", true]];
+  const opts = [["history", "Browsing history and time spent per site", true], ["downloads", "Download list", true], ["closed", "Recently closed tabs", true], ["cookies", "Cookies and site data (signs you out of sites)", false], ["cache", "Cached images and files", true]];
   const boxes = {};
   const checks = h("div", { class: "checks" }, ...opts.map(([k, label, on]) => {
     boxes[k] = h("input", { type: "checkbox", checked: on });
@@ -210,7 +210,7 @@ function clearDataCard() {
     if (!Object.values(pick).some(Boolean)) return flash("Choose what to clear");
     if (!confirm("Clear the selected browsing data? This can't be undone.")) return;
     // Sidebar data (same storage as this page):
-    if (pick.history) localStorage.setItem("alcove-history", "[]");
+    if (pick.history) { localStorage.setItem("alcove-history", "[]"); localStorage.removeItem("alcove-time-v1"); } // (the tracked time lists every site visited)
     if (pick.downloads) localStorage.setItem("alcove-downloads", "[]");
     if (pick.closed) localStorage.setItem("alcove-closed", "[]");
     if (pick.cookies || pick.cache) await invoke("clear_data", { cookies: pick.cookies, cache: pick.cache });

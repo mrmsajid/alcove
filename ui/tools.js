@@ -282,9 +282,27 @@
     "focus-sites": list => { st.focusSites = (Array.isArray(list) ? list : []).map(String).slice(0, 100); },
     "track-toggle": () => { st.trackPaused = !st.trackPaused; lastTrack = now(); },
     "track-clear-today": () => { const d = loadTime(); delete d.days[today()]; write(TIME_KEY, d); },
+    "track-restore-today": day => { // takes "Clear today" back
+      if (!day || typeof day !== "object") return;
+      const clean = o => Object.fromEntries(Object.entries(o && typeof o === "object" ? o : {}).slice(0, 500).map(([k, v]) => [String(k).slice(0, 200), Math.max(0, Number(v) || 0)]));
+      const d = loadTime(), cur = d.days[today()] || { sites: {}, spaces: {} };
+      for (const key of ["sites", "spaces"]) { // time tracked since the clear stays; what was cleared is added back
+        const back = clean(day[key]);
+        for (const [k, v] of Object.entries(cur[key] || {})) back[k] = (back[k] || 0) + v;
+        cur[key] = back;
+      }
+      d.days[today()] = cur;
+      write(TIME_KEY, d);
+    },
     "task-start": name => { stopTask(); st.task = { name: String(name).slice(0, 80), start: now() }; },
     "task-stop": () => stopTask(),
     "task-clear-log": () => { st.log[today()] = []; },
+    "task-restore-log": list => { // takes "Clear" back; tasks logged since stay
+      const back = (Array.isArray(list) ? list : []).slice(0, 200).map(x => ({ name: String(x && x.name).slice(0, 80), sec: Math.max(0, Number(x && x.sec) || 0) }));
+      const cur = st.log[today()] || [];
+      for (const c of cur) { const same = back.find(x => x.name === c.name); if (same) same.sec += c.sec; else back.push(c); }
+      st.log[today()] = back;
+    },
     zones: list => {
       const ok = (Array.isArray(list) ? list : []).filter(z => Array.isArray(z) && z.length === 2);
       if (ok.length > 30) toast("You can keep up to 30 places");

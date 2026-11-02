@@ -460,6 +460,10 @@ Tools page <------------- storage event (alcove-tools-v1 changed) -----------+
   forward) rings when it lands; a repeated one (fall back) rings once. The limit is 50 alarms (finished one-offs make room) and 30 places.
 - *A Pomodoro that ended more than two minutes ago* (the machine slept) is dropped, not counted and not followed by a break.
   A task that runs past midnight is split between the days (`stopTask`); the start page counts only the part since midnight.
+- *Destructive clicks offer Undo for seven seconds*: deleting a to-do, Clear done, Clear today (`track-restore-today`), clearing the task log
+  (`task-restore-log`; both ops add back what was cleared and keep what was tracked since), clearing History or Downloads in the sidebar,
+  and removing a start-page shortcut. Deleting a space removes its to-dos and notes; Settings > Clear browsing data's "history" also
+  clears the time tracked per site (`alcove-time-v1` lists every site visited).
 - *World clock*: `CITY_ALIAS` maps cities that are listed under another name (Kolkata is `Asia/Calcutta`, Kyiv is `Europe/Kiev`); offsets read
   "+5h 30m", "+45m".
 
