@@ -22,10 +22,11 @@
   </style>
 </head>
 <body>
-  <input id="q" type="text" spellcheck="false" autocomplete="off" autofocus
+  <input id="q" type="text" role="combobox" aria-expanded="true" aria-controls="list" aria-autocomplete="list" aria-label="Search or run anything" spellcheck="false" autocomplete="off" autofocus
          placeholder="Search or run anything: tabs, history, yt …, 5 kg to lb, =12*8">
-  <div id="list"></div>
+  <div id="list" role="listbox"></div>
   <div id="qr" hidden></div>
+  <script src="common.js"></script>
   <script src="vendor/qrcode.js"></script>
   <script src="engines.js"></script>
   <script src="palette.js"></script>

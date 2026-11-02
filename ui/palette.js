@@ -91,7 +91,7 @@ const ASIN = /^B0[A-Z0-9]{8}$/i;
 let appSettings = {}; // for the search engine (Settings › Search engine)
 invoke("get_app_settings").then(s => {
   appSettings = s || {};
-  if (appSettings.accent) document.documentElement.style.setProperty("--accent", appSettings.accent);
+  if (appSettings.accent) setAccent(appSettings.accent);
   render();
 }).catch(() => {});
 
@@ -357,6 +357,9 @@ function render() {
   $("list").replaceChildren(...results.map((r, i) => {
     const el = document.createElement("div");
     el.className = "row" + (i === sel ? " sel" : "");
+    el.id = `opt${i}`;
+    el.setAttribute("role", "option");
+    el.setAttribute("aria-selected", i === sel ? "true" : "false");
     const main = document.createElement("div");
     main.className = "main";
     const t = document.createElement("div");
@@ -383,6 +386,7 @@ function render() {
     return el;
   }));
   $("list").children[sel]?.scrollIntoView({ block: "nearest" });
+  $("q").setAttribute("aria-activedescendant", results.length ? `opt${sel}` : ""); // the arrow keys move a highlight, not the focus
 }
 
 // ---- running a result ----

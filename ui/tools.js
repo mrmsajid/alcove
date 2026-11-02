@@ -76,7 +76,7 @@
       st.ringing = { id: a.id, label: a.label || "Alarm", time: a.time, at: now() };
       if (a.snooze) st.alarms = st.alarms.filter(x => x !== a);
       save();
-      call("notify", { title: a.label || "Alarm", body: `It's ${a.time}` });
+      call("notify", { title: a.label || "Alarm", body: `It's ${new Date(2000, 0, 1, h, m).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` });
       startRinging();
       call("open_tools", { tab: "alarms" }); // an alarm should be hard to miss
       break;

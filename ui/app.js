@@ -12,7 +12,7 @@ const newTabUrl = () => appSettings.newTab === "blank" ? "about:blank"
   : START_PAGE;
 function applyAppSettings(s) {
   appSettings = s || {};
-  document.documentElement.style.setProperty("--accent", appSettings.accent || "#76767f");
+  setAccent(appSettings.accent || "#76767f");
   const size = { small: "12.5px", large: "15px" }[appSettings.textSize] || "13.5px";
   document.documentElement.style.fontSize = document.body.style.fontSize = size;
 }
@@ -732,6 +732,7 @@ function tabEl(t, depth = 0, kids = 0) {
   pin.innerHTML = '<svg><use href="#i-pin"/></svg>';
   const close = document.createElement("button");
   close.className = "close";
+  close.title = "Close tab";
   close.innerHTML = '<svg><use href="#i-x"/></svg>';
   if (!t.pinned && kids) {
     // Parent of opened-from tabs: the chevron shows or hides its children.
@@ -754,6 +755,16 @@ function tabEl(t, depth = 0, kids = 0) {
   el.append(favNode(t), title, ...(sound ? [sound] : []), pin, close);
   pin.addEventListener("click", e => { e.stopPropagation(); togglePin(t.id); });
 
+  // The row is a button for the keyboard and for screen readers: Tab reaches it, Enter or Space opens it, Delete closes it.
+  el.tabIndex = 0;
+  el.setAttribute("role", "button");
+  el.setAttribute("aria-label", `${t.title || t.url}${opened.has(t.id) ? "" : " (not loaded)"}`);
+  if (t.id === space().active) el.setAttribute("aria-current", "page");
+  el.addEventListener("keydown", e => {
+    if (e.target !== el) return; // keys pressed on the buttons inside the row are theirs
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(t.id); }
+    else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); closeTab(t.id); }
+  });
   el.addEventListener("click", () => activate(t.id));
   el.addEventListener("auxclick", e => { if (e.button === 1) closeTab(t.id); });
   close.addEventListener("click", e => { e.stopPropagation(); closeTab(t.id); });

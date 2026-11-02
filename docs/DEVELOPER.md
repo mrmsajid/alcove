@@ -409,6 +409,17 @@ web session (`applyBlocking`).
 `ui/settings.html` + `settings.js`. Sections are data (`SECTIONS`), rows are built with small helpers. It reads and
 writes through `get_app_settings` / `set_app_setting` and listens for `settings-changed`.
 
+**Accessibility conventions.** `ui/common.js` (loaded by the sidebar, Settings, Tools, the palette and the start page) has `setAccent(hex)`,
+which sets `--accent` and `--on-accent` (white or near-black, whichever reads better on the chosen colour; buttons on the accent use
+`color: var(--on-accent, #fff)`), and `scrollBehavior()`, which respects reduced motion. `--muted` is `#abaab5` on the dark palette and
+`#5a5a64` on the light one (at least 4.5:1 on the surfaces it sits on; keep that when changing them). Custom controls need roles and the
+keyboard: sidebar tab rows are `role=button` with Enter/Space to open and Delete to close, Settings radios are `role=radio` in a
+`radiogroup` (Enter/Space) and Settings keeps the focused control across its redraws, the palette is a `combobox` with a `listbox` and
+`aria-activedescendant`, switches are `role=switch` with `aria-checked`. Icon-only buttons are named by their `title` attribute, which
+browsers use as the accessible name, so don't add a separate label that can go stale. `:focus-visible` has a ring in `style.css`.
+Not done: the Markdown graph is mouse-only (canvas), and the Markdown editor page does not load `common.js` (its policy blocks external
+scripts).
+
 ### 6.5 The Tools page
 
 **Split on purpose.** The always-running engine lives in the *sidebar* page (`ui/tools.js`) because the sidebar is

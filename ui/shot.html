@@ -47,7 +47,7 @@
     for (const id of ["close", "discard"]) $(id).addEventListener("click", () => invoke("shot_discard"));
     document.addEventListener("keydown", e => {
       if (e.key === "Escape") invoke("shot_discard");
-      else if (e.key === "Enter") $("save").click();
+      else if (e.key === "Enter" && !/^(BUTTON|A)$/.test(document.activeElement.tagName)) $("save").click();
     });
   </script>
 </body>

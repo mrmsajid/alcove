@@ -9,11 +9,11 @@
        normal tab, so it can't use the sidebar's stylesheet. The palette matches the Tools page. */
     :root {
       color-scheme: dark light;
-      --bg: #1d1d20; --surface: #2a2a2e; --hover: #ffffff0b; --border: #ffffff12; --text: #ededf0; --muted: #8e8e97;
+      --bg: #1d1d20; --surface: #2a2a2e; --hover: #ffffff0b; --border: #ffffff12; --text: #ededf0; --muted: #abaab5;
       --active: #ffffff15; --accent: #76767f; --shadow: 0 10px 32px #00000066; --live: #34c759;
     }
     @media (prefers-color-scheme: light) {
-      :root { --bg: #ececef; --surface: #ffffff; --hover: #0000000a; --border: #00000012; --text: #1c1c1f; --muted: #6e6e78; --active: #0000000f; --shadow: 0 10px 32px #0000001c; }
+      :root { --bg: #ececef; --surface: #ffffff; --hover: #0000000a; --border: #00000012; --text: #1c1c1f; --muted: #5a5a64; --active: #0000000f; --shadow: 0 10px 32px #0000001c; }
     }
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
@@ -116,7 +116,7 @@
     dialog .err { min-height: 18px; margin: -4px 0 6px; font-size: 12px; color: #ff6b5e; }
     dialog .btns { display: flex; justify-content: flex-end; gap: 8px; }
     dialog .btns button { padding: 7px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--active); cursor: pointer; }
-    dialog .btns button.primary { background: var(--accent); border-color: transparent; color: #fff; }
+    dialog .btns button.primary { background: var(--accent); border-color: transparent; color: var(--on-accent, #fff); }
     @container (max-width: 560px) {
       #search { margin-bottom: 24px; }
       #q { height: 48px; padding: 0 18px 0 46px; font-size: 15px; border-radius: 24px; }
@@ -167,6 +167,7 @@
     </form>
   </dialog>
 
+  <script src="common.js"></script>
   <script src="engines.js"></script>
   <script src="tools-shared.js"></script>
   <script>
@@ -203,7 +204,7 @@
     });
     Promise.resolve(bridge.settings && bridge.settings()).then(s => {
       settings = s || {};
-      if (settings.accent) document.documentElement.style.setProperty("--accent", settings.accent);
+      if (settings.accent) setAccent(settings.accent);
       const name = settings.searchEngine === "custom" ? "Custom search" : (ENGINES[settings.searchEngine] || ENGINES.duckduckgo).name;
       $("engine").textContent = name;
       input.placeholder = `Search ${name} or enter address`;

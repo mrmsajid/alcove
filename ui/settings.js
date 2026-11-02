@@ -26,8 +26,10 @@ const row = (title, desc, ...ctl) => h("div", { class: "row", "data-find": `${ti
 const toggle = (on, fn) => h("button", { class: "switch" + (on ? " on" : ""), role: "switch", "aria-checked": String(!!on), on: { click: () => fn(!on) } });
 const seg = (value, options, fn) => h("div", { class: "seg" }, ...options.map(([v, label]) =>
   h("button", { class: v === value ? "on" : "", on: { click: () => fn(v) } }, label)));
-const radios = (value, options, fn) => h("div", { class: "radios" }, ...options.map(([v, label, sub]) =>
-  h("div", { class: "radio" + (v === value ? " on" : ""), "data-find": label, on: { click: () => fn(v) } }, h("span", { class: "dot2" }), label, sub ? h("span", { class: "sub2" }, sub) : null)));
+const pressed = fn => e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); } }; // a click for the keyboard
+const radios = (value, options, fn) => h("div", { class: "radios", role: "radiogroup" }, ...options.map(([v, label, sub]) =>
+  h("div", { class: "radio" + (v === value ? " on" : ""), "data-find": label, role: "radio", tabindex: "0", "aria-checked": v === value ? "true" : "false",
+    on: { click: () => fn(v), keydown: pressed(() => fn(v)) } }, h("span", { class: "dot2" }), label, sub ? h("span", { class: "sub2" }, sub) : null)));
 const card = (...rows) => h("div", { class: "card" }, ...rows);
 
 let flashTimer;
@@ -232,22 +234,36 @@ async function sidebar(cmd) {
 let current = location.hash.slice(1) || "search";
 
 function render() {
-  document.documentElement.style.setProperty("--accent", S.accent || "#76767f");
+  setAccent(S.accent || "#76767f");
   const scroll = $("main").scrollTop;
+  // Every change redraws the page; the control that had the focus is found again by its position so the keyboard user keeps their place.
+  const controls = () => [...document.querySelectorAll("#nav a, #sections button, #sections input, #sections select, #sections [role=radio]")];
+  const at = controls().indexOf(document.activeElement);
   $("sections").replaceChildren(...SECTIONS.map(([id, title, build]) =>
     h("section", { id }, h("h2", {}, title), ...build())));
   $("nav").replaceChildren(h("h1", {}, "Settings"), ...SECTIONS.map(([id, title]) =>
-    h("a", { class: id === current ? "on" : "", on: { click: () => go(id) } }, title)));
+    h("a", { class: id === current ? "on" : "", role: "button", tabindex: "0", "aria-current": id === current ? "true" : null, on: { click: () => go(id), keydown: pressed(() => go(id)) } }, title)));
   applyFind();
   $("main").scrollTop = scroll;
+  if (at >= 0) controls()[at]?.focus({ preventScroll: true });
+}
+
+// The section link for the section on screen is highlighted (and marked as the current one for screen readers).
+function markCurrent(id) {
+  const title = SECTIONS.find(s => s[0] === id)[1];
+  for (const a of $("nav").querySelectorAll("a")) {
+    const here = a.textContent === title;
+    a.classList.toggle("on", here);
+    if (here) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current");
+  }
 }
 
 function go(id) {
   current = id;
   $("find").value = "";
   applyFind();
-  document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  for (const a of $("nav").querySelectorAll("a")) a.classList.toggle("on", a.textContent === SECTIONS.find(s => s[0] === id)[1]);
+  document.getElementById(id)?.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
+  markCurrent(id);
 }
 
 // Search hides rows (and whole sections) that don't mention the words typed.
@@ -271,7 +287,7 @@ $("main").addEventListener("scroll", () => {
   if ($("find").value) return;
   let best = SECTIONS[0][0];
   for (const [id] of SECTIONS) { const el = document.getElementById(id); if (el && el.getBoundingClientRect().top < 140) best = id; }
-  if (best !== current) { current = best; for (const a of $("nav").querySelectorAll("a")) a.classList.toggle("on", a.textContent === SECTIONS.find(s => s[0] === best)[1]); }
+  if (best !== current) { current = best; markCurrent(best); }
 });
 
 async function refreshInfo() { info = await invoke("get_app_info"); render(); }

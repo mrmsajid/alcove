@@ -5,7 +5,7 @@
   --hover: #2a2a33;
   --border: #ffffff14;
   --text: #ececf1;
-  --muted: #8e8e9c;
+  --muted: #abaab5;
   --accent: #7c8cff;
   --space: #7c8cff;
   --radius: 10px;
@@ -17,10 +17,13 @@
     --hover: #e8e8ee;
     --border: #00000014;
     --text: #1b1b20;
-    --muted: #6f6f7d;
+    --muted: #5a5a64;
   }
 }
 * { box-sizing: border-box; }
+/* A visible focus ring for keyboard users on buttons, rows and links (text fields have their own focus style). */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; }
 [hidden] { display: none !important; }
 html, body {
   margin: 0; height: 100%; color: var(--text);
@@ -65,7 +68,7 @@ input:focus { border-color: var(--accent); }
 #shield.off { color: var(--muted); opacity: .6; }
 #shield-count {
   position: absolute; top: -2px; right: -2px; min-width: 14px; height: 14px; padding: 0 3px;
-  border-radius: 7px; background: var(--accent); color: #fff; font-size: 9px; line-height: 14px; text-align: center;
+  border-radius: 7px; background: var(--accent); color: var(--on-accent, #fff); font-size: 9px; line-height: 14px; text-align: center;
 }
 #shield-count:empty { display: none; }
 
@@ -182,12 +185,12 @@ body { transition: border-color .2s ease; }
   animation: drop-in .2s cubic-bezier(.2, .8, .2, 1);
 }
 .banner span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.banner button { background: var(--accent); color: #fff; font-weight: 600; padding: 4px 10px; flex: none; }
+.banner button { background: var(--accent); color: var(--on-accent, #fff); font-weight: 600; padding: 4px 10px; flex: none; }
 .banner button:hover { background: var(--accent); filter: brightness(1.08); }
 
 .browse-btn {
   display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 6px;
-  background: var(--accent); color: #fff; font-weight: 600; padding: 9px 12px; border-radius: var(--radius);
+  background: var(--accent); color: var(--on-accent, #fff); font-weight: 600; padding: 9px 12px; border-radius: var(--radius);
 }
 .browse-btn:hover { background: var(--accent); filter: brightness(1.08); }
 
@@ -241,23 +244,23 @@ body.panel-open .space-title { display: none; }
 /* ---- per-space appearance (overrides the system light/dark setting) ---- */
 body.theme-dark {
   color-scheme: dark;
-  --bg: #17171c; --surface: #202027; --hover: #2a2a33; --border: #ffffff14; --text: #ececf1; --muted: #8e8e9c;
+  --bg: #17171c; --surface: #202027; --hover: #2a2a33; --border: #ffffff14; --text: #ececf1; --muted: #abaab5;
 }
 body.theme-light {
   color-scheme: light;
-  --bg: #f4f4f7; --surface: #ffffff; --hover: #e8e8ee; --border: #00000014; --text: #1b1b20; --muted: #6f6f7d;
+  --bg: #f4f4f7; --surface: #ffffff; --hover: #e8e8ee; --border: #00000014; --text: #1b1b20; --muted: #5a5a64;
 }
 
 /* ==== Sidebar refresh: softer neutral palette, roomier rows, Nook-like layout ==== */
 :root {
-  --bg: #1d1d20; --surface: #2a2a2e; --hover: #ffffff0b; --border: #ffffff12; --text: #ededf0; --muted: #8e8e97;
+  --bg: #1d1d20; --surface: #2a2a2e; --hover: #ffffff0b; --border: #ffffff12; --text: #ededf0; --muted: #abaab5;
   --active: #ffffff15; --tile: #ffffff0e;
 }
 @media (prefers-color-scheme: light) {
-  :root { --bg: #ececef; --surface: #ffffff; --hover: #0000000a; --border: #00000012; --text: #1c1c1f; --muted: #6e6e78; --active: #0000000f; --tile: #00000009; }
+  :root { --bg: #ececef; --surface: #ffffff; --hover: #0000000a; --border: #00000012; --text: #1c1c1f; --muted: #5a5a64; --active: #0000000f; --tile: #00000009; }
 }
-body.theme-dark { --bg: #1d1d20; --surface: #2a2a2e; --hover: #ffffff0b; --border: #ffffff12; --text: #ededf0; --muted: #8e8e97; --active: #ffffff15; --tile: #ffffff0e; }
-body.theme-light { --bg: #ececef; --surface: #ffffff; --hover: #0000000a; --border: #00000012; --text: #1c1c1f; --muted: #6e6e78; --active: #0000000f; --tile: #00000009; }
+body.theme-dark { --bg: #1d1d20; --surface: #2a2a2e; --hover: #ffffff0b; --border: #ffffff12; --text: #ededf0; --muted: #abaab5; --active: #ffffff15; --tile: #ffffff0e; }
+body.theme-light { --bg: #ececef; --surface: #ffffff; --hover: #0000000a; --border: #00000012; --text: #1c1c1f; --muted: #5a5a64; --active: #0000000f; --tile: #00000009; }
 
 html, body { font-size: 13.5px; }
 body { padding: 6px 10px 10px; gap: 6px; }
@@ -386,11 +389,11 @@ textarea:focus, select:focus { border-color: var(--accent); }
 .t-btns.wrap { flex-wrap: wrap; }
 .t-btn { padding: 5px 11px; border-radius: 8px; background: var(--active); color: var(--text); font-size: 12.5px; }
 .t-btn:hover { background: var(--hover); filter: brightness(1.15); }
-.t-btn.primary { background: var(--accent); color: #fff; }
+.t-btn.primary { background: var(--accent); color: var(--on-accent, #fff); }
 .t-btn.primary:hover { background: var(--accent); filter: brightness(1.1); }
 .t-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .t-chip { padding: 4px 9px; border-radius: 999px; background: var(--active); color: var(--text); font-size: 12px; }
-.t-chip.on { background: var(--accent); color: #fff; }
+.t-chip.on { background: var(--accent); color: var(--on-accent, #fff); }
 .t-row { display: flex; gap: 6px; align-items: center; }
 .t-row input { flex: 1; min-width: 0; padding: 6px 10px; }
 .t-row input.t-min { flex: none; width: 64px; }

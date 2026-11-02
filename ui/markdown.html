@@ -8,8 +8,8 @@
        XHR, sockets, frames, plugins or form posts). Images may come from https: and data: only. -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src https: data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <style>
-    :root { color-scheme: dark light; --bg: #1d1d20; --surface: #26262a; --text: #ededf0; --muted: #8e8e97; --line: #ffffff17; --accent: #76767f; --code: #ffffff0f; --link: #8ab4ff; --hover: #ffffff10; --tag: #ffffff14; }
-    @media (prefers-color-scheme: light) { :root { --bg: #fbfbfc; --surface: #f1f1f4; --text: #1c1c1f; --muted: #6e6e78; --line: #0000001a; --code: #0000000a; --link: #1a5fd0; --hover: #0000000a; --tag: #0000000d; } }
+    :root { color-scheme: dark light; --bg: #1d1d20; --surface: #26262a; --text: #ededf0; --muted: #abaab5; --line: #ffffff17; --accent: #76767f; --code: #ffffff0f; --link: #8ab4ff; --hover: #ffffff10; --tag: #ffffff14; }
+    @media (prefers-color-scheme: light) { :root { --bg: #fbfbfc; --surface: #f1f1f4; --text: #1c1c1f; --muted: #5a5a64; --line: #0000001a; --code: #0000000a; --link: #1a5fd0; --hover: #0000000a; --tag: #0000000d; } }
     * { box-sizing: border-box; }
     [hidden] { display: none !important; } /* panels set their own display, which would otherwise win over hidden */
     html, body { height: 100%; margin: 0; }
@@ -1688,7 +1688,7 @@
           vis.focus();
           sel.removeAllRanges();
           sel.addRange(r);
-          n.parentElement.scrollIntoView({ block: "center", behavior: "smooth" });
+          n.parentElement.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
           return;
         }
       }

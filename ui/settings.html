@@ -57,7 +57,7 @@
     .switch:hover { filter: brightness(1.08); background: var(--active); }
     .switch.on:hover { background: var(--accent); }
     .btn { padding: 6px 14px; border-radius: 9px; border: 1px solid var(--border); background: var(--active); }
-    .btn.primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 600; }
+    .btn.primary { background: var(--accent); color: var(--on-accent, #fff); border-color: transparent; font-weight: 600; }
     .btn.danger { color: #ff6b6b; }
     .swatches { display: flex; gap: 8px; }
     .swatch { width: 22px; height: 22px; border-radius: 50%; padding: 0; border: 2px solid transparent; }
@@ -95,6 +95,7 @@
     </main>
   </div>
   <div id="flash" class="flash" hidden></div>
+  <script src="common.js"></script>
   <script src="engines.js"></script>
   <script src="settings.js"></script>
 </body>

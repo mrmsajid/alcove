@@ -224,7 +224,7 @@ function alarmsView() {
   const list = alarms.length ? el("div", { class: "alarms" }, ...alarms.map(a => el("div", { class: "alarm" + (a.on ? "" : " off") },
     el("div", { class: "at" }, fmtTime(a.time)),
     el("div", { class: "al" }, el("div", {}, a.label || (a.snooze ? "Snoozed" : "Alarm")), el("div", { class: "t-sub" }, repeatText(a))),
-    el("button", { class: "t-switch" + (a.on ? " on" : ""), title: a.on ? "Turn off" : "Turn on", on: { click: () => op("alarm-toggle", a.id) } }),
+    el("button", { class: "t-switch" + (a.on ? " on" : ""), role: "switch", "aria-checked": a.on ? "true" : "false", "aria-label": `Alarm ${a.time}${a.label ? " " + a.label : ""}`, title: a.on ? "Turn off" : "Turn on", on: { click: () => op("alarm-toggle", a.id) } }),
     el("button", { class: "icon sm", title: "Delete", on: { click: () => op("alarm-delete", a.id) } }, "×")))) : note("No alarms yet. Add one below.");
 
   // the new-alarm form: pick how it repeats, then the days that go with that
@@ -278,7 +278,7 @@ function alarmsView() {
       note("Alarms ring while Alcove is open: a chime, a notification, and this page opens.")),
     card("New alarm", form),
     card("Sound",
-      el("div", { class: "t-row spaced" }, el("span", {}, "Chime when a timer, Pomodoro or alarm ends"), el("button", { class: "t-switch" + (st.sound ? " on" : ""), title: st.sound ? "Turn off" : "Turn on", on: { click: () => op("sound-toggle") } })),
+      el("div", { class: "t-row spaced" }, el("span", {}, "Chime when a timer, Pomodoro or alarm ends"), el("button", { class: "t-switch" + (st.sound ? " on" : ""), role: "switch", "aria-checked": st.sound ? "true" : "false", "aria-label": "Chime", title: st.sound ? "Turn off" : "Turn on", on: { click: () => op("sound-toggle") } })),
       el("div", { class: "t-btns" }, btn("Play test sound", () => op("sound-test")))),
   ];
 }
@@ -603,6 +603,6 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closeTools()
 window.addEventListener("pagehide", flushNotes);
 window.addEventListener("focus", () => { st = loadState(); ctx = read(CTX_KEY, ctx); renderSoon(); });
 
-invoke("get_app_settings").then(s => { if (s && s.accent) document.documentElement.style.setProperty("--accent", s.accent); }).catch(() => {});
-listen("settings-changed", ({ payload }) => { if (payload && payload.accent) document.documentElement.style.setProperty("--accent", payload.accent); });
+invoke("get_app_settings").then(s => { if (s && s.accent) setAccent(s.accent); }).catch(() => {});
+listen("settings-changed", ({ payload }) => { if (payload && payload.accent) setAccent(payload.accent); });
 render();
