@@ -608,6 +608,7 @@ available width and they use plain media queries (Tools: under 600 px its tab ba
 | `openTools(tab)` | opens the Tools page on that tab |
 | `openMarkdown` | loads the Markdown editor in this tab |
 | `startTimer(min)`, `startPomodoro` | the only two engine ops allowed (`START_OPS`), minutes clamped to 1-600 |
+| `setPrivate(on)` | the "Private" switch beside the search bar: starts or ends a private session (6.9), answering before the page is replaced |
 | `copy(text)` | clipboard, capped at 8000 characters |
 
 Every call checks `e.senderFrame.url` is exactly `ui/newtab.html`. The engine stays the single writer of its keys:
@@ -634,6 +635,8 @@ page on the wrong host.
 A **private session** is a throwaway profile (`PRIVATE` in `main.js`, never in `config.profiles`). Alcove has one window, so starting it
 (`startPrivate`: File › New Private Session, `Cmd/Ctrl+Shift+N`, the palette, or the avatar menu) swaps the whole window the way a profile
 switch does (`swapSession`): the pages of the current profile are closed (they come back when it ends) and a sidebar with nothing in it opens.
+The start page also has a **Private** switch beside its search bar (`setPrivate` in the bridge, 6.7): it shows the current state
+(`aria-pressed`, filled violet when on), so a person can decide before searching.
 
 - **Storage is in memory.** `webPartition` / `uiPartition` return `alcove-private-<token>` / `alcove-private-ui-<token>`, partitions without the
   `persist:` prefix, so cookies, cache, site storage, and everything the sidebar keeps (tabs, history, bookmarks, closed tabs, downloads list,
@@ -663,7 +666,7 @@ switch does (`swapSession`): the pages of the current profile are closed (they c
   under `UI_PREFIX`) get no "View Page Source" or "Inspect" in their right-click menu, their developer tools are
   closed if opened (`devtools-opened`), and `view-source:` of them is refused. Websites keep the normal menu.
 - **The start page bridge is narrow too** (6.7): one `file://` page, sender URL checked, a fixed list of calls, and
-  only two engine ops (a timer and a Pomodoro). It exposes no file or navigation access.
+  only two engine ops (a timer and a Pomodoro) plus the private-session switch. It exposes no file or navigation access.
 - **The Markdown bridge is narrow**: exists only on one `file://` page, checks the sender's URL, reads only
   Markdown/text files, writes only to paths the session opened or the user chose in a dialog, lists only inside
   folders the user mounted, and never returns file contents it was not asked for.

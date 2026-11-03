@@ -134,6 +134,7 @@ if (window === window.top && location.protocol === "file:" && /\/ui\/newtab\.htm
     openMarkdown: () => start("markdown"),
     startTimer: minutes => start("op", "timer-start", minutes),
     startPomodoro: () => start("op", "pomo-start"),
+    setPrivate: on => start("private", !!on), // the private-session switch beside the search bar
   });
 }
 

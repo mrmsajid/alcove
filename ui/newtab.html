@@ -33,7 +33,15 @@
     .private-note[hidden] { display: none; }
     .private-note strong { display: block; margin-bottom: 4px; font-size: 14px; }
     .private-note p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
-    #search { position: relative; max-width: 700px; margin: 0 auto 34px; }
+    /* the search bar and, beside it, the private-session switch */
+    .top { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 10px; margin: 0 auto 34px; }
+    #search { position: relative; flex: 1 1 420px; max-width: 700px; }
+    .priv-toggle { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 54px; padding: 0 20px 0 16px; border-radius: 27px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: var(--shadow); transition: background .15s, color .15s, border-color .15s; }
+    .priv-toggle svg { width: 20px; height: 20px; }
+    .priv-toggle:hover { color: var(--text); border-color: #7a5af8; }
+    .priv-toggle:focus-visible { outline: 2px solid #7a5af8; outline-offset: 2px; }
+    .priv-toggle[aria-pressed="true"] { background: #7a5af8; border-color: #7a5af8; color: #fff; }
     #search > svg { position: absolute; left: 20px; top: 17px; width: 20px; height: 20px; color: var(--muted); pointer-events: none; transition: color .15s; }
     #search:focus-within > svg { color: var(--text); }
     #q { width: 100%; height: 54px; padding: 0 140px 0 52px; border-radius: 27px; border: 1px solid var(--border); background: var(--surface);
@@ -123,7 +131,8 @@
     dialog .btns button { padding: 7px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--active); cursor: pointer; }
     dialog .btns button.primary { background: var(--accent); border-color: transparent; color: var(--on-accent, #fff); }
     @container (max-width: 560px) {
-      #search { margin-bottom: 24px; }
+      .top { margin-bottom: 24px; }
+      .priv-toggle { height: 44px; border-radius: 22px; }
       #q { height: 48px; padding: 0 18px 0 46px; font-size: 15px; border-radius: 24px; }
       #search > svg { left: 17px; top: 14px; }
       #engine { display: none; }
@@ -144,11 +153,16 @@
       <strong>Private session</strong>
       <p>Cookies, history, tabs, notes and timers from this session are wiped when you leave it, and nothing you change here is saved. Websites, your network and your internet provider can still see where you go, and files you download stay on your computer. Extensions are off.</p>
     </aside>
+    <div class="top">
     <form id="search" autocomplete="off" role="search">
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
       <input id="q" type="text" placeholder="Search or enter address" aria-label="Search or enter address" spellcheck="false" autofocus>
       <div id="engine"></div>
     </form>
+    <button id="private-toggle" class="priv-toggle" type="button" aria-pressed="false" title="Private session: cookies, history and tabs aren't saved. Your other tabs come back when you leave it.">
+      <svg viewBox="0 0 24 24"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6zM4 4l16 16"/></svg><span>Private</span>
+    </button>
+    </div>
 
     <div id="shortcuts"></div>
 
@@ -204,6 +218,12 @@
       if (url) location.href = url;
     });
     input.addEventListener("keydown", e => { if (e.key === "Escape") input.value = ""; });
+    // The switch next to the search bar starts or ends a private session (it swaps the window, so this page is replaced).
+    $("private-toggle").addEventListener("click", e => {
+      const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
+      e.currentTarget.setAttribute("aria-pressed", String(on));
+      try { bridge.setPrivate(on); } catch {}
+    });
     // Typing anywhere starts a search.
     window.addEventListener("keydown", e => {
       const a = document.activeElement;
@@ -215,6 +235,7 @@
       settings = s || {};
       if (settings.accent) setAccent(settings.accent);
       $("private-note").hidden = !settings.private;
+      $("private-toggle").setAttribute("aria-pressed", String(!!settings.private));
       const name = settings.searchEngine === "custom" ? "Custom search" : (ENGINES[settings.searchEngine] || ENGINES.duckduckgo).name;
       $("engine").textContent = name;
       input.placeholder = `Search ${name} or enter address`;

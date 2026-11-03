@@ -1580,6 +1580,7 @@ ipcMain.handle("alcove-start", async (e, op, a, b) => {
   }
   if (op === "shortcuts") return config.shortcuts || [];
   if (op === "shortcuts-set") { config.shortcuts = cleanShortcuts(a); saveConfig(); return config.shortcuts; }
+  if (op === "private") { setImmediate(() => { if (a) startPrivate(); else endPrivate(); }); return; } // replaces this page, so answer first
   if (op === "copy") { clipboard.writeText(String(a).slice(0, 8000)); return; }
   if (op === "tools") { setImmediate(() => openTools(String(a || "timers").slice(0, 20))); return; }
   if (op === "markdown") { e.sender.loadURL(MD_PAGE).catch(() => {}); return; }
