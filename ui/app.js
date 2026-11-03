@@ -656,7 +656,7 @@ async function setZoom(delta) {
   if (!t || !opened.has(t.id)) return;
   const base = appSettings.defaultZoom || 1; // Settings › Appearance › Page zoom
   t.zoom = delta === 0 ? base : Math.min(3, Math.max(0.5, Math.round(((t.zoom || base) + delta) * 10) / 10));
-  await invoke("zoom", { id: t.id, factor: t.zoom });
+  await invoke("zoom", { id: t.id, factor: t.zoom, reset: delta === 0 });
   write(STATE_KEY, state);
   toast(`Zoom ${Math.round(t.zoom * 100)}%`);
 }

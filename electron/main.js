@@ -907,6 +907,11 @@ function openTab(id, url) {
   const wc = view.webContents;
   tabs.set(id, view);
   wcToTab.set(wc.id, id);
+  // Gestures. Pinch to zoom (a trackpad or a touch screen) is off by default in Electron: allow up to 5x. Ctrl + the mouse wheel is
+  // a zoom request ("zoom-changed", only if the page didn't use the wheel itself): it goes through the sidebar's zoom, so it takes
+  // the same 10% steps, is kept per tab and shows the same toast as the shortcuts.
+  wc.setVisualZoomLevelLimits(1, 5).catch(() => {});
+  wc.on("zoom-changed", (_e, direction) => { if (shownId === id) send("shortcut", direction === "in" ? "zoom-in" : "zoom-out"); });
   // A page that closes itself (window.close()) is reported to the sidebar so it drops the row. Not while the app is shutting down
   // or switching profile: then every page is destroyed on purpose, and the sidebar must keep its tabs for the next start.
   wc.once("destroyed", () => { dropTab(id); if (!shuttingDown && !view.alcoveQuiet) send("tab-closed", { id }); });
@@ -1036,6 +1041,7 @@ function openPeek(url) {
   placePeek();
   peekBackdrop.webContents.loadFile(uiFile("peek.html")).then(() => peekInfo({ url })).catch(() => {});
   const pwc = peekView.webContents;
+  pwc.setVisualZoomLevelLimits(1, 5).catch(() => {}); // pinch to zoom here too
   const thisPeek = peekView;
   pwc.once("destroyed", () => { if (peekView === thisPeek) closePeek(); }); // the previewed page closed itself
   pwc.on("before-input-event", (e, input) => {
@@ -2741,6 +2747,11 @@ const commands = {
     win.setContentSize(Math.round(w), Math.round(h));
     return win.getContentBounds();
   },
+  debug_wheel_zoom: ({ id, direction }) => { // test hook: what Ctrl + the mouse wheel (and a precision touchpad's pinch) does on Windows and Linux
+    if (process.env.ALCOVE_TEST !== "1") return null;
+    wcOf(id)?.emit("zoom-changed", { preventDefault() {} }, direction === "in" ? "in" : "out");
+    return true;
+  },
   debug_open_devtools: async ({ id }) => { // test hook: try to open the developer tools on a tab and say whether they stayed open
     if (process.env.ALCOVE_TEST !== "1" || !wcOf(id)) return null;
     wcOf(id).openDevTools({ mode: "detach" });
@@ -2914,7 +2925,13 @@ const commands = {
     for (const k of Object.keys(config.sitePermissions)) if (k.startsWith(`${origin} `)) delete config.sitePermissions[k];
     saveConfig();
   },
-  zoom: ({ id, factor }) => { wcOf(id)?.setZoomFactor(Math.min(5, Math.max(0.25, factor))); },
+  zoom: ({ id, factor, reset }) => {
+    const wc = wcOf(id);
+    if (!wc) return;
+    wc.setZoomFactor(Math.min(5, Math.max(0.25, factor)));
+    // Actual Size also undoes a pinch zoom: clamping the limits to 1 puts the page back at 1x, then they open up again.
+    if (reset) wc.setVisualZoomLevelLimits(1, 1).then(() => wc.setVisualZoomLevelLimits(1, 5)).catch(() => {});
+  },
   find: ({ id, text, backwards }) => {
     const wc = wcOf(id);
     if (!wc || !text) return;

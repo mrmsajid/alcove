@@ -335,6 +335,13 @@ web session (`applyBlocking`).
   and tracks which one is on screen in `shownId`.
 - **Split view** shows two tab views side by side with a draggable `divider` view; `layout()` handles the bounds.
 - **Peek** (Shift-click a link) is a floating preview window with a backdrop.
+- **Zoom has two kinds, as in Chrome.** *Page zoom* (Cmd/Ctrl +, -, 0; `setZoom` in the sidebar, kept per tab in `tab.zoom`, 10% steps, the
+  `zoom` command) changes the layout. *Pinch zoom* (a trackpad or touch screen) scales the visual viewport from 1x to 5x without reflowing:
+  Electron has it off, so `openTab` and the peek call `setVisualZoomLevelLimits(1, 5)`. Actual Size does both (`reset` on the `zoom`
+  command clamps the visual limits to 1 and reopens them). Ctrl + the mouse wheel, and a precision touchpad's pinch on Windows and
+  Linux, arrive as `zoom-changed` and are sent to the sidebar as the zoom-in / zoom-out shortcuts for the shown tab; Chromium does not
+  raise it on macOS (there the trackpad pinch is the gesture). Tested with real two-finger touch events over CDP and the
+  `debug_wheel_zoom` hook; the wheel path itself has not been tried on a Windows machine.
 - **Staying up.** A page whose process dies is reloaded (`render-process-gone` -> `tab-crashed`); if the sidebar's own process dies its
   tabs are closed quietly and it reloads and reopens the active tab. Asking to open a tab that already has a view just shows it,
   and the sidebar marks a tab open before the call, so two activations at once can't make two views. Own-page tabs are saved as
