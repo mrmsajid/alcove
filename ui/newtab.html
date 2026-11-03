@@ -28,6 +28,11 @@
     section { margin-top: 40px; }
 
     /* search */
+    /* private session: said once, plainly, above the search bar */
+    .private-note { max-width: 700px; margin: 0 auto 22px; padding: 14px 18px; border: 1px solid #7a5af8; border-radius: 16px; background: color-mix(in srgb, #7a5af8 10%, transparent); }
+    .private-note[hidden] { display: none; }
+    .private-note strong { display: block; margin-bottom: 4px; font-size: 14px; }
+    .private-note p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
     #search { position: relative; max-width: 700px; margin: 0 auto 34px; }
     #search > svg { position: absolute; left: 20px; top: 17px; width: 20px; height: 20px; color: var(--muted); pointer-events: none; transition: color .15s; }
     #search:focus-within > svg { color: var(--text); }
@@ -135,6 +140,10 @@
 </head>
 <body>
   <main>
+    <aside id="private-note" class="private-note" hidden>
+      <strong>Private session</strong>
+      <p>Cookies, history, tabs, notes and timers from this session are wiped when you leave it, and nothing you change here is saved. Websites, your network and your internet provider can still see where you go, and files you download stay on your computer. Extensions are off.</p>
+    </aside>
     <form id="search" autocomplete="off" role="search">
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
       <input id="q" type="text" placeholder="Search or enter address" aria-label="Search or enter address" spellcheck="false" autofocus>
@@ -205,6 +214,7 @@
     Promise.resolve(bridge.settings && bridge.settings()).then(s => {
       settings = s || {};
       if (settings.accent) setAccent(settings.accent);
+      $("private-note").hidden = !settings.private;
       const name = settings.searchEngine === "custom" ? "Custom search" : (ENGINES[settings.searchEngine] || ENGINES.duckduckgo).name;
       $("engine").textContent = name;
       input.placeholder = `Search ${name} or enter address`;

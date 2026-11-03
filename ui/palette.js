@@ -14,6 +14,8 @@ const keyLabel = k => !k ? "" : MAC
 // [id, label, shortcut, extra search words]
 const COMMANDS = [
   ["new-tab", "New Tab", "Mod+T"],
+  ["private-new", "New Private Session", "Mod+Shift+N", "incognito private browsing window"],
+  ["private-exit", "Leave Private Session", "", "incognito private close end"],
   ["reopen-tab", "Reopen Closed Tab", "Mod+Shift+T", "undo restore"],
   ["close-tab", "Close Tab", "Mod+W"],
   ["recent-tab", "Switch to Recent Tab", "Ctrl+Tab", "previous last"],

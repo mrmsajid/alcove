@@ -122,6 +122,15 @@ body.panel-open #tabs, body.panel-open #pinned, body.panel-open .new-row { displ
   margin-right: 6px;
 }
 .avatar:hover { filter: brightness(1.1); background: inherit; }
+/* private session: a badge at the top of the sidebar and a violet avatar, so it is never unclear which mode you are in */
+.private-badge { display: flex; align-items: center; gap: 7px; margin: 0 8px 6px; padding: 5px 8px; border-radius: 9px; font-size: 12px; font-weight: 600; color: #fff; background: #7a5af8; }
+.private-badge[hidden] { display: none; }
+.private-badge svg { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.private-badge span { flex: 1; }
+.private-badge .text-btn { color: #fff; background: #ffffff26; border-radius: 6px; padding: 2px 8px; font-size: 11px; }
+.private-badge .text-btn:hover { background: #ffffff40; }
+.avatar.private { background: #7a5af8 !important; display: grid; place-items: center; }
+.avatar.private svg { width: 13px; height: 13px; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .space-dots { display: flex; gap: 6px; margin: 0 4px; }
 .space-dot { width: 10px; height: 10px; border-radius: 50%; cursor: pointer; opacity: .55; transition: transform .12s, opacity .12s; }
 .space-dot:hover { opacity: .85; }

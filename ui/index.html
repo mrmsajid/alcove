@@ -29,6 +29,7 @@
       <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
       <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
       <symbol id="i-muted" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></symbol>
+      <symbol id="i-private" viewBox="0 0 24 24"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6zM4 4l16 16"/></symbol>
       <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
       <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
       <symbol id="i-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
@@ -73,6 +74,11 @@
     <button id="yt-audio" class="ghost">Audio</button>
   </div>
 
+  <div id="private-badge" class="private-badge" role="status" hidden>
+    <svg><use href="#i-private"/></svg>
+    <span>Private session</span>
+    <button id="private-leave" class="text-btn" title="Close every private tab and wipe the session">Leave</button>
+  </div>
   <div id="pinned" class="pinned"></div>
   <div id="space-title" class="space-title"></div>
   <div class="new-row">

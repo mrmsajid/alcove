@@ -58,7 +58,7 @@ let adblock = true;
 let adblockAllow = []; // hostnames where the blocker is off
 const hostOf = url => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
 const siteOff = host => adblockAllow.some(d => host === d || host.endsWith("." + d));
-let profiles = { profiles: [], active: "default" };
+let profiles = { profiles: [], active: "default", private: false };
 const blocked = new Map(); // tab id -> requests blocked on the current page
 
 const space = () => state.spaces[state.space];
@@ -957,6 +957,14 @@ function renderChrome() {
   $("shield-count").textContent = !off && count ? String(count) : "";
   $("shield").title = off ? "Ad blocker off here (click for options)" : `Ad blocker on · ${count} blocked on this page`;
   const p = profiles.profiles.find(x => x.id === profiles.active);
+  $("private-badge").hidden = !profiles.private;
+  document.body.classList.toggle("private", !!profiles.private);
+  $("profile").classList.toggle("private", !!profiles.private);
+  if (profiles.private) { // a private session: a violet eye-off glyph instead of the profile's letter
+    $("profile").innerHTML = '<svg><use href="#i-private"/></svg>';
+    $("profile").title = "Private session (click for options)";
+    return;
+  }
   $("profile").textContent = (p ? p.name : "D")[0].toUpperCase();
   $("profile").style.background = p ? p.color : "var(--accent)";
   $("profile").title = p ? `Profile: ${p.name}` : "Profile";
@@ -1270,17 +1278,23 @@ function showMenu(x, y, items) {
 
 function profileMenu() {
   const rect = $("profile").getBoundingClientRect();
-  const items = profiles.profiles.map(p => ({
-    label: (p.id === profiles.active ? "✓  " : "     ") + p.name,
-    fn: () => { if (p.id !== profiles.active) call("switch_profile", { id: p.id }); },
-    remove: p.id === "default" || p.id === profiles.active ? null : () => {
+  const items = [];
+  if (profiles.private) items.push({ label: "Leave private session", fn: () => call("private_end") });
+  // In a private session no profile is current; picking one ends the session and opens it.
+  for (const p of profiles.profiles) items.push({
+    label: (p.id === profiles.active && !profiles.private ? "✓  " : "     ") + p.name,
+    fn: () => { if (profiles.private || p.id !== profiles.active) call("switch_profile", { id: p.id }); },
+    remove: p.id === "default" || p.id === profiles.active || profiles.private ? null : () => {
       if (confirm(`Delete profile "${p.name}" and all its data?`)) {
         call("delete_profile", { id: p.id }).then(loadProfiles);
       }
     },
-  }));
-  items.push({ label: "New profile…", fn: () => setTimeout(newProfile, 0) });
-  items.push({ label: "Import from Chrome…", fn: () => openPanel("import") });
+  });
+  if (!profiles.private) {
+    items.push({ label: "New private session", fn: () => call("private_start") });
+    items.push({ label: "New profile…", fn: () => setTimeout(newProfile, 0) });
+    items.push({ label: "Import from Chrome…", fn: () => openPanel("import") });
+  }
   items.push({ label: "Settings…", fn: () => call("open_settings") });
   showMenu(rect.left, rect.top - items.length * 32 - 14, items);
 }
@@ -1317,6 +1331,8 @@ const focusAddr = () => invoke("focus_ui").then(() => { $("addr").focus(); $("ad
 
 const actions = {
   "new-tab": () => newTab(),
+  "private-new": () => call("private_start"),
+  "private-exit": () => call("private_end"),
   "reopen-tab": reopenClosed,
   "close-tab": () => { const t = activeTab(); if (t) closeTab(t.id); },
   "palette": () => invoke("show_palette"),
@@ -1535,6 +1551,7 @@ $("topbar").addEventListener("dblclick", e => { if (!e.target.closest("button"))
 for (const ev of ["mouseup", "blur"]) window.addEventListener(ev, () => call("drag_end"));
 $("toggle-sidebar").addEventListener("click", () => call("toggle_sidebar"));
 $("profile").addEventListener("click", e => { e.stopPropagation(); profileMenu(); });
+$("private-leave").addEventListener("click", () => call("private_end"));
 // A menu (not a bare toggle) so the blocker can't be switched off by a stray click.
 async function setSiteAllowed(host, allowed) {
   adblockAllow = (await call("set_adblock_site", { host, allowed })) || adblockAllow;

@@ -156,6 +156,7 @@ function loadConfig() {
 // Written to a temporary file and renamed over the real one, so a crash or a full disk can't leave half a file; the
 // previous version is kept as config.json.bak, which loadConfig falls back to.
 function saveConfig() {
+  if (privateSnapshot) return; // private mode: nothing reaches the disk
   const file = configPath(), tmp = `${file}.tmp`;
   const text = JSON.stringify(config, null, 2);
   try {
@@ -169,8 +170,16 @@ function saveConfig() {
 
 // Each profile gets its own cookie jar (web) and its own sidebar storage (ui: tabs, bookmarks, history).
 // The default profile keeps the original partitions so existing data carries over.
-const webPartition = id => (id === "default" ? "persist:alcove" : `persist:web-${id}`);
-const uiPartition = id => (id === "default" ? undefined : `persist:ui-${id}`);
+// Private mode is a throwaway profile (id PRIVATE, never in config.profiles). Its partitions have no "persist:" prefix, so
+// cookies, cache, tabs, history, bookmarks, timers and notes live in memory only. privateToken is new for every private session,
+// so nothing carries over from the last one even though the process lives on.
+const PRIVATE = "private";
+let privateToken = "";
+const webPartition = id => (id === PRIVATE ? `alcove-private-${privateToken}` : id === "default" ? "persist:alcove" : `persist:web-${id}`);
+const uiPartition = id => (id === PRIVATE ? `alcove-private-ui-${privateToken}` : id === "default" ? undefined : `persist:ui-${id}`);
+// The config as it was when private mode began. While it is set saveConfig writes nothing, and leaving private mode puts it
+// back, so no permission, allow-list entry, recent file or setting touched in private mode survives it.
+let privateSnapshot = null;
 
 // ---- state ----
 
@@ -1563,7 +1572,7 @@ const START_OPS = { "timer-start": m => [Math.min(600, Math.max(1, Math.round(Nu
 ipcMain.handle("alcove-start", async (e, op, a, b) => {
   if (!e.senderFrame || e.senderFrame.url.split(/[?#]/)[0] !== NEWTAB_PAGE) throw new Error("forbidden");
   if (op === "inset") { const n = insetFor(contentRect()); insetSent.set(e.sender, n); return n; } // current value; later changes are pushed
-  if (op === "settings") return { searchEngine: S().searchEngine, customSearch: S().customSearch, accent: S().accent };
+  if (op === "settings") return { searchEngine: S().searchEngine, customSearch: S().customSearch, accent: S().accent, private: !!privateSnapshot };
   if (op === "tools-data") { // the Tools engine's state, time tracking, to-dos and to-do tallies: JSON text, or null
     if (deadView(ui)) return null;
     const keys = ["alcove-tools-v1", "alcove-time-v1", "alcove-todos-v1", "alcove-done-v1"];
@@ -2072,6 +2081,7 @@ const activeWebSession = () => session.fromPartition(webPartition(config.activeP
 const extRoot = profileId => path.join(app.getPath("userData"), "extensions", profileId);
 
 async function loadProfileExtensions(profileId, ses) {
+  if (profileId === PRIVATE) return; // extensions are off in private mode, as in Chrome's incognito
   const root = extRoot(profileId);
   if (!fs.existsSync(root)) return;
   perf("extensions: start");
@@ -2188,6 +2198,7 @@ async function installCrx(buf, folderName) {
 
 // Chrome Web Store link or bare 32-letter extension ID.
 async function installFromStore(input) {
+  if (privateSnapshot) throw new Error("extensions are turned off in private mode");
   const m = String(input).match(/[a-p]{32}/);
   if (!m) throw new Error("no extension ID found in that text");
   const id = m[0];
@@ -2202,6 +2213,7 @@ async function installFromStore(input) {
 }
 
 async function installUnpacked() {
+  if (privateSnapshot) throw new Error("extensions are turned off in private mode");
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: "Choose an unpacked extension folder",
     properties: ["openDirectory"],
@@ -2501,11 +2513,12 @@ function createUi() {
 }
 
 function activeProfile() {
+  if (config.activeProfile === PRIVATE) return { id: PRIVATE, name: "Private", color: "#7a5af8" };
   return config.profiles.find(p => p.id === config.activeProfile);
 }
 
-function switchProfile(id) {
-  if (id === config.activeProfile || !config.profiles.some(p => p.id === id)) return;
+// Closes every page and the sidebar of the current profile, makes `id` the active one and opens its sidebar.
+function swapSession(id) {
   hidePalette();
   closePeek();
   closeSettings();
@@ -2516,7 +2529,6 @@ function switchProfile(id) {
   for (const tabId of [...tabs.keys()]) closeTab(tabId, true);
   const old = ui;
   config.activeProfile = id;
-  saveConfig();
   ensureSession(id);
   applyBlocking();
   createUi();
@@ -2526,7 +2538,48 @@ function switchProfile(id) {
   win.setTitle(p.id === "default" ? "Alcove" : `Alcove — ${p.name}`);
 }
 
+function switchProfile(id) {
+  if (privateSnapshot) { if (config.profiles.some(p => p.id === id)) endPrivate(id); return; } // choosing a profile leaves private mode
+  if (id === config.activeProfile || !config.profiles.some(p => p.id === id)) return;
+  swapSession(id);
+  saveConfig();
+}
+
+// ---- private mode ----
+// Starting it closes the pages of the current profile (they come back when it ends) and opens a profile with nothing in it: no
+// cookies, no history, no tabs. Ad blocking, Do Not Track and the site permission prompts work as usual; extensions are off.
+function startPrivate() {
+  if (privateSnapshot || !win || win.isDestroyed()) return;
+  privateSnapshot = JSON.parse(JSON.stringify(config));
+  privateToken = require("crypto").randomBytes(8).toString("hex");
+  swapSession(PRIVATE);
+  Menu.setApplicationMenu(buildMenu());
+}
+
+// Ends it: the pages and the sidebar of the private session are closed, the config goes back to what it was, and the private
+// session's storage is wiped. `toId` is the profile to land on (default: the one private mode was started from).
+function endPrivate(toId) {
+  if (!privateSnapshot) return;
+  const parts = [webPartition(PRIVATE), uiPartition(PRIVATE)];
+  const snap = privateSnapshot;
+  const to = toId && snap.profiles.some(p => p.id === toId) ? toId : snap.activeProfile;
+  config = snap;
+  privateSnapshot = null;
+  swapSession(to);
+  if (to !== snap.activeProfile) saveConfig();
+  nativeTheme.themeSource = S().theme; // a theme picked in private mode is not kept
+  Menu.setApplicationMenu(buildMenu());
+  for (const part of parts) {
+    const ses = session.fromPartition(part);
+    knownSessions.delete(ses);
+    ses.clearStorageData().catch(() => {});
+    ses.clearCache().catch(() => {});
+  }
+  privateToken = "";
+}
+
 function createProfile(name) {
+  if (privateSnapshot) throw new Error("leave private mode first");
   const n = config.profiles.length;
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "profile";
   const profile = { id: `${slug}-${Math.random().toString(36).slice(2, 6)}`, name, color: COLORS[n % COLORS.length] };
@@ -2536,6 +2589,7 @@ function createProfile(name) {
 }
 
 async function deleteProfile(id) {
+  if (privateSnapshot) throw new Error("leave private mode first");
   if (id === "default" || id === config.activeProfile) throw new Error("cannot delete this profile");
   config.profiles = config.profiles.filter(p => p.id !== id);
   saveConfig();
@@ -2925,7 +2979,7 @@ const commands = {
     if (config.adblock && !blocker) blockerReady = ensureBlocker(); // first time on this run: load it (it applies itself)
     else applyBlocking();
   },
-  get_profiles: () => ({ profiles: config.profiles, active: config.activeProfile }),
+  get_profiles: () => ({ profiles: config.profiles, active: privateSnapshot ? privateSnapshot.activeProfile : config.activeProfile, private: !!privateSnapshot }),
   list_import_sources: () => listImportSources(),
   import_browser: args => importFromBrowser(args),
   take_pending_import: () => {
@@ -2935,6 +2989,8 @@ const commands = {
   },
   create_profile: ({ name }) => createProfile(String(name).trim().slice(0, 30) || "Profile"),
   switch_profile: ({ id }) => { setImmediate(() => switchProfile(id)); },
+  private_start: () => { setImmediate(startPrivate); },
+  private_end: () => { setImmediate(() => endPrivate()); },
   delete_profile: ({ id }) => deleteProfile(id),
 };
 
@@ -2980,6 +3036,9 @@ function buildMenu() {
       item("new-tab", "New Tab", "CmdOrCtrl+T"),
       item("reopen-tab", "Reopen Closed Tab", "CmdOrCtrl+Shift+T"),
       item("close-tab", "Close Tab", "CmdOrCtrl+W"),
+      { type: "separator" },
+      { label: "New Private Session", accelerator: "CmdOrCtrl+Shift+N", enabled: !privateSnapshot, click: () => { setImmediate(startPrivate); } },
+      { label: "Leave Private Session", enabled: !!privateSnapshot, click: () => { setImmediate(() => endPrivate()); } },
       { type: "separator" },
       item("palette", "Command Palette", "CmdOrCtrl+K"),
       item("focus-address", "Open Location", "CmdOrCtrl+L"),

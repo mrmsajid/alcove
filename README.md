@@ -10,8 +10,8 @@ Built on [Electron](https://www.electronjs.org/) (Chromium). Plain HTML, CSS and
 - **Sidebar-first browsing:** tabs, spaces, tab groups, pinned tabs, split view, peek, a Cmd/Ctrl+K command palette.
 - **Start page:** a search bar, pinned website shortcuts, a live daily report (to-dos done, Markdown to-dos done,
   time spent) and your tools.
-- **Privacy:** built-in ad and tracker blocking, Do Not Track, optional HTTPS-only, per-site permissions, no
-  account, no telemetry.
+- **Privacy:** built-in ad and tracker blocking, Do Not Track, optional HTTPS-only, per-site permissions, private
+  sessions (Cmd/Ctrl+Shift+N: no saved cookies, history or tabs), no account, no telemetry.
 - **Tools:** timers, stopwatch, Pomodoro, alarms, time tracking, focus mode (blocks distracting sites), world clock,
   notes and to-dos.
 - **Markdown editor:** Visual and Code views, folders you mount like vaults, search, tags, a graph of linked notes.

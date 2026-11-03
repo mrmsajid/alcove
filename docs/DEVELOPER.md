@@ -231,7 +231,7 @@ call commands. If you add a new view that needs commands, add it to that list.
 | Screenshots | `screenshot` `screenshot_region` `region_done` `region_cancel` `shot_save_as` `shot_copy` `shot_discard` |
 | Extensions | `list_extensions` `install_extension` `install_unpacked_extension` `remove_extension` `extension_popup` `store_button` |
 | Video download | `video_tools` `install_downloader` `download_video` `cancel_video` |
-| Profiles and import | `get_profiles` `create_profile` `switch_profile` `delete_profile` `list_import_sources` `import_browser` `take_pending_import` |
+| Profiles and import | `get_profiles` `create_profile` `switch_profile` `delete_profile` `private_start` `private_end` `list_import_sources` `import_browser` `take_pending_import` |
 | Tools | `open_tools` `close_tools` `toggle_tools` `tools_op` `notify` `activity` `focus_mode` `focus_state` `eyedropper` `page_images` `save_images` |
 | Markdown | `md_url` `md_recent` `md_recent_folders` (the editor itself uses its own bridge, see 6.6) |
 | Start page | `add_shortcut` (the start page itself uses its own bridge, see 6.7) |
@@ -628,6 +628,30 @@ release: tag `vX.Y.Z` matching `version` in `package.json` and publish the draft
 the next time they check. The check needs the repository's releases to be readable without a login, i.e. a public repository.
 Tested with a local stand-in server (`ALCOVE_UPDATE_API`): newer, same, older, minor bump, 404, 500, unreadable body, no tag, and a release
 page on the wrong host.
+
+### 6.9 Private mode
+
+A **private session** is a throwaway profile (`PRIVATE` in `main.js`, never in `config.profiles`). Alcove has one window, so starting it
+(`startPrivate`: File › New Private Session, `Cmd/Ctrl+Shift+N`, the palette, or the avatar menu) swaps the whole window the way a profile
+switch does (`swapSession`): the pages of the current profile are closed (they come back when it ends) and a sidebar with nothing in it opens.
+
+- **Storage is in memory.** `webPartition` / `uiPartition` return `alcove-private-<token>` / `alcove-private-ui-<token>`, partitions without the
+  `persist:` prefix, so cookies, cache, site storage, and everything the sidebar keeps (tabs, history, bookmarks, closed tabs, downloads list,
+  timers, notes, time tracking) are never written. The token is new for every session, and `endPrivate` also clears both partitions.
+- **Settings and permissions are frozen.** `startPrivate` copies `config` to `privateSnapshot`. While it is set `saveConfig` writes nothing, and
+  `endPrivate` puts the copy back, so a permission answer, an ad-block allow entry, a recent Markdown file, a shortcut or a setting changed in
+  private mode is dropped when the session ends (quitting while private leaves `config.json` as it was). `config.activeProfile` is `"private"`
+  meanwhile, which is why `get_profiles` reports the real profile in `active` and `private: true` separately.
+- **What stays on.** Ad blocking, Do Not Track, HTTPS-only and the permission prompts use the private session like any other (`applyBlocking`
+  moves the blocker onto it). **What is off:** extensions (`loadProfileExtensions` skips it; installing one throws), and creating or deleting
+  a profile or importing from another browser.
+- **What it does not hide:** the sites you visit, your network and internet provider, and files you download (they go to the normal downloads
+  folder). The start page says so.
+- **Leaving it** (`endPrivate`: the badge's Leave button, File › Leave Private Session, the palette, or choosing a profile) closes every
+  private page, restores the config, rebuilds the sidebar of the profile it started from and wipes the private partitions.
+- **Tested** against a throwaway profile (8.1): a cookie set in a normal tab is invisible in the private tab and the reverse, `config.json` has the
+  same hash before, during (with a setting changed) and after, a second private session starts with no cookies, storage or history, the menu
+  items work, and nothing in the user-data folder mentions the private pages' addresses.
 
 ---
 
