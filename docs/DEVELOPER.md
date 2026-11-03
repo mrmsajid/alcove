@@ -841,6 +841,11 @@ method (concept, art direction, one signature moment, then build and audit); the
   check before publishing: the Markdown status bar shows local file paths (crop it), and a palette capture lists "Recently closed" rows with
   the start page's `file://` address. Keep the test window in front while capturing, or the glass tint and the sidebar's light or dark
   text follow a stale backdrop. `--host-resolver-rules="MAP *.example 127.0.0.1:8765"` gives sample tabs believable addresses.
+  **Retake them whenever the start page or the Tools page changes** (`hero-page-*`, `hero-page-full-*`, `tools-*`, and `og.png`, which lays
+  `hero-page-dark` over the sidebar shot: serve a copy of `og.html` and capture it at 1200x630 with the window at least 1200 wide). Seed
+  seven shortcuts, not eight, so "Add site" stays on the first row. The Tools shot is taken at an exact page width with
+  `Emulation.setDeviceMetricsOverride` (1104 wide, deviceScaleFactor 2, held on one socket, 850 high so the Timers tab fits) because the
+  window can't be sized that narrow without docking the sidebar; update the `width` and `height` attributes in `index.html` to match.
 - **Contact.** The support address appears in the support section and the footer of `index.html` and in `404.html`.
 
 **Deploy.** `.github/workflows/pages.yml` publishes `site/` on every push to `main` that changes it. One-time setup by the repository owner:
