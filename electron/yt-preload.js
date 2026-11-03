@@ -171,3 +171,96 @@ if (window === window.top && location.protocol === "file:" && /\/ui\/markdown\.h
     if (dropped) md("allow", dropped).then(() => window.postMessage({ __alcoveMdDrop: dropped }, "*"));
   }, true);
 }
+
+// ---- gestures, in every tab's top page: swipe between pages, and the mouse's back and forward buttons ----
+// Two fingers sideways on a trackpad (or a swipe in from the left or right edge of a touch screen) shows an arrow that follows the
+// fingers; past the line it turns blue, and letting go there goes back or forward. A page that scrolls sideways keeps the swipe: it only
+// counts when nothing under the pointer can scroll further that way and the page didn't take the wheel itself. The app does the
+// navigating (main.js, "alcove-nav") and says whether it's switched on. A plain mouse wheel never swipes: it scrolls up and down, and
+// Shift + wheel (sideways scrolling) is left alone.
+if (window === window.top) {
+  const nav = (op, kind) => ipcRenderer.invoke("alcove-nav", op, kind);
+  const LINE = 150; // how far to swipe, in px of finger travel
+  const ease = k => 1 - Math.pow(1 - k, 3);
+  let ui = null, can = null;
+  function arrow(progress, dir, ok) { // dir 1 = back (arrow on the left), -1 = forward (on the right)
+    if (!ui) {
+      // a closed shadow root on <html>, styled through the CSSOM only (so any page CSP allows it); it never takes the pointer
+      const host = document.createElement("alcove-swipe"), root = host.attachShadow({ mode: "closed" });
+      const dot = document.createElement("div"), NS = "http://www.w3.org/2000/svg", svg = document.createElementNS(NS, "svg"), p = document.createElementNS(NS, "path");
+      svg.setAttribute("viewBox", "0 0 24 24"); svg.setAttribute("width", "22"); svg.setAttribute("height", "22");
+      for (const [k, v] of [["d", "M14.5 5.5 8 12l6.5 6.5"], ["fill", "none"], ["stroke", "currentColor"], ["stroke-width", "2.5"], ["stroke-linecap", "round"], ["stroke-linejoin", "round"]]) p.setAttribute(k, v);
+      svg.append(p); dot.append(svg); root.append(dot);
+      ui = { host, dot, svg };
+    }
+    if (!ui.host.isConnected) { ui.host.style.cssText = "all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647"; document.documentElement.append(ui.host); }
+    const k = Math.max(0, Math.min(1, progress)), done = k >= 1 && ok;
+    ui.dot.style.cssText = `position:absolute;top:50%;${dir > 0 ? `left:${(can && can.inset) || 0}px` : "right:0"};width:46px;height:46px;margin-top:-23px;border-radius:50%;` +
+      `display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 6px 20px rgba(0,0,0,.28);` +
+      `background:${done ? "#3b74ff" : "rgba(28,28,32,.86)"};transition:background .12s;` +
+      `transform:translateX(${dir * (-52 + 76 * ease(k))}px) scale(${done ? 1.06 : .72 + .28 * k});opacity:${ok ? Math.min(1, k * 1.8) : .3 * k}`;
+    ui.svg.style.transform = dir > 0 ? "" : "scaleX(-1)";
+  }
+  function hide() {
+    if (!ui || !ui.host.isConnected) return;
+    ui.dot.style.transition = "transform .2s ease, opacity .2s ease"; ui.dot.style.opacity = "0";
+    setTimeout(() => ui.host.remove(), 220);
+  }
+  // can this element, or one around it, still scroll sideways this way? then the swipe is the page's
+  function scrollsX(el, dx) {
+    const room = e => (dx < 0 ? e.scrollLeft > 0 : e.scrollLeft + e.clientWidth < e.scrollWidth - 1);
+    for (let e = el && el.nodeType === 1 ? el : el && el.parentElement; e && e !== document.body && e !== document.documentElement; e = e.parentElement) {
+      if (e.scrollWidth > e.clientWidth + 1 && /(auto|scroll|overlay)/.test(getComputedStyle(e).overflowX) && room(e)) return true;
+    }
+    const s = document.scrollingElement || document.documentElement;
+    return s.scrollWidth > s.clientWidth + 1 && room(s);
+  }
+  function commit(amount, kind) {
+    const dir = amount > 0 ? 1 : -1, ok = can && can.on && (dir > 0 ? can.back : can.forward);
+    if (Math.abs(amount) >= LINE && ok) nav(dir > 0 ? "back" : "forward", kind);
+    hide();
+  }
+
+  // trackpad: wheel events with a sideways delta; a gesture ends when the events (momentum included) pause
+  let acc = 0, lastT = 0, state = "idle", endTimer = 0;
+  window.addEventListener("wheel", e => {
+    if (e.ctrlKey || e.metaKey || e.shiftKey) return; // pinch zoom, zoom, or a mouse's sideways scroll
+    const now = performance.now();
+    if (now - lastT > 220) { state = "idle"; acc = 0; }
+    lastT = now;
+    if (state === "blocked") return;
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? innerWidth : 1, dx = e.deltaX * unit, dy = e.deltaY * unit;
+    if (state === "idle") {
+      if (Math.abs(dx) < 1.5 || Math.abs(dx) < Math.abs(dy) * 1.4) { if (Math.abs(dy) > 2) state = "blocked"; return; } // a scroll up or down
+      if (e.defaultPrevented || scrollsX(e.target, dx)) { state = "blocked"; return; }
+      state = "track"; can = null; nav("can", "swipe").then(c => { can = c; }, () => {});
+    }
+    if (Math.abs(dy) > Math.abs(dx) * 2) return;
+    acc -= dx;
+    if (can && can.on) arrow(Math.abs(acc) / LINE, acc > 0 ? 1 : -1, acc > 0 ? can.back : can.forward);
+    clearTimeout(endTimer);
+    endTimer = setTimeout(() => { if (state === "track") { state = "idle"; commit(acc, "swipe"); acc = 0; } }, 160);
+  }, { passive: true });
+
+  // touch screen: one finger swiping in from the left (back) or right (forward) edge
+  let t0 = null;
+  window.addEventListener("touchstart", e => {
+    t0 = null;
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0], edge = t.clientX < 24 ? 1 : t.clientX > innerWidth - 24 ? -1 : 0;
+    if (edge) { t0 = { x: t.clientX, y: t.clientY, edge, d: 0 }; can = null; nav("can", "swipe").then(c => { can = c; }, () => {}); }
+  }, { passive: true, capture: true });
+  window.addEventListener("touchmove", e => {
+    if (!t0 || e.touches.length !== 1) return;
+    const t = e.touches[0], dx = t.clientX - t0.x, dy = t.clientY - t0.y;
+    if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 12) { t0 = null; hide(); return; } // that was a scroll
+    t0.d = Math.max(0, dx * t0.edge) * t0.edge;
+    if (can && can.on) arrow(Math.abs(t0.d) / (LINE * .8), t0.edge, t0.edge > 0 ? can.back : can.forward);
+  }, { passive: true, capture: true });
+  const touchEnd = () => { if (!t0) return; const d = t0.d / .8; t0 = null; commit(d, "swipe"); };
+  window.addEventListener("touchend", touchEnd, { passive: true, capture: true });
+  window.addEventListener("touchcancel", () => { t0 = null; hide(); }, { passive: true, capture: true });
+
+  // the mouse's own back and forward buttons (the 4th and 5th)
+  window.addEventListener("mouseup", e => { if (e.button === 3 || e.button === 4) nav(e.button === 3 ? "back" : "forward", "button"); }, true);
+}

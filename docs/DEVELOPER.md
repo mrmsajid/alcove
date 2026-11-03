@@ -342,6 +342,19 @@ web session (`applyBlocking`).
   Linux, arrive as `zoom-changed` and are sent to the sidebar as the zoom-in / zoom-out shortcuts for the shown tab; Chromium does not
   raise it on macOS (there the trackpad pinch is the gesture). Tested with real two-finger touch events over CDP and the
   `debug_wheel_zoom` hook; the wheel path itself has not been tried on a Windows machine.
+- **Gestures** (Settings › Gestures, `swipeNav` and `mouseNav`, both on by default). Electron has no swipe-between-pages, so the
+  session preload (`yt-preload.js`, top frame of every tab) does it. *Two fingers sideways on a trackpad*: wheel events with a sideways
+  delta, summed per gesture (a gesture ends when the events, momentum included, pause for 220 ms); a gesture that starts mostly
+  vertical, with Ctrl/Cmd/Shift, over anything that can still scroll sideways that way (`scrollsX`), or that the page already
+  `preventDefault`ed is left to the page. *Touch screens*: one finger swiping in from the left or right 24 px edge. *Mouse*: the 4th and
+  5th buttons. While swiping, an arrow follows the fingers (a custom `alcove-swipe` element with a closed shadow root, styled only through
+  the CSSOM so a page's CSP can't block it, `pointer-events: none`); it turns blue past 150 px and letting go there navigates. The page
+  never navigates itself: it asks main (`ipcMain.handle("alcove-nav")`, which only answers a tab's own main frame) for `can` (`on`,
+  `back`, `forward`, and `inset`, how much of the page's left edge the floating sidebar covers, so the back arrow sits beside it), then
+  for `back` or `forward`. Tested over CDP with synthetic wheel, touch and mouse-button events (`scratchpad` swipe/touch tests: back,
+  forward, short swipe, vertical scroll, Shift+wheel, a sideways-scrolling strip, the setting off); not yet by hand on a real trackpad,
+  a Magic Mouse, a Windows precision touchpad or a touch screen. Note that CDP's synthetic wheel events look like mouse notches
+  (`wheelDeltaX` 120), so don't filter on that.
 - **Staying up.** A page whose process dies is reloaded (`render-process-gone` -> `tab-crashed`); if the sidebar's own process dies its
   tabs are closed quietly and it reloads and reopens the active tab. Asking to open a tab that already has a view just shows it,
   and the sidebar marks a tab open before the call, so two activations at once can't make two views. Own-page tabs are saved as

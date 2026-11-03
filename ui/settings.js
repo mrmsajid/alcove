@@ -105,6 +105,19 @@ const SECTIONS = [
       seg(S.sidebarMode, [["overlay", "Overlay"], ["docked", "Docked"]], v => set("sidebarMode", v))),
     row("Compact layout", "Remove the margin and rounded corners around pages.", toggle(S.compact, v => set("compact", v))),
   )]],
+  ["gestures", "Gestures", () => [card(
+    row("Swipe between pages", "Two fingers left or right on a trackpad go back or forward; on a touch screen, swipe in from the left or right edge. An arrow follows your fingers and turns blue when letting go will move.", toggle(S.swipeNav !== false, v => set("swipeNav", v))),
+    row("Mouse back and forward buttons", "The extra side buttons on a mouse go back and forward.", toggle(S.mouseNav !== false, v => set("mouseNav", v))),
+  ), card(...[
+    ["Two fingers left or right", "Back or forward (trackpad)"],
+    ["Swipe in from the left or right edge", "Back or forward (touch screen)"],
+    ["Pinch with two fingers", "Zoom the page in or out; Actual Size (⌘0 or Ctrl+0) resets it"],
+    MAC ? null : ["Ctrl + scroll", "Zoom the page in or out"], // macOS doesn't send this one; there the pinch is the gesture
+    ["Mouse side buttons", "Back or forward"],
+    ["Middle-click a link", "Open it in a new tab"],
+    ["Point at the left edge", "Show the sidebar while it is hidden"],
+  ].filter(Boolean).map(([what, does]) => row(what, does))),
+  ]],
   ["downloads", "Downloads", () => [card(
     row("Location", null,
       h("span", { class: "path", title: info.downloadDir }, info.downloadDir || ""),

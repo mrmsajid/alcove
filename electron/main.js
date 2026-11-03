@@ -72,6 +72,8 @@ const DEFAULT_SETTINGS = {
   shine: 40,                                // specular edges and color fringe on glass controls (0 = off)
   dnt: true, httpsOnly: false, spellcheck: true,
   checkUpdates: false,                      // ask GitHub for a newer release when Alcove starts (at most once a day); off unless the user turns it on
+  swipeNav: true,                           // two fingers sideways on a trackpad (or in from a touch screen's edge) go back or forward
+  mouseNav: true,                           // the mouse's back and forward buttons do the same
 };
 const SETTING_RULES = {
   searchEngine: v => typeof v === "string" && v.length < 30,
@@ -91,6 +93,8 @@ const SETTING_RULES = {
   httpsOnly: v => typeof v === "boolean",
   spellcheck: v => typeof v === "boolean",
   checkUpdates: v => typeof v === "boolean",
+  swipeNav: v => typeof v === "boolean",
+  mouseNav: v => typeof v === "boolean",
   glass: v => typeof v === "boolean",
   frost: v => typeof v === "number" && v >= 0 && v <= 100,
   sidebarMode: v => ["overlay", "docked"].includes(v),
@@ -1580,6 +1584,19 @@ function addShortcut(url, name) { // false when it isn't a website, is already t
   return true;
 }
 const START_OPS = { "timer-start": m => [Math.min(600, Math.max(1, Math.round(Number(m)) || 25))], "pomo-start": () => [] };
+// Gestures from a tab's page (yt-preload.js): "can" says whether swiping is on and where the tab can go; "back"/"forward" go there.
+// Only a tab's own top frame may ask, and only for itself; kind is "swipe" or "button", each with its own setting.
+ipcMain.handle("alcove-nav", (e, op, kind) => {
+  const wc = e.sender;
+  if (!e.senderFrame || e.senderFrame !== wc.mainFrame || ![...tabs.values()].some(v => v.webContents === wc)) return null;
+  const on = kind === "button" ? S().mouseNav !== false : S().swipeNav !== false, h = wc.navigationHistory;
+  if (op === "can") return { on, back: h.canGoBack(), forward: h.canGoForward(), inset: wc === wcOf(shownId) ? insetFor(contentRect()) : 0 }; // inset: what a floating sidebar covers of its left edge
+  if (!on) return false;
+  if (op === "back" && h.canGoBack()) { h.goBack(); return true; }
+  if (op === "forward" && h.canGoForward()) { h.goForward(); return true; }
+  return false;
+});
+
 ipcMain.handle("alcove-start", async (e, op, a, b) => {
   if (!e.senderFrame || e.senderFrame.url.split(/[?#]/)[0] !== NEWTAB_PAGE) throw new Error("forbidden");
   if (op === "inset") { const n = insetFor(contentRect()); insetSent.set(e.sender, n); return n; } // current value; later changes are pushed
