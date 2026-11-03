@@ -6,115 +6,190 @@
   <title>Tools</title>
   <link rel="stylesheet" href="style.css">
   <style>
+    /* The Tools page: hairlines instead of boxes, light numerals, one calm column (the start page uses the same tokens).
+       The shared .t-* rules in style.css also style the sidebar's small Tools panel, so everything here is scoped to #view. */
+    :root { --line: color-mix(in srgb, var(--text) 32%, transparent); --ease: cubic-bezier(.2, .7, .2, 1); --r-sm: 10px; --r-md: 14px;
+      --ok: color-mix(in srgb, #34c759 62%, var(--text)); --bad: color-mix(in srgb, #ff6b5e 62%, var(--text)); }
     html, body { display: block; height: 100%; margin: 0; padding: 0; background: var(--bg) !important; user-select: none; }
     .shell { display: flex; flex-direction: column; height: 100%; }
-    .bar { display: flex; align-items: center; gap: 18px; padding: 14px 28px; border-bottom: 1px solid var(--border); flex: none; }
-    .bar h1 { font-size: 18px; margin: 0; }
-    .bar nav { display: flex; gap: 2px; padding: 3px; background: var(--active); border-radius: 11px; }
-    .bar nav button { padding: 5px 15px; border-radius: 8px; color: var(--muted); font-size: 13px; }
-    .bar nav button:hover { background: transparent; color: var(--text); }
-    .bar nav button.on { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px #0003; }
+
+    /* header: the title, the tabs with a sliding ink line, close */
+    .bar { display: flex; align-items: flex-end; gap: 28px; padding: 0 32px; border-bottom: 1px solid var(--border); flex: none; }
+    .bar h1 { margin: 0; height: 54px; display: flex; align-items: center; font-size: 20px; font-weight: 600; letter-spacing: -.015em; }
+    .bar nav { position: relative; display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+    .bar nav button { flex: none; height: 54px; padding: 0 12px; border-radius: 8px 8px 0 0; color: var(--muted); font-size: 14px; font-weight: 500; }
+    .bar nav button:hover { background: var(--hover); color: var(--text); }
+    .bar nav button.on { color: var(--text); font-weight: 600; }
+    .bar nav button:focus-visible { outline-offset: -2px; }
+    .bar nav .ink { position: absolute; left: 0; bottom: 0; height: 2px; width: var(--w, 0px); transform: translateX(var(--x, 0px)); background: var(--text); border-radius: 2px; pointer-events: none; }
+    .bar nav.settled .ink { transition: transform .3s var(--ease), width .3s var(--ease); }
     .bar .spacer { flex: 1; }
-    main { flex: 1; overflow-y: auto; padding: 22px 28px 60px; }
-    #view.t-view { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(310px, 100%), 1fr)); gap: 14px; align-items: start; max-width: 1020px; margin: 0 auto; padding: 0; }
-    #view[data-tab="timers"], #view[data-tab="alarms"] { align-items: stretch; } /* cards in a row line up; elsewhere (to-do beside notes) each keeps its own height */
-    #view.enter { animation: viewin .2s ease-out; } /* only when the tab changes, never when a timer ticks the page back in */
-    @keyframes viewin { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+    .bar #close { align-self: center; }
+    main { flex: 1; overflow-y: auto; padding: 36px 32px 80px; container-type: inline-size; }
+
+    /* the page: one 640px column; Timers gets room for three instruments side by side */
+    #view.t-view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 36px; align-items: start; max-width: 640px; margin: 0 auto; padding: 0; }
+    #view[data-tab="timers"] { max-width: 920px; grid-template-columns: repeat(auto-fit, minmax(min(232px, 100%), 1fr)); gap: 40px 36px; align-items: stretch; }
+    #view > .t-card.wide { grid-column: 1 / -1; }
+    #view.enter > * { animation: rise .42s var(--ease) backwards; animation-delay: calc(var(--i, 0) * 55ms); } /* only when the tab changes, never when a timer ticks the page back in */
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+
     /* what is running, on every tab except the one that already shows it in full */
-    .status { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 28px 0; flex: none; }
+    .status { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 32px 0; flex: none; }
     .status[hidden] { display: none; }
-    .live { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: 12.5px; }
+    .live { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; font-size: 12.5px; }
     .live .dot { flex: none; width: 8px; height: 8px; margin: 0 4px 0 9px; border-radius: 50%; background: #34c759; animation: livepulse 2s ease-in-out infinite; }
     .live.paused .dot { background: var(--muted); animation: none; }
     .live .go { padding: 4px 8px; border-radius: 999px; font-weight: 600; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .live .go:hover { background: var(--hover); }
-    .live .time { padding: 0 8px 0 2px; font: 600 13px ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
-    .live .act { min-height: 28px; padding: 0 11px; border-radius: 999px; background: var(--active); font-size: 12px; font-weight: 600; }
+    .live .time { padding: 0 8px 0 2px; font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; }
+    .live .act { min-height: 28px; padding: 0 12px; border-radius: 999px; background: var(--active); font-size: 12px; font-weight: 600; }
     .live .act:hover { background: var(--hover); filter: brightness(1.15); }
     @keyframes livepulse { 0%, 100% { box-shadow: 0 0 0 0 #34c75966; } 50% { box-shadow: 0 0 0 4px #34c75900; } }
-    .z-slot { flex: none; width: 26px; } /* keeps every clock's time in one column, with or without a remove button */
-    #view .t-card { background: var(--surface); }
-    #view .t-card.wide { grid-column: 1 / -1; }
-    .t-big { font-size: 34px; }
-    /* Narrow: the page sits beside the sidebar, so it can be a third of the window. The tabs get their own row. */
-    @media (max-width: 600px) {
-      .bar { flex-wrap: wrap; gap: 10px 12px; padding: 12px 16px; }
-      .status { padding: 10px 16px 0; }
-      .bar h1 { font-size: 16px; }
-      .bar nav { order: 3; flex: 1 0 100%; flex-wrap: wrap; overflow: visible; } /* every tab visible, none hidden off to the side */
-      main { padding: 16px 14px 48px; }
-    }
-    .bar nav { overflow-x: auto; scrollbar-width: none; }
-    .bar nav button { flex: none; }
-    .dialcard { align-items: center; text-align: center; }
-    .dialcard .t-title { align-self: flex-start; }
+
+    /* sections: no box, a hairline above each (the first one needs none) */
+    #view .t-card { gap: 14px; padding: 22px 0 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: none; min-width: 0; }
+    #view > .t-card:first-child, #view .t-card.dialcard { padding-top: 0; border-top: 0; }
+    #view .t-title { font-size: 15px; font-weight: 600; letter-spacing: -.005em; text-transform: none; color: var(--text); }
+    #view .t-sub { font-size: 13px; color: var(--muted); }
+    #view .t-note { font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+    #view .t-big { font: 300 46px/1.05 -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; letter-spacing: -.02em; }
+    #view .t-btns { flex-wrap: wrap; gap: 8px; }
+    #view .t-btn { min-height: 34px; padding: 0 16px; border: 1px solid var(--line); border-radius: var(--r-sm); background: transparent; color: var(--text); font-size: 13.5px; font-weight: 500; transition: background .15s, border-color .15s; }
+    #view .t-btn:hover { background: var(--active); filter: none; }
+    #view .t-btn.primary { background: var(--text); border-color: transparent; color: var(--bg); font-weight: 600; }
+    #view .t-btn.primary:hover { background: var(--text); filter: brightness(.9); }
+    #view .t-chips { gap: 6px; }
+    #view .t-chip { min-height: 30px; padding: 0 12px; border: 1px solid var(--line); background: transparent; font-size: 13px; transition: background .15s, border-color .15s; }
+    #view .t-chip:hover { background: var(--active); }
+    #view .t-chip.on { background: color-mix(in srgb, var(--text) 14%, transparent); border-color: var(--text); color: var(--text); font-weight: 600; }
+    #view .t-row { gap: 8px; }
+    #view input, #view select, #view textarea { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); font-size: 14px; }
+    #view input, #view select { min-height: 36px; }
+    #view input:focus, #view select:focus, #view textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
+    #view input[type="checkbox"] { min-height: 0; }
+    #view textarea { padding: 10px 12px; line-height: 1.5; }
+    #view ::placeholder { color: var(--muted); opacity: 1; }
+    .t-time { width: 130px !important; flex: none !important; }
+    .t-dom { width: 110px; padding: 5px 8px; }
+
+    /* the three instruments */
+    .dialcard { align-items: center; text-align: center; gap: 16px; }
+    #view .dialcard .t-title { align-self: center; font-size: 13px; font-weight: 500; color: var(--muted); }
     .dialcard .t-btns, .dialcard .t-chips, .dialcard .t-row { justify-content: center; }
-    .dial text, .ring text, .dial-face, .dial-btn, .hand-hub { stroke: none; } /* style.css gives every svg an outline: not wanted here */
-    .ring.timer .ring-prog { stroke: #4c8dff; }
-    .ring.idle .ring-prog { stroke: var(--border); }
-    .dial, .ring { width: 100%; max-width: 250px; height: auto; display: block; overflow: visible; }
-    .ring { max-width: 220px; }
-    .dial-case { fill: var(--active); stroke: var(--border); stroke-width: 2; }
-    .dial-face { fill: var(--bg); }
-    .dial-btn { fill: var(--muted); }
-    .tick { stroke: var(--muted); stroke-width: 1; stroke-linecap: round; }
-    .tick.major { stroke: var(--text); stroke-width: 2; }
-    .dial-num { fill: var(--muted); font: 600 9.5px -apple-system, "Segoe UI", sans-serif; text-anchor: middle; }
-    .sub-ring { fill: none; stroke: var(--border); stroke-width: 1.5; }
-    .dial-read { fill: var(--text); font: 600 19px ui-monospace, "SF Mono", Menlo, Consolas, monospace; text-anchor: middle; font-variant-numeric: tabular-nums; }
-    .hand-sec { stroke: #ff5a4d; stroke-width: 2.2; stroke-linecap: round; }
-    .hand-min { stroke: var(--text); stroke-width: 1.8; stroke-linecap: round; }
-    .hand-hub { fill: #ff5a4d; }
-    .ring-track { fill: none; stroke: var(--active); stroke-width: 12; }
-    .ring-prog { fill: none; stroke: var(--accent); stroke-width: 12; stroke-linecap: round; transition: stroke .3s; }
+    .dialcard .t-chips { max-width: 232px; }
+    .dialcard .t-row { width: 100%; max-width: 240px; }
+    .ring text, .dial-tick { stroke: none; } /* style.css gives every svg an outline: not wanted here */
+    .ring { width: 100%; max-width: 208px; height: auto; display: block; overflow: visible; }
+    .ring-track { fill: none; stroke: color-mix(in srgb, var(--text) 14%, transparent); stroke-width: 5; }
+    .ring-prog { fill: none; stroke: var(--accent); stroke-width: 5; stroke-linecap: round; transition: stroke .3s; }
+    .ring.intro .ring-prog { transition: stroke-dashoffset .9s var(--ease), stroke .3s; } /* the arc draws in to its value, once, when the tab opens */
+    .ring.idle .ring-prog { stroke: transparent; }
     .ring.pomo.focus .ring-prog { stroke: #ff6b5e; }
     .ring.pomo.break .ring-prog { stroke: #34c759; }
-    .ring-time { fill: var(--text); font: 600 40px ui-monospace, "SF Mono", Menlo, Consolas, monospace; text-anchor: middle; font-variant-numeric: tabular-nums; }
-    .ring-sub { fill: var(--muted); font: 13px -apple-system, "Segoe UI", sans-serif; text-anchor: middle; }
+    .ring-time { fill: var(--text); font: 300 46px -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; text-anchor: middle; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+    .ring-sub { fill: var(--muted); font: 13px -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; text-anchor: middle; font-variant-numeric: tabular-nums; }
+    .sw-tick { stroke: color-mix(in srgb, var(--text) 26%, transparent); stroke-width: 1.5; stroke-linecap: round; }
+    .sw-tick.major { stroke: color-mix(in srgb, var(--text) 55%, transparent); stroke-width: 2; }
+    .sw-head { fill: var(--text); stroke: none; }
+    .ring.idle .sw-head { opacity: 0; }
     .pips { display: flex; gap: 9px; justify-content: center; }
-    .pip { width: 10px; height: 10px; border-radius: 50%; background: var(--active); border: 1px solid var(--border); }
+    .pip { width: 8px; height: 8px; border-radius: 50%; background: transparent; border: 1.5px solid var(--line); }
     .pip.done { background: #ff6b5e; border-color: #ff6b5e; }
     .pip.now { box-shadow: 0 0 0 3px #ff6b5e55; }
-    .cfgs { display: flex; gap: 8px; justify-content: center; }
-    .cfg { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); }
-    .cfg input { width: 58px; text-align: center; padding: 4px 6px; }
-    .laps { width: 100%; max-height: 160px; overflow: auto; display: flex; flex-direction: column; font: 12.5px ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
-    .lap { display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 4px 8px; border-top: 1px solid var(--border); text-align: right; }
+    .cfgs { display: flex; gap: 10px; justify-content: center; }
+    .cfg { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+    .cfg input { width: 64px; text-align: center; padding: 4px 6px; min-height: 32px; }
+    .laps { width: 100%; max-height: 168px; overflow: auto; display: flex; flex-direction: column; font-size: 13px; font-variant-numeric: tabular-nums; }
+    .lap { display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 6px 4px; border-top: 1px solid var(--border); text-align: right; }
     .lap span:first-child { text-align: left; }
     .lap .d { color: var(--muted); }
-    .lap.best { color: #34c759; } .lap.worst { color: #ff6b5e; }
+    .lap.best { color: var(--ok); } .lap.worst { color: var(--bad); }
+
+    /* alarms */
     .alarms { display: flex; flex-direction: column; }
-    .alarm { display: flex; align-items: center; gap: 14px; padding: 10px 4px; border-top: 1px solid var(--border); }
+    .alarm { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-top: 1px solid var(--border); }
     .alarm:first-child { border-top: 0; }
-    .alarm .at { font: 600 26px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; min-width: 104px; }
+    .alarm .at { font: 300 32px/1 -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; letter-spacing: -.02em; min-width: 124px; }
     .alarm .al { flex: 1; min-width: 0; }
     .alarm.off .at, .alarm.off .al > div:first-child { color: var(--muted); }
-    .t-switch { flex: none; width: 40px; height: 22px; padding: 0; border-radius: 999px; background: var(--active); border: 1px solid var(--border); position: relative; }
-    .t-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted); transition: transform .15s, background .15s; }
-    .t-switch.on { background: var(--accent); border-color: var(--accent); }
-    .t-switch.on::after { transform: translateX(18px); background: #fff; }
-    .alarm-form { display: flex; flex-direction: column; gap: 10px; }
-    .t-time { width: 130px !important; flex: none !important; }
+    .t-switch { flex: none; width: 42px; height: 24px; padding: 0; border-radius: 999px; background: color-mix(in srgb, var(--text) 18%, transparent); border: 0; position: relative; transition: background .2s; }
+    .t-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0004; transition: transform .2s var(--ease); }
+    .t-switch.on { background: #34c759; }
+    .t-switch.on::after { transform: translateX(18px); }
+    .alarm-form { display: flex; flex-direction: column; gap: 12px; }
     .alarm-sec { display: flex; flex-direction: column; gap: 8px; }
     .alarm-sec.t-row { flex-direction: row; }
-    .t-dom { width: 110px; padding: 5px 8px; }
     .t-row.spaced { justify-content: space-between; }
-    .t-card.ringing { border-color: #ff5f57; animation: ringpulse 1s ease-in-out infinite; }
+    #view .t-card.ringing { padding: 18px; border: 1px solid #ff5f57; border-radius: var(--r-md); animation: ringpulse 1s ease-in-out infinite; }
+    #view > .t-card.ringing:first-child { padding-top: 18px; }
     .ring-name { font-size: 22px; font-weight: 600; }
     @keyframes ringpulse { 0%, 100% { box-shadow: 0 0 0 0 #ff5f5766; } 50% { box-shadow: 0 0 0 8px #ff5f5700; } }
-    .t-notes { min-height: 300px; }
-    .todos { display: flex; flex-direction: column; gap: 1px; }
-    .todo { display: flex; align-items: center; gap: 10px; padding: 5px 4px; border-radius: 8px; }
+
+    /* a tab with nothing in it yet says so, and says what to do */
+    .t-empty { display: flex; flex-direction: column; gap: 3px; padding: 4px 0; }
+    .t-empty b { font-size: 14px; font-weight: 600; }
+    .t-empty span { font-size: 13px; line-height: 1.45; color: var(--muted); }
+
+    /* to-dos and notes */
+    .t-notes { min-height: 280px; }
+    .todos { display: flex; flex-direction: column; }
+    .todo { display: flex; align-items: center; gap: 12px; padding: 8px 4px; border-top: 1px solid var(--border); }
+    .todo:first-child { border-top: 0; }
     .todo:hover { background: var(--hover); }
-    .todo input[type=checkbox] { width: 16px; height: 16px; padding: 0; flex: none; accent-color: var(--accent); cursor: pointer; }
-    .todo-text { flex: 1; min-width: 0; overflow-wrap: anywhere; user-select: text; cursor: text; }
+    #view .todo input[type=checkbox] { appearance: none; -webkit-appearance: none; flex: none; width: 20px; height: 20px; margin: 0; padding: 0; border: 1.5px solid var(--line); border-radius: 50%; background: transparent; cursor: pointer; position: relative; transition: background .15s, border-color .15s; }
+    #view .todo input[type=checkbox]:checked { background: var(--text); border-color: var(--text); }
+    #view .todo input[type=checkbox]:checked::after { content: ""; position: absolute; left: 6px; top: 2.5px; width: 5px; height: 9px; border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+    #view .todo input[type=checkbox]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; box-shadow: none; }
+    .todo-text { flex: 1; min-width: 0; overflow-wrap: anywhere; user-select: text; cursor: text; font-size: 14px; }
     .todo.done .todo-text { color: var(--muted); text-decoration: line-through; }
     .todo .icon { opacity: 0; }
-    .todo:hover .icon { opacity: 1; }
+    .todo:hover .icon, .todo .icon:focus-visible { opacity: 1; }
     .todo-edit { flex: 1; padding: 3px 8px; }
-    .md-recent { display: flex; flex-direction: column; gap: 2px; }
-    .md-recent button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; padding: 6px 10px; }
-    .md-recent .d { color: var(--muted); font-size: 11.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* time tracking */
+    .t-bars { display: flex; flex-direction: column; }
+    .t-bar { position: relative; display: flex; align-items: baseline; gap: 12px; padding: 8px 0 9px; border-radius: 0; font-size: 13.5px; overflow: visible; }
+    .t-bar .fill { position: absolute; inset: auto auto 0 0; height: 2px; border-radius: 2px; background: var(--accent); }
+    .t-bar::before { content: ""; position: absolute; inset: auto 0 0 0; height: 2px; border-radius: 2px; background: var(--active); }
+    .t-bar .fill { z-index: 1; }
+    .t-bar.plain { background: none; }
+    .t-bar.plain::before { background: none; border-bottom: 1px solid var(--border); height: 0; }
+    .t-bar .v { color: var(--muted); }
+
+    /* world clock */
+    .z-list { display: flex; flex-direction: column; }
+    .z-row { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-top: 1px solid var(--border); border-radius: 0; }
+    .z-row:first-child { border-top: 0; }
+    .z-main .z-name { font-size: 15px; }
+    .z-sub { font-size: 12.5px; }
+    .z-time { font: 300 28px/1 -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+    .z-slot { flex: none; width: 26px; } /* keeps every clock's time in one column, with or without a remove button */
+    .z-dot { width: 8px; height: 8px; background: var(--line); opacity: 1; }
+    .z-dot.open { background: #34c759; }
+
+    /* Markdown files */
+    .md-recent { display: flex; flex-direction: column; }
+    .md-recent button { display: flex; flex-direction: column; align-items: flex-start; text-align: left; padding: 9px 0; min-height: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: none; }
+    .md-recent button:first-child { border-top: 0; }
+    .md-recent button:hover { background: var(--hover); }
+    .md-recent .d { color: var(--muted); font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Narrow: the page sits beside the sidebar, so it can be a third of the window. The tabs get their own row (no ink: it can't wrap). */
+    @media (max-width: 720px) {
+      .bar { flex-wrap: wrap; gap: 0 12px; padding: 0 16px; }
+      .bar h1 { height: 48px; font-size: 18px; flex: 1; }
+      .bar #close { height: 48px; }
+      .bar #close { order: 2; }
+      .bar .spacer { display: none; }
+      .bar nav { order: 3; flex: 1 0 100%; flex-wrap: wrap; overflow: visible; padding-bottom: 8px; }
+      .bar nav button { padding: 7px 11px; border-radius: 8px; }
+      .bar nav button.on { background: var(--active); }
+      .bar nav .ink { display: none; }
+      .status { padding: 12px 16px 0; }
+      main { padding: 24px 16px 56px; }
+    }
+    @container (max-width: 520px) { #view .t-big { font-size: 40px; } }
   </style>
 </head>
 <body>

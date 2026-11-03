@@ -444,11 +444,24 @@ Tools page <------------- storage event (alcove-tools-v1 changed) -----------+
   writes them itself, because no other code touches them.)
 - **The page shell.** The seven tabs are built once and are a real tab list (`role="tablist"`, roving `tabindex`, arrow keys, Home and
   End, and the number keys 1 to 7 from anywhere unless a field has the focus): the engine's state changes redraw the view at every tick,
-  and rebuilding the tabs each time used to drop the keyboard focus. `setView` is the only way to change tab; it fades the new tab in
-  (`#view.enter`, only on a tab change, never on a redraw). Above the view, `statusStrip` shows what is running (stopwatch, timer,
+  and rebuilding the tabs each time used to drop the keyboard focus. `setView` is the only way to change tab; it makes the new tab rise in
+  (`#view.enter` staggers the sections with `--i`, only on a tab change or the first render, never on a redraw) and draws the rings in
+  (`introRing`: the arc starts empty because `held` makes `update()` write a full offset, then a CSS transition runs to the value; it is
+  switched off after a second so a running timer isn't smoothed frame by frame). Above the view, `statusStrip` shows what is running (stopwatch, timer,
   Pomodoro, Focus mode, task timer) with its live time and a pause or stop button, on every tab except the one that already shows
   it in full (the timers live on Timers, the task on Track). Cards in a row share a height on Timers and Alarms only
   (`#view[data-tab]`); on Notes the to-do list and the notes keep their own heights.
+- **The look** (the same tokens as the start page; the 2026-11-03 redesign, concept "a quiet desk"). All of it is in `tools.html`'s own
+  `<style>` and scoped to `#view`, because the shared `.t-*` rules in `style.css` also style the sidebar's small Tools panel, which must
+  not change. No boxed cards: a section is a hairline above its title (`#view .t-card`; the first one and the instruments have none).
+  Timers is three borderless instruments (the stopwatch is a ring too, with a head dot and 60 ticks, not a skeuomorphic case) in an
+  auto-fit grid up to 920px; every other tab is one 640px column. Numerals are weight 300 with `tabular-nums` (the ring text shrinks to
+  34px past `mm:ss`). The primary button is inverted (`--text` on `--bg`) so it reads on any accent; the accent colours only the arcs,
+  focus rings and Track bars; switches are system green because a gray accent made on and off hard to tell apart. Field edges use
+  `--line` (text at 32%), dividers `--border`. The tab "ink" is one absolutely positioned line inside the tab row that `paintInk` moves
+  (`--x`, `--w`); under 720px the tabs wrap onto their own row and the ink gives way to a pill. `empty(title, text)` is the one shape of
+  an empty tab. Gotcha: a rule like `#view input` out-ranks `.todo input[type=checkbox]`, so the custom checkbox rules start with `#view`;
+  a `.t-chip.on` from `style.css` has white text, so the redesign sets its colour (white on a pale tint failed contrast in light mode).
 - `tools-shared.js` holds the state shape (`loadState`), formatters, `alarmDue`, the Amazon/link helpers, and is
   loaded by both sides.
 - **Timers use timestamps** (`end`, `start`+`acc`), never counters, so they survive reloads and background
@@ -583,7 +596,12 @@ What a new tab shows. Setting `newTab` is `start` (default), `engine` (the searc
 `custom`; `loadConfig` moves a saved `engine` to `start` once (`settingsVersion` 3), so an explicit choice made
 afterwards sticks. `app.js` builds the URL with `newTabUrl()`.
 
-It is a normal tab on a `file://` page, self-contained like the Markdown editor, with four parts:
+It is a normal tab on a `file://` page, self-contained like the Markdown editor, with four parts. The look (redesigned 2026-11-03, same
+tokens as the Tools page): one 760px column, hairlines under section titles instead of boxes, the day's five figures as large light
+numerals (a zero is dimmed, and when the whole day is empty one line says so), the search bar and the Private switch at 56px with the
+same radius, tool tiles four across (Timers takes two because it holds the quick start). The page rises in once, section by section.
+Container queries (not media queries, because the page sits beside the floating sidebar): under 620px the search engine label goes and
+the figures become three columns; under 460px the switch shows only its icon (its `aria-label` stays) and the figures become two.
 
 - **Search bar** with the address bar's rules (`normalize`: scheme, domain, `localhost`, else the chosen engine).
   Typing anywhere focuses it.

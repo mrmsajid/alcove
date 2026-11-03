@@ -44,6 +44,7 @@ const el = (tag, props = {}, ...kids) => {
 const btn = (label, fn, kind = "") => el("button", { class: `t-btn ${kind}`.trim(), on: { click: fn } }, label);
 const card = (title, ...kids) => el("div", { class: "t-card" }, el("div", { class: "t-title" }, title), ...kids);
 const note = text => el("div", { class: "t-note" }, text);
+const empty = (title, text) => el("div", { class: "t-empty" }, el("b", {}, title), el("span", {}, text));
 
 let fast = []; // numbers that refresh every frame (the stopwatch's milliseconds)
 let live = []; // numbers that refresh every second without rebuilding the page
@@ -74,33 +75,33 @@ const polar = (cx, cy, r, deg) => [cx + Math.sin(deg * Math.PI / 180) * r, cy - 
 
 function stopwatchCard() {
   const running = !!st.sw.start, has = swMs(st) > 0, laps = st.sw.laps || [];
-  // the face: a case with a crown and a side button, 60 ticks, a small 30-minute dial, a sweeping red hand
-  const dial = svg("svg", { viewBox: "0 0 240 270", class: "dial" });
-  dial.append(
-    svg("rect", { x: 110, y: 2, width: 20, height: 14, rx: 3, class: "dial-btn" }),
-    svg("rect", { x: 114, y: 14, width: 12, height: 12, class: "dial-btn" }),
-    svg("rect", { x: 186, y: 40, width: 14, height: 22, rx: 3, class: "dial-btn", transform: "rotate(42 193 51)" }),
-    svg("circle", { cx: 120, cy: 150, r: 112, class: "dial-case" }),
-    svg("circle", { cx: 120, cy: 150, r: 102, class: "dial-face" }));
+  // a ring that fills once a minute, a head that sweeps round it, and a quiet scale of 60 ticks outside it
+  const C = 2 * Math.PI * 94;
+  const prog = svg("circle", { cx: 110, cy: 110, r: 94, class: "ring-prog", transform: "rotate(-90 110 110)", "stroke-dasharray": C });
+  const head = svg("circle", { r: 4.5, class: "sw-head" });
+  const time = svg("text", { x: 110, y: 121, class: "ring-time" }), sub = svg("text", { x: 110, y: 148, class: "ring-sub" });
+  const box = svg("svg", { viewBox: "0 0 220 220", class: "ring sw" }, svg("circle", { cx: 110, cy: 110, r: 94, class: "ring-track" }));
   for (let i = 0; i < 60; i++) {
-    const major = i % 5 === 0, [x1, y1] = polar(120, 150, 98, i * 6), [x2, y2] = polar(120, 150, major ? 86 : 92, i * 6);
-    dial.append(svg("line", { x1, y1, x2, y2, class: major ? "tick major" : "tick" }));
-    if (major) { const [tx, ty] = polar(120, 150, 73, i * 6); dial.append(svg("text", { x: tx, y: ty + 3.5, class: "dial-num" }, String(i || 60))); }
+    const major = i % 5 === 0, [x1, y1] = polar(110, 110, 102, i * 6), [x2, y2] = polar(110, 110, major ? 107 : 104.5, i * 6);
+    box.append(svg("line", { x1, y1, x2, y2, class: major ? "sw-tick major" : "sw-tick" }));
   }
-  dial.append(svg("circle", { cx: 120, cy: 112, r: 22, class: "sub-ring" }));
-  for (let i = 0; i < 30; i++) { const [x1, y1] = polar(120, 112, 21, i * 12), [x2, y2] = polar(120, 112, i % 5 === 0 ? 16 : 18.5, i * 12); dial.append(svg("line", { x1, y1, x2, y2, class: "tick" })); }
-  const read = svg("text", { x: 120, y: 196, class: "dial-read" });
-  const minHand = svg("g", {}, svg("line", { x1: 120, y1: 112, x2: 120, y2: 96, class: "hand-min" }));
-  const secHand = svg("g", {}, svg("line", { x1: 120, y1: 166, x2: 120, y2: 60, class: "hand-sec" }), svg("circle", { cx: 120, cy: 150, r: 5.5, class: "hand-hub" }), svg("circle", { cx: 120, cy: 150, r: 2, class: "dial-face" }));
-  dial.append(read, minHand, secHand, svg("circle", { cx: 120, cy: 112, r: 2, class: "hand-hub" }));
+  box.append(prog, head, time, sub);
+  if (entering) introRing(box);
+  let size = "";
   const update = () => {
-    const ms = swMs(st);
-    secHand.setAttribute("transform", `rotate(${(ms % 60000) / 1000 * 6} 120 150)`);
-    minHand.setAttribute("transform", `rotate(${(ms / 60000 % 30) * 12} 120 112)`);
-    read.textContent = clockMs(ms);
+    const ms = swMs(st), full = clockMs(ms), dot = full.lastIndexOf("."), main = full.slice(0, dot);
+    const [x, y] = polar(110, 110, 94, (ms % 60000) / 1000 * 6);
+    prog.setAttribute("stroke-dashoffset", box.classList.contains("held") ? C : C * (1 - (ms % 60000) / 60000));
+    head.setAttribute("cx", x); head.setAttribute("cy", y);
+    box.classList.toggle("idle", ms === 0);
+    time.textContent = main;
+    sub.textContent = full.slice(dot);
+    const fit = main.length > 5 ? "34px" : "";
+    if (fit !== size) { size = fit; time.style.fontSize = fit; }
   };
   update();
   fast.push(update);
+  const dial = box;
 
   const splits = laps.map((t, i) => t - (i ? laps[i - 1] : 0));
   const best = splits.length > 2 ? Math.min(...splits) : -1, worst = splits.length > 2 ? Math.max(...splits) : -1;
@@ -113,15 +114,27 @@ function stopwatchCard() {
         el("span", {}, `Lap ${i + 1}`), el("span", {}, "+" + clockMs(splits[i])), el("span", { class: "d" }, clockMs(t))))) : null);
 }
 
+// While a tab opens its rings draw in to their value (a CSS transition on the arc); it is switched off again so a running
+// timer isn't smoothed frame by frame afterwards.
+function introRing(box) {
+  box.classList.add("intro", "held"); // held: the arc starts empty, then takes its value a moment later, which the transition animates
+  setTimeout(() => box.classList.remove("held"), 80);
+  setTimeout(() => box.classList.remove("intro"), 1000);
+}
+
 // A ring that empties as time runs out; the centre shows the time left
 function ring(cls, fracFn, timeFn, subFn) {
   const C = 2 * Math.PI * 94;
   const prog = svg("circle", { cx: 110, cy: 110, r: 94, class: "ring-prog", transform: "rotate(-90 110 110)", "stroke-dasharray": C });
   const time = svg("text", { x: 110, y: 118, class: "ring-time" }), sub = svg("text", { x: 110, y: 146, class: "ring-sub" });
   const box = svg("svg", { viewBox: "0 0 220 220", class: "ring " + cls }, svg("circle", { cx: 110, cy: 110, r: 94, class: "ring-track" }), prog, time, sub);
+  if (entering) introRing(box);
+  let size = "";
   const update = () => {
-    prog.setAttribute("stroke-dashoffset", C * (1 - Math.min(1, Math.max(0, fracFn()))));
-    time.textContent = timeFn();
+    prog.setAttribute("stroke-dashoffset", box.classList.contains("held") ? C : C * (1 - Math.min(1, Math.max(0, fracFn()))));
+    const t = timeFn(), fit = t.length > 5 ? "34px" : "";
+    time.textContent = t;
+    if (fit !== size) { size = fit; time.style.fontSize = fit; }
     sub.textContent = subFn();
   };
   update();
@@ -226,7 +239,7 @@ function alarmsView() {
     el("div", { class: "at" }, fmtTime(a.time)),
     el("div", { class: "al" }, el("div", {}, a.label || (a.snooze ? "Snoozed" : "Alarm")), el("div", { class: "t-sub" }, repeatText(a))),
     el("button", { class: "t-switch" + (a.on ? " on" : ""), role: "switch", "aria-checked": a.on ? "true" : "false", "aria-label": `Alarm ${a.time}${a.label ? " " + a.label : ""}`, title: a.on ? "Turn off" : "Turn on", on: { click: () => op("alarm-toggle", a.id) } }),
-    el("button", { class: "icon sm", title: "Delete", on: { click: () => op("alarm-delete", a.id) } }, "×")))) : note("No alarms yet.");
+    el("button", { class: "icon sm", title: "Delete", "aria-label": "Delete alarm", on: { click: () => op("alarm-delete", a.id) } }, "×")))) : empty("No alarms yet", "Set one below. It rings with a chime and a notification, and this page opens.");
 
   // the new-alarm form: pick how it repeats, then the days that go with that
   const nowD = new Date();
@@ -276,7 +289,7 @@ function alarmsView() {
     card("Alarms",
       next ? liveText("t-sub", () => `Next: ${next[1].toDateString() === new Date().toDateString() ? "today" : next[1].toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })} ${fmtTime(next[0].time)} · in ${untilText(next[1] - Date.now())}`) : alarms.length ? el("div", { class: "t-sub" }, "All alarms are off") : null,
       list,
-      note("Alarms ring while Alcove is open: a chime, a notification, and this page opens.")),
+      alarms.length ? note("Alarms ring while Alcove is open: a chime, a notification, and this page opens.") : null),
     card("New alarm", form),
     card("Sound",
       el("div", { class: "t-row spaced" }, el("span", {}, "Chime when a timer, Pomodoro or alarm ends"), el("button", { class: "t-switch" + (st.sound ? " on" : ""), role: "switch", "aria-checked": st.sound ? "true" : "false", "aria-label": "Chime", title: st.sound ? "Turn off" : "Turn on", on: { click: () => op("sound-toggle") } })),
@@ -451,7 +464,7 @@ function todoCard() {
   };
   const open = items.filter(x => !x.done), done = items.filter(x => x.done);
   return card(`To-do · ${ctx.space.name || "this space"}`, form,
-    items.length ? el("div", { class: "todos" }, ...open.map(row), ...done.map(row)) : note("Nothing on the list. Add what you need to do in this space."),
+    items.length ? el("div", { class: "todos" }, ...open.map(row), ...done.map(row)) : empty("Nothing to do here", "Add what you need to do in this space."),
     items.length ? el("div", { class: "t-btns" },
       el("span", { class: "t-sub", style: "flex:1;align-self:center" }, `${open.length} open · ${done.length} done`),
       done.length ? btn("Clear done", () => {
@@ -530,8 +543,8 @@ const everyLabel = ms => (ms < 60000 ? `${ms / 1000}s` : `${ms / 60000} min`);
 function pageView() {
   const tab = ctx.tab;
   if (!tab || !tab.opened || !/^https?:/.test(tab.url)) {
-    return [card("This page", note("Open a web page, then come back here for its tools: auto-refresh, color picker, images, clean links and Amazon helpers."),
-      el("div", { class: "t-sub" }, "On an empty page you can still work with Markdown files"),
+    return [card("This page", empty("No web page in front", "Open a site, then come back here for its tools: auto-refresh, color picker, images, clean links and Amazon helpers."),
+      el("div", { class: "t-sub" }, "Markdown files work without a page"),
       el("div", { class: "t-btns wrap" }, btn("Open Markdown file…", () => openMarkdown("open")), btn("New Markdown document", () => openMarkdown("new"))))];
   }
   const cur = (ctx.refreshers.find(r => r.id === tab.id) || {}).ms || 0;
@@ -573,7 +586,7 @@ function pageView() {
 // The tabs are built once (a redraw happens at every tick of the engine's state, and rebuilding them would drop the keyboard
 // focus). They are a real tab list: arrow keys, Home and End move between them, and the number keys 1 to 7 jump from anywhere.
 const tabEls = new Map();
-let entering = false; // the next render is a tab change, so the new tab fades in; a redraw of the same tab never does
+let entering = true; // the next render is a tab change (or the first one), so the new tab rises in and its rings draw; a redraw of the same tab never does
 function setView(id, { focus = false } = {}) {
   if (id === view || !TABS.some(t => t[0] === id)) return;
   view = id;
@@ -581,6 +594,7 @@ function setView(id, { focus = false } = {}) {
   entering = true;
   render();
   document.querySelector("main").scrollTop = 0;
+  tabEls.get(id)?.scrollIntoView({ block: "nearest", inline: "nearest" }); // a narrow window can scroll the tab row
   if (focus) tabEls.get(id)?.focus();
 }
 TABS.forEach(([id, label], i) => {
@@ -588,6 +602,16 @@ TABS.forEach(([id, label], i) => {
   tabEls.set(id, b);
   $("nav").append(b);
 });
+// The ink: one line under the active tab that slides to the next one (it sits inside the tab row, so it scrolls with it).
+$("nav").append(el("i", { class: "ink", "aria-hidden": "true" }));
+function paintInk() {
+  const b = tabEls.get(view);
+  if (!b) return;
+  $("nav").style.setProperty("--x", `${b.offsetLeft}px`);
+  $("nav").style.setProperty("--w", `${b.offsetWidth}px`);
+}
+new ResizeObserver(paintInk).observe($("nav"));
+document.fonts?.ready.then(paintInk);
 $("nav").addEventListener("keydown", e => {
   const i = TABS.findIndex(t => t[0] === view);
   const to = e.key === "ArrowRight" ? (i + 1) % TABS.length : e.key === "ArrowLeft" ? (i + TABS.length - 1) % TABS.length : e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : -1;
@@ -604,6 +628,7 @@ function paintNav() {
   }
   $("view").setAttribute("aria-labelledby", `tab-${view}`);
   $("view").dataset.tab = view;
+  paintInk();
 }
 
 // What is running, shown above every tab except the one that already shows it in full (the timers live on Timers, the task on
@@ -639,6 +664,7 @@ function render() {
   const build = { timers: timersView, alarms: alarmsView, track: trackView, clocks: clocksView, notes: notesView, markdown: markdownView, page: pageView }[view];
   const v = $("view");
   v.replaceChildren(...[st.ringing ? ringingCard() : null, ...build()].filter(Boolean));
+  [...v.children].forEach((c, i) => c.style.setProperty("--i", i)); // the stagger of the rise-in
   statusStrip();
   if (entering) { entering = false; v.classList.remove("enter"); void v.offsetWidth; v.classList.add("enter"); }
   if (refocusTodo) { refocusTodo = false; document.querySelector(".todo-input")?.focus(); }
@@ -674,3 +700,4 @@ window.addEventListener("focus", () => { st = loadState(); ctx = read(CTX_KEY, c
 invoke("get_app_settings").then(s => { if (s && s.accent) setAccent(s.accent); }).catch(() => {});
 listen("settings-changed", ({ payload }) => { if (payload && payload.accent) setAccent(payload.accent); });
 render();
+requestAnimationFrame(() => requestAnimationFrame(() => $("nav").classList.add("settled"))); // the ink slides between tabs, but doesn't fly in from the left at the start
