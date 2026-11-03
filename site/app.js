@@ -1,5 +1,7 @@
-// Alcove's web page. Plain JavaScript, no libraries. Everything here is progressive: without it the page is a normal static page
-// whose download buttons point at the latest-release page. The only request the page makes is to GitHub, to find the latest release.
+// Alcove's web page. Plain JavaScript, no libraries.
+// The page is complete without this script: static framed window, every section readable, download buttons pointing at the
+// latest-release page. The script adds the interactions, and its only network request is to GitHub (api.github.com), to find
+// the latest release. Styles are only ever set through custom properties (the page's Content-Security-Policy forbids inline styles).
 (() => {
   "use strict";
   const $ = (s, r = document) => r.querySelector(s);
@@ -7,15 +9,20 @@
   const html = document.documentElement;
   html.classList.add("js");
   const raf = requestAnimationFrame;
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)");
-  const finePointer = matchMedia("(pointer: fine)");
+  const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const range = (v, a, b) => clamp01((v - a) / (b - a));
+  const smooth = t => t * t * (3 - 2 * t);
+  const reduceMQ = matchMedia("(prefers-reduced-motion: reduce)");
+  const fineMQ = matchMedia("(hover: hover) and (pointer: fine)");
   const nav = navigator, uaData = nav.userAgentData;
   const platform = (uaData && uaData.platform) || nav.platform || "";
   const isMac = /Mac/i.test(platform);
   const MOD = isMac ? "⌘" : "Ctrl+", SHIFT = isMac ? "⇧" : "Shift+", ALT = isMac ? "⌥" : "Alt+";
   const keyLabel = k => (k ? k.replace("Mod+", MOD).replace("Shift+", SHIFT).replace("Alt+", ALT) : "");
+  const behavior = () => (reduceMQ.matches ? "auto" : "smooth");
+  const go = sel => { const el = $(sel); if (el) el.scrollIntoView({ behavior: behavior(), block: "start" }); };
 
-  // ---- toast ----
+  // ---- toast and clipboard ----
   const toastEl = $("#toast");
   let toastTimer = 0;
   function toast(msg) {
@@ -24,81 +31,197 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastEl.classList.remove("on"), 2600);
   }
-  async function copy(text) {
-    try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
-  }
+  async function copy(text) { try { await navigator.clipboard.writeText(text); return true; } catch { return false; } }
+  const setSwap = (el, text) => { if (!el) return; el.dataset.t = text; const i = $("i", el); if (i) i.textContent = text; };
 
   // ---- theme: follows the system until the visitor picks one (kept in localStorage, which may be unavailable) ----
-  const THEME_KEY = "alcove-site-theme", themeBtn = $("#theme"), dark = matchMedia("(prefers-color-scheme: dark)");
-  const stored = { get() { try { return localStorage.getItem(THEME_KEY); } catch { return null; } }, set(v) { try { localStorage.setItem(THEME_KEY, v); } catch {} } };
-  let theme = stored.get();
+  const THEME_KEY = "alcove-site-theme", themeBtn = $("#theme"), themeState = $("#theme-state"), systemDark = matchMedia("(prefers-color-scheme: dark)");
+  const store = { get() { try { return localStorage.getItem(THEME_KEY); } catch { return null; } }, set(v) { try { localStorage.setItem(THEME_KEY, v); } catch {} } };
+  let theme = store.get();
   if (theme !== "light" && theme !== "dark") theme = null;
-  const isDark = () => (theme ? theme === "dark" : dark.matches);
+  const isDark = () => (theme ? theme === "dark" : systemDark.matches);
   function applyTheme() {
     if (theme) html.dataset.theme = theme; else delete html.dataset.theme;
-    // The screenshots come in a light and a dark version (<picture>): a chosen theme overrides the system query.
+    // Every screenshot has a light and a dark version (<picture>): a chosen theme overrides the system query.
     for (const s of $$("picture > source")) s.media = theme ? (theme === "dark" ? "all" : "not all") : "(prefers-color-scheme: dark)";
     themeBtn.setAttribute("aria-pressed", String(isDark()));
+    themeState.textContent = isDark() ? "on" : "off";
   }
-  themeBtn.addEventListener("click", () => { theme = isDark() ? "light" : "dark"; stored.set(theme); applyTheme(); });
-  if (dark.addEventListener) dark.addEventListener("change", applyTheme);
+  const toggleTheme = () => { theme = isDark() ? "light" : "dark"; store.set(theme); applyTheme(); };
+  themeBtn.addEventListener("click", toggleTheme);
+  if (systemDark.addEventListener) systemDark.addEventListener("change", applyTheme);
   applyTheme();
 
-  // ---- scroll progress, header shadow, and the section being read ----
-  const progress = $(".progress i");
-  const links = $$(".links a");
-  const spy = links.map(a => $(a.getAttribute("href"))).filter(Boolean);
-  let ticking = false;
-  function onScroll() {
-    if (ticking) return;
-    ticking = true;
-    raf(() => {
-      ticking = false;
-      const h = html.scrollHeight - innerHeight;
-      progress.style.setProperty("--p", h > 0 ? (scrollY / h).toFixed(4) : "0");
-      html.classList.toggle("scrolled", scrollY > 8);
-      const y = scrollY + innerHeight * 0.35;
-      let cur = null;
-      for (const s of spy) if (s.offsetTop <= y) cur = s;
-      for (const a of links) a.classList.toggle("on", !!cur && a.getAttribute("href") === "#" + cur.id);
-    });
-  }
-  addEventListener("scroll", onScroll, { passive: true });
-  addEventListener("resize", onScroll, { passive: true });
-  onScroll();
-
-  // ---- reveal on scroll, count-ups ----
-  function countUp(el) {
-    const to = Number(el.dataset.count) || 0;
-    if (reduce.matches || to === 0) { el.textContent = String(to); return; }
-    const t0 = performance.now(), D = 1300;
-    const step = now => {
-      const p = Math.min(1, (now - t0) / D);
-      el.textContent = String(Math.round(to * (1 - Math.pow(1 - p, 3))));
-      if (p < 1) raf(step);
-    };
-    el.textContent = "0";
-    raf(step);
-  }
-  const seen = "IntersectionObserver" in window ? new IntersectionObserver(entries => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      e.target.classList.add("in");
-      if (e.target.matches("[data-count]")) countUp(e.target);
-      $$("[data-count]", e.target).forEach(countUp);
-      seen.unobserve(e.target);
+  // ---- the site menu: an alcove that opens from the left edge (fine pointers) or from the Menu button (everywhere) ----
+  const menu = $("#menu"), menuBtn = $("#menu-btn"), menuClose = $("#menu-close"), edge = $("#edge"), scrim = $("#scrim");
+  const behind = [$(".bar"), $("main"), $(".foot")];
+  let menuOpen = false, menuBy = "", leaveTimer = 0, scrimTimer = 0;
+  function openMenu(by) {
+    if (menuOpen) return;
+    menuOpen = true; menuBy = by;
+    menu.inert = false;
+    menu.classList.add("open");
+    menuBtn.setAttribute("aria-expanded", "true");
+    if (by === "button") { // a real dialog: dim the page, keep the keyboard inside, lock scrolling
+      clearTimeout(scrimTimer);
+      scrim.hidden = false;
+      raf(() => scrim.classList.add("on"));
+      for (const el of behind) el.inert = true;
+      html.style.setProperty("overflow", "hidden");
+      void menu.offsetWidth; // the menu is visible now, so it can take focus
+      const first = $("nav a", menu);
+      if (first) first.focus({ preventScroll: true });
     }
-  }, { threshold: 0.14, rootMargin: "0px 0px -6% 0px" }) : null;
-  for (const el of $$(".reveal, .fgrid, [data-count]")) { if (seen) seen.observe(el); else el.classList.add("in"); }
+  }
+  function closeMenu(returnFocus) {
+    if (!menuOpen) return;
+    const by = menuBy;
+    menuOpen = false; menuBy = "";
+    clearTimeout(leaveTimer);
+    menu.classList.remove("open");
+    menu.inert = true;
+    menuBtn.setAttribute("aria-expanded", "false");
+    scrim.classList.remove("on");
+    scrimTimer = setTimeout(() => { scrim.hidden = true; }, 420);
+    for (const el of behind) el.inert = false;
+    html.style.removeProperty("overflow");
+    if (by === "button" && returnFocus) menuBtn.focus({ preventScroll: true });
+  }
+  menuBtn.addEventListener("click", () => (menuOpen ? closeMenu(true) : openMenu("button")));
+  menuClose.addEventListener("click", () => closeMenu(true));
+  scrim.addEventListener("click", () => closeMenu(true));
+  for (const a of $$("nav a", menu)) a.addEventListener("click", () => closeMenu(false));
+  edge.addEventListener("pointerenter", () => { if (fineMQ.matches) openMenu("hover"); });
+  menu.addEventListener("pointerenter", () => clearTimeout(leaveTimer));
+  menu.addEventListener("pointerleave", () => { if (menuBy === "hover") { clearTimeout(leaveTimer); leaveTimer = setTimeout(() => closeMenu(false), 260); } });
+  menu.addEventListener("keydown", e => { // a simple focus trap while the menu is a dialog
+    if (e.key !== "Tab" || menuBy !== "button") return;
+    const items = $$("a[href], button:not([disabled])", menu);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
 
-  // ---- a soft spotlight that follows the pointer on cards ----
-  addEventListener("pointermove", e => {
-    const t = e.target.closest && e.target.closest(".spot, .f");
-    if (!t) return;
-    const r = t.getBoundingClientRect();
-    t.style.setProperty("--mx", (e.clientX - r.left).toFixed(0) + "px");
-    t.style.setProperty("--my", (e.clientY - r.top).toFixed(0) + "px");
-  }, { passive: true });
+  // ---- scroll: ONE passive listener and ONE rAF drive the header, the section marker and the signature scene ----
+  const bar = $(".bar");
+  const spyLinks = $$("nav a", menu).map(a => ({ a, el: $(a.getAttribute("href")), top: 0 })).filter(s => s.el);
+  const scene = $("#window"), pin = $(".pin", scene), win = $("#win");
+  const edgeZone = $("#edge-zone"), tabsBtn = $("#tabs-btn"), tabsLabel = $("#tabs-label"), hint = $("#hint");
+  const geo = { sceneTop: 0, range: 1, barH: 56, sEnd: 1 }; // layout is read here, on resize only, never while scrolling
+  let scrub = false, sceneOn = false, sy = scrollY, vh = innerHeight;
+  let cur = 0, ready = false, sbCur = 0, override = null, overrideAt = 0, lastHint = "", lastLabel = "";
+  const painted = {};
+  const setVar = (name, v) => { if (painted[name] !== v) { painted[name] = v; pin.style.setProperty(name, v); } };
+
+  function measure() {
+    vh = innerHeight;
+    geo.barH = bar.offsetHeight;
+    for (const s of spyLinks) s.top = s.el.getBoundingClientRect().top + scrollY;
+    if (!scrub) return;
+    const pinH = pin.offsetHeight, pinW = pin.clientWidth, ww = win.offsetWidth, wh = win.offsetHeight;
+    geo.sceneTop = scene.getBoundingClientRect().top + scrollY;
+    geo.range = Math.max(1, scene.offsetHeight - pinH);
+    const availH = vh - geo.barH, fit = pinW / ww, cover = Math.max(fit, availH / wh);
+    geo.sEnd = Math.min(pinW / availH > 1.15 ? cover : fit, 2.6); // landscape: fill the screen. Portrait: edge to edge, no blurry crop
+    if (geo.sEnd < 1.02) geo.sEnd = 1.02;
+  }
+
+  function paintScene(p) {
+    const e = smooth(range(p, 0, 0.55));
+    const out = smooth(range(p, 0.3, 0.8));
+    const cp = smooth(range(p, 0.7, 0.9));
+    const hovered = override !== null && Math.abs(p - overrideAt) < 0.2;
+    const sbTarget = hovered ? override : out;
+    sbCur += (sbTarget - sbCur) * 0.22;
+    if (Math.abs(sbTarget - sbCur) < 0.002) sbCur = sbTarget;
+    setVar("--s", (1 + (geo.sEnd - 1) * e).toFixed(4));
+    setVar("--rad", (20 * (1 - e)).toFixed(2) + "px");
+    setVar("--sb", sbCur.toFixed(3));
+    setVar("--xf", smooth(range(sbCur, 0.42, 0.62)).toFixed(3)); // the page re-centres in a short swap once the sidebar is mostly gone, so the two layouts never sit on top of each other for long
+    setVar("--cp", cp.toFixed(3));
+    setVar("--p", p.toFixed(4));
+    const shown = sbCur < 0.5;
+    const label = shown ? "Hide tabs" : "Show tabs";
+    if (label !== lastLabel) { lastLabel = label; tabsLabel.textContent = label; tabsBtn.setAttribute("aria-pressed", String(shown)); }
+    const h = p < 0.9 ? "Scroll to open the window." : fineMQ.matches ? "Now move to the left edge for the tabs." : "Tap Show tabs to bring them back.";
+    if (h !== lastHint) { lastHint = h; hint.textContent = h; }
+    return sbCur !== sbTarget;
+  }
+
+  let rafId = 0, lastTs = 0, scrolled = false, spyIdx = -1;
+  function tick(ts) {
+    rafId = 0;
+    const dt = lastTs ? Math.min(0.05, (ts - lastTs) / 1000) : 0.016;
+    lastTs = ts;
+    let more = false;
+    const isScrolled = sy > 8;
+    if (isScrolled !== scrolled) { scrolled = isScrolled; html.classList.toggle("scrolled", scrolled); }
+    // which section is being read
+    const y = sy + vh * 0.4;
+    let idx = -1;
+    for (let i = 0; i < spyLinks.length; i++) if (spyLinks[i].top <= y) idx = i;
+    if (idx !== spyIdx) { spyIdx = idx; spyLinks.forEach((s, i) => { if (i === idx) s.a.setAttribute("aria-current", "true"); else s.a.removeAttribute("aria-current"); }); }
+    // the signature scene: one number, 0 to 1, drives everything
+    if (scrub && sceneOn) {
+      const target = clamp01((sy - geo.sceneTop + geo.barH) / geo.range);
+      if (!ready) { cur = target; ready = true; } // landing mid-scene (anchor, refresh): go straight to the right state
+      else { cur += (target - cur) * (1 - Math.pow(0.0006, dt)); if (Math.abs(target - cur) < 0.0008) cur = target; else more = true; }
+      if (paintScene(cur)) more = true;
+    }
+    if (more) rafId = raf(tick); else lastTs = 0;
+  }
+  const schedule = () => { if (!rafId) rafId = raf(tick); };
+  addEventListener("scroll", () => { sy = scrollY; schedule(); }, { passive: true });
+  let resizeTimer = 0;
+  addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { setupScene(); }, 120); });
+
+  // the scene is pinned only for visitors who have not asked for less motion, and on screens tall enough to hold it
+  function setupScene() {
+    const want = !reduceMQ.matches && innerHeight >= 460 && "IntersectionObserver" in window;
+    if (want !== scrub) {
+      scrub = want;
+      html.classList.toggle("scrub", scrub);
+      ready = false; sbCur = 0; override = null; lastLabel = ""; lastHint = "";
+      for (const k of Object.keys(painted)) { delete painted[k]; pin.style.removeProperty(k); }
+      win.removeAttribute("data-tabs");
+      if (!scrub) { win.style.removeProperty("will-change"); tabsLabel.textContent = "Hide tabs"; tabsBtn.setAttribute("aria-pressed", "true"); }
+    }
+    measure();
+    sy = scrollY;
+    schedule();
+  }
+  if ("IntersectionObserver" in window) new IntersectionObserver(es => {
+    sceneOn = es[0].isIntersecting;
+    win.style.setProperty("will-change", sceneOn && scrub ? "transform" : "auto"); // a compositor layer only while the scene is on screen
+    if (sceneOn) schedule();
+  }, { rootMargin: "25% 0px" }).observe(scene);
+  if (reduceMQ.addEventListener) reduceMQ.addEventListener("change", setupScene);
+
+  // after the scene: the pointer at the window's left edge brings the sidebar back, as in the app. A button does the same for everyone else.
+  if (edgeZone) {
+    edgeZone.addEventListener("pointerenter", () => { if (scrub && fineMQ.matches && cur > 0.6) { override = 0; overrideAt = cur; schedule(); } });
+    edgeZone.addEventListener("pointerleave", () => { if (override === 0) { override = null; schedule(); } });
+  }
+  tabsBtn.addEventListener("click", () => {
+    if (scrub) { // flip what is on screen now, until the visitor scrolls on
+      override = sbCur < 0.5 ? 1 : 0; overrideAt = cur; schedule();
+    } else {
+      const off = win.dataset.tabs !== "off";
+      if (off) win.dataset.tabs = "off"; else win.removeAttribute("data-tabs");
+      tabsLabel.textContent = off ? "Show tabs" : "Hide tabs";
+      tabsBtn.setAttribute("aria-pressed", String(!off));
+    }
+  });
+  setupScene();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { measure(); schedule(); });
+  addEventListener("load", () => { measure(); schedule(); });
+
+  // ---- reveal: section heads, figures and lists only, once ----
+  const io = "IntersectionObserver" in window ? new IntersectionObserver(es => {
+    for (const e of es) if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+  }, { threshold: 0.12, rootMargin: "0px 0px -6% 0px" }) : null;
+  for (const el of $$(".rv")) { if (io) io.observe(el); else el.classList.add("in"); }
 
   // ---- the little tools Alcove has: calculator, unit converter, site shortcuts (the same logic as the command bar in the app) ----
   function calculate(expr) { // a tiny expression parser (no eval): + - * / % ^ and brackets
@@ -150,175 +273,30 @@
   }
   const BANGS = { g: "Google", ddg: "DuckDuckGo", yt: "YouTube", gh: "GitHub", w: "Wikipedia", maps: "Google Maps", amz: "Amazon", r: "Reddit", x: "X", img: "Google Images", tr: "Google Translate" };
 
-  // ---- hero: sidebar toggle, pointer tilt, live chips ----
-  const win = $("#win"), seg = $$(".seg button");
-  let touchedSidebar = false;
-  function setSidebar(v, byUser) {
-    if (byUser) touchedSidebar = true;
-    win.dataset.sidebar = v;
-    for (const b of seg) { const on = b.dataset.side === v; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on)); }
-  }
-  for (const b of seg) b.addEventListener("click", () => setSidebar(b.dataset.side, true));
-  if (!reduce.matches) setTimeout(() => { // a one-time hint that the sidebar is a toggle: hide it, then bring it back
-    if (touchedSidebar) return;
-    setSidebar("off");
-    setTimeout(() => { if (!touchedSidebar) setSidebar("on"); }, 2300);
-  }, 3800);
-
-  const stage = $("#stage"), tilt = $("#tilt");
-  if (finePointer.matches && !reduce.matches) {
-    let pending = 0;
-    stage.addEventListener("pointermove", e => {
-      if (pending) return;
-      const r = stage.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
-      pending = raf(() => {
-        pending = 0;
-        tilt.style.setProperty("--ry", (x * 7).toFixed(2) + "deg");
-        tilt.style.setProperty("--rx", (-y * 5).toFixed(2) + "deg");
-        stage.style.setProperty("--px", x.toFixed(3));
-        stage.style.setProperty("--py", y.toFixed(3));
-      });
-    });
-    stage.addEventListener("pointerleave", () => {
-      tilt.style.setProperty("--ry", "0deg"); tilt.style.setProperty("--rx", "0deg");
-      stage.style.setProperty("--px", "0"); stage.style.setProperty("--py", "0");
-    });
-  }
-
-  const modK = isMac ? "⌘ K" : "Ctrl K";
-  $$(".chip .mod, #mod-k").forEach(k => { k.textContent = modK; });
-  const chipRing = $("#chip-ring"), chipTime = $("#chip-time"), CHIP_C = 2 * Math.PI * 18;
-  chipRing.style.setProperty("stroke-dasharray", CHIP_C.toFixed(2));
-  let chipLeft = 24 * 60 + 58;
-  function tickChip() {
-    chipLeft = chipLeft <= 0 ? 25 * 60 : chipLeft - 1;
-    chipTime.textContent = Math.floor(chipLeft / 60) + ":" + String(chipLeft % 60).padStart(2, "0");
-    chipRing.style.setProperty("stroke-dashoffset", (CHIP_C * (1 - chipLeft / 1500)).toFixed(2));
-  }
-  tickChip();
-  if (!reduce.matches) setInterval(() => { if (!document.hidden) tickChip(); }, 1000);
-
-  const samples = ["12 × (3 + 4)", "5 mi to km", "72 f to c", "yt lofi", "2 gb to mb", "(18 + 6) / 4"];
-  const chipQ = $("#chip-q"), chipA = $("#chip-a");
-  const answerFor = q => {
-    const c = calculate(q); if (c !== null) return "= " + fmt(c);
-    const u = convertUnits(q); if (u) return u.text;
-    const b = /^(\S+)\s+(.+)$/.exec(q); if (b && BANGS[b[1]]) return `Search ${BANGS[b[1]]} for “${b[2]}”`;
-    return "";
-  };
-  let sample = 0;
-  function nextSample() {
-    const q = samples[sample++ % samples.length];
-    chipQ.classList.add("swap"); chipA.classList.add("swap");
-    setTimeout(() => { chipQ.textContent = q; chipA.textContent = answerFor(q); chipQ.classList.remove("swap"); chipA.classList.remove("swap"); }, 260);
-  }
-  if (!reduce.matches) setInterval(() => { if (!document.hidden) nextSample(); }, 3400);
-
-  // ---- the tour: five screens, with an optional auto-advance ----
-  const tabs = $$(".tab"), panels = $$(".panel"), tour = $(".tour");
-  let cur = 0, auto = !reduce.matches, paused = false, visible = false, elapsed = 0, last = 0, loopId = 0;
-  const DURATION = 7000;
-  function show(i, byUser) {
-    cur = i; elapsed = 0; last = 0;
-    if (byUser) auto = false;
-    tabs.forEach((t, k) => {
-      const on = k === i;
-      t.classList.toggle("on", on); t.setAttribute("aria-selected", String(on)); t.tabIndex = on ? 0 : -1;
-      $("u", t).style.setProperty("--prog", on && !auto ? "1" : "0");
-    });
-    panels.forEach((p, k) => { const on = k === i; p.classList.toggle("on", on); p.inert = !on; });
-  }
-  function loop(ts) {
-    loopId = 0;
-    if (!auto) return;
-    if (paused || !visible || document.hidden) { last = 0; return; }
-    if (!last) last = ts;
-    elapsed += ts - last; last = ts;
-    const p = Math.min(1, elapsed / DURATION);
-    $("u", tabs[cur]).style.setProperty("--prog", p.toFixed(3));
-    if (p >= 1) show((cur + 1) % tabs.length);
-    loopId = raf(loop);
-  }
-  const kick = () => { if (auto && !loopId) loopId = raf(loop); };
-  tabs.forEach((t, i) => t.addEventListener("click", () => show(i, true)));
-  $(".tabs").addEventListener("keydown", e => {
-    const d = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
-    let i = d ? (cur + d + tabs.length) % tabs.length : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : -1;
-    if (i < 0) return;
-    e.preventDefault(); show(i, true); tabs[i].focus();
-  });
-  tour.addEventListener("pointerenter", () => { paused = true; });
-  tour.addEventListener("pointerleave", () => { paused = false; kick(); });
-  tour.addEventListener("focusin", () => { paused = true; });
-  tour.addEventListener("focusout", () => { paused = false; kick(); });
-  document.addEventListener("visibilitychange", kick);
-  if ("IntersectionObserver" in window) new IntersectionObserver(es => { visible = es[0].isIntersecting; kick(); }, { threshold: 0.35 }).observe(tour);
-  show(0);
-  const goToTour = i => { show(i, true); $("#showcase").scrollIntoView({ behavior: reduce.matches ? "auto" : "smooth", block: "start" }); };
-
-  // ---- demo: Pomodoro ----
-  const pomo = $(".demo-pomo"), pomoTime = $("#pomo-time"), pomoRing = $("#pomo-ring"), pomoGo = $("#pomo-go"), pomoPhase = $("#pomo-phase"), pomoSess = $("#pomo-sessions");
-  const POMO_C = 2 * Math.PI * 54, PHASES = { focus: [25 * 60, "Focus"], break: [5 * 60, "Break"] };
-  let phase = "focus", left = PHASES.focus[0], running = false, pomoTimer = 0, sessions = 0;
-  pomoRing.style.setProperty("stroke-dasharray", POMO_C.toFixed(3));
-  function paintPomo() {
-    pomoTime.textContent = String(Math.floor(left / 60)).padStart(2, "0") + ":" + String(left % 60).padStart(2, "0");
-    pomoRing.style.setProperty("stroke-dashoffset", (POMO_C * (1 - left / PHASES[phase][0])).toFixed(3));
-    pomoPhase.textContent = PHASES[phase][1];
-    pomo.classList.toggle("is-break", phase === "break");
-    pomo.classList.toggle("running", running);
-    $("span", pomoGo).textContent = running ? "Pause" : left === PHASES[phase][0] ? "Start" : "Resume";
-    $("use", pomoGo).setAttribute("href", running ? "#i-pause" : "#i-play");
-    pomoSess.textContent = sessions + (sessions === 1 ? " session" : " sessions") + " today";
-  }
-  function endPhase() {
-    if (phase === "focus") { sessions++; phase = "break"; toast("Focus session done. Time for a break."); } else { phase = "focus"; }
-    left = PHASES[phase][0];
-  }
-  function setRunning(on) {
-    running = on;
+  // ---- a Pomodoro, started from the command bar ----
+  const pomo = $("#pomo"), pomoTime = $("#pomo-time");
+  let pomoLeft = 0, pomoTimer = 0;
+  const paintPomo = () => { pomoTime.textContent = String(Math.floor(pomoLeft / 60)).padStart(2, "0") + ":" + String(pomoLeft % 60).padStart(2, "0"); };
+  function stopPomo() { clearInterval(pomoTimer); pomo.hidden = true; }
+  function startPomo() {
     clearInterval(pomoTimer);
-    if (on) pomoTimer = setInterval(() => { left--; if (left <= 0) endPhase(); paintPomo(); }, 1000);
-    paintPomo();
+    pomoLeft = 25 * 60; paintPomo(); pomo.hidden = false;
+    pomoTimer = setInterval(() => { pomoLeft--; if (pomoLeft <= 0) { stopPomo(); toast("Focus session done. Take a break."); } else paintPomo(); }, 1000);
+    toast("Pomodoro started. Click the timer to stop it.");
   }
-  pomoGo.addEventListener("click", () => setRunning(!running));
-  $("#pomo-reset").addEventListener("click", () => { phase = "focus"; left = PHASES.focus[0]; setRunning(false); });
-  $("#pomo-skip").addEventListener("click", () => { endPhase(); paintPomo(); });
-  paintPomo();
-  function pulse(el) { el.classList.remove("pulse"); void el.offsetWidth; el.classList.add("pulse"); setTimeout(() => el.classList.remove("pulse"), 1400); }
+  $("#pomo-stop").addEventListener("click", () => { stopPomo(); toast("Pomodoro stopped"); });
 
-  // ---- demo: your day ----
-  const TODOS = [["Review the pricing copy", false], ["Send the beta invites", false], ["Draft the announcement", true], ["Record the walkthrough", true], ["Check the page on a phone", false]];
-  const todoList = $("#todos"), repDone = $("#rep-done"), repOpen = $("#rep-open"), repPct = $("#rep-pct"), repBar = $("#rep-bar");
-  function paintReport(bump) {
-    const done = TODOS.filter(t => t[1]).length, open = TODOS.length - done;
-    repDone.textContent = done; repOpen.textContent = open; repPct.textContent = Math.round(done / TODOS.length * 100) + "%";
-    repBar.style.setProperty("--w", (done / TODOS.length * 100) + "%");
-    if (bump) for (const b of [repDone, repOpen, repPct]) { b.classList.add("bump"); setTimeout(() => b.classList.remove("bump"), 260); }
-  }
-  TODOS.forEach((t, i) => {
-    const li = document.createElement("li"), b = document.createElement("button");
-    b.type = "button"; b.setAttribute("role", "checkbox"); b.setAttribute("aria-checked", String(t[1]));
-    b.innerHTML = '<span class="box"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></span><span class="lbl"></span>';
-    $(".lbl", b).textContent = t[0];
-    b.addEventListener("click", () => { t[1] = !t[1]; b.setAttribute("aria-checked", String(t[1])); paintReport(true); });
-    li.append(b); todoList.append(li);
-  });
-  paintReport(false);
-  $("#rep-copy").addEventListener("click", async () => {
-    const done = TODOS.filter(t => t[1]).length;
-    const text = `Today in Alcove\nTo-dos done: ${done} (${TODOS.length - done} open)\n` + TODOS.map(t => `${t[1] ? "[x]" : "[ ]"} ${t[0]}`).join("\n");
-    toast((await copy(text)) ? "Report copied" : "Could not copy here");
-  });
-
-  // ---- demo: the command bar ----
+  // ---- the command bar ----
   const CMDS = [
+    ["Go to Command Bar", "", "navigate section"], ["Go to Built In Tools", "", "navigate section"], ["Go to All Features", "", "navigate section list"],
+    ["Go to Privacy", "", "navigate section"], ["Go to Download", "", "navigate section install"], ["Go to Support", "", "navigate section contact help"],
+    ["Toggle Dark Mode", "", "night theme invert light"], ["Start Pomodoro (25 min)", "", "timer focus work"],
     ["New Tab", "Mod+T"], ["Reopen Closed Tab", "Mod+Shift+T", "undo restore"], ["Pin / Unpin Tab"], ["Tidy Tabs by Site", "", "organize group sort clean"], ["Close Duplicate Tabs", "", "dedupe clean"],
     ["Mute All Tabs", "", "sound audio silence"], ["Split View with Recent Tab", "", "side by side"], ["Picture in Picture", "Mod+Alt+P", "video float"], ["Copy Link Without Tracking", "", "utm clean url share"],
     ["Show QR Code for This Page", "", "phone share"], ["Translate Page", "", "language english"], ["Force Dark Mode on This Site", "", "night theme invert dark"], ["Bookmark This Page", "Mod+D", "favorite save"],
     ["Find in Page", "Mod+F", "search text"], ["Screenshot Selected Area", "Mod+Shift+4", "capture"], ["Screenshot Visible Area", "Mod+Shift+S", "capture"], ["Screenshot Full Page", "Mod+Alt+Shift+S", "capture"],
     ["Download YouTube Video", "Mod+Shift+D"], ["New Space"], ["Zoom In", "Mod+="], ["Show History", "Mod+Y"], ["Show Downloads", "Mod+Shift+J"], ["Browse Chrome Web Store Extensions"],
-    ["Import from Browser (Chrome, Edge, Brave, Arc)"], ["Show Tools", "Mod+Shift+U", "timer stopwatch pomodoro clock notes focus time tracker"], ["Start Pomodoro (25 min)", "", "timer focus work"],
+    ["Import from Browser (Chrome, Edge, Brave, Arc)"], ["Show Tools", "Mod+Shift+U", "timer stopwatch pomodoro clock notes focus time tracker"],
     ["Start Focus Mode (25 min)", "", "block distractions sites concentrate"], ["Show World Clock", "", "time zones clocks cities"], ["Open Markdown File…", "", "md edit view read document"],
     ["Pick a Color from the Page", "", "eyedropper hex"], ["Download All Images on This Page", "", "save pictures photos"], ["Check for Updates", "", "version release new download upgrade"], ["Settings", "Mod+,", "preferences options search engine downloads theme"],
   ];
@@ -326,8 +304,19 @@
   const palQ = $("#pal-q"), palList = $("#pal-list"), palHint = $("#pal-hint");
   let palItems = [], palSel = 0;
   const match = (text, words) => { const t = text.toLowerCase(); return words.every(w => t.includes(w)) ? (t.startsWith(words[0]) ? 2 : 1) : 0; };
+  function runCommand(title) { // a few commands act on this page; the rest say what they would do in the app
+    if (/^Go to Command Bar/.test(title)) go("#bar-demo");
+    else if (/^Go to Built In|^Show Tools|^Open Markdown|^Show World Clock|^Start Focus/.test(title)) { go("#built-in"); if (!/^Go to/.test(title)) toast("Tools and the Markdown editor are right here"); }
+    else if (/^Go to All Features/.test(title)) go("#features");
+    else if (/^Go to Privacy/.test(title)) go("#privacy");
+    else if (/^Go to Download|^Check for Updates/.test(title)) { go("#download"); if (/^Check/.test(title)) toast("Alcove would check for a newer release"); }
+    else if (/^Go to Support/.test(title)) go("#support");
+    else if (/^Toggle Dark Mode|^Force Dark Mode/.test(title)) { toggleTheme(); toast(isDark() ? "Dark mode on" : "Dark mode off"); }
+    else if (/^Start Pomodoro/.test(title)) startPomo();
+    else toast(`In Alcove this would run “${title}”`);
+  }
   function computePalette() {
-    const raw = palQ.value, q = raw.trim(), words = q.toLowerCase().split(/\s+/).filter(Boolean), out = [];
+    const q = palQ.value.trim(), words = q.toLowerCase().split(/\s+/).filter(Boolean), out = [];
     if (q) {
       const calc = calculate(q.replace(/^=/, ""));
       if (calc !== null) out.push({ kind: "Calculator", title: "= " + fmt(calc), sub: "Enter copies the result", big: true, run: async () => toast((await copy(String(calc))) ? `Copied ${fmt(calc)}` : `Result: ${fmt(calc)}`) });
@@ -338,9 +327,9 @@
       const split = /^split\s+(.+)$/i.exec(q);
       if (split) for (const [title, host] of OPEN_TABS) if (match(title + " " + host, split[1].toLowerCase().split(/\s+/))) out.push({ kind: "Split", title: `Split view with ${title}`, sub: host, run: () => toast(`In Alcove ${title} would open beside this tab`) });
     }
-    const go = q ? { kind: "Go", title: `Search the web for “${q}”`, sub: "Open here · Shift+Enter for a new tab", run: () => toast(`In Alcove this would search for “${q}”`) } : null;
+    const web = q ? { kind: "Go", title: `Search the web for “${q}”`, sub: "Open here · Shift+Enter for a new tab", run: () => toast(`In Alcove this would search for “${q}”`) } : null;
     const rest = [];
-    for (const [title, host] of OPEN_TABS) { const s = q ? match(title + " " + host, words) : 0; if (q && s) rest.push({ s: 300 + s, kind: "Tab", title, sub: host, run: () => toast(`In Alcove this would switch to “${title}”`) }); }
+    if (q) for (const [title, host] of OPEN_TABS) { const s = match(title + " " + host, words); if (s) rest.push({ s: 300 + s, kind: "Tab", title, sub: host, run: () => toast(`In Alcove this would switch to “${title}”`) }); }
     CMDS.forEach(([title, keys, extra], order) => {
       const s = q ? match(title + " " + (extra || ""), words) : 1;
       if (!s) return;
@@ -350,16 +339,7 @@
     rest.sort((a, b) => b.s - a.s);
     const shown = rest.slice(0, q ? 8 : 7);
     // Like the app: the web search comes first, unless a tab or command clearly matches what you typed.
-    return out.concat(go && shown.length && shown[0].s >= 260 ? [shown[0], go, ...shown.slice(1)] : go ? [go, ...shown] : shown);
-  }
-  function runCommand(title) { // a few commands do something real on this page; the rest say what they would do
-    if (/^Start Pomodoro/.test(title)) { pomo.scrollIntoView({ behavior: reduce.matches ? "auto" : "smooth", block: "center" }); if (!running) setRunning(true); pulse(pomo); toast("Pomodoro started"); }
-    else if (/^Force Dark Mode/.test(title)) { theme = isDark() ? "light" : "dark"; stored.set(theme); applyTheme(); toast(isDark() ? "Dark mode on for this site" : "Dark mode off"); }
-    else if (/^Show Tools/.test(title)) { goToTour(3); toast("Here are the built-in tools"); }
-    else if (/^Check for Updates/.test(title)) { $("#download").scrollIntoView({ behavior: reduce.matches ? "auto" : "smooth" }); toast("Alcove would check for a newer release"); }
-    else if (/^Show World Clock|^Start Focus/.test(title)) { goToTour(3); toast("Tools has a world clock and focus mode"); }
-    else if (/^Open Markdown/.test(title)) { goToTour(4); toast("The Markdown editor is on this screen"); }
-    else toast(`In Alcove this would run “${title}”`);
+    return out.concat(web && shown.length && shown[0].s >= 260 ? [shown[0], web, ...shown.slice(1)] : web ? [web, ...shown] : shown);
   }
   function renderPalette() {
     palItems = computePalette();
@@ -369,14 +349,13 @@
       const li = document.createElement("li");
       li.id = "pal-" + i; li.setAttribute("role", "option"); li.setAttribute("aria-selected", String(i === palSel));
       if (it.big) li.className = "big";
-      const wrap = document.createElement("div"), t = document.createElement("span"), s = document.createElement("span");
+      const wrap = document.createElement("div"), t = document.createElement("span");
       t.className = "t"; t.textContent = it.title; wrap.append(t);
-      if (it.sub) { s.className = "s"; s.textContent = it.sub; wrap.append(s); }
-      li.append(wrap);
+      if (it.sub) { const s = document.createElement("span"); s.className = "s"; s.textContent = it.sub; wrap.append(s); }
       const key = document.createElement("span");
       if (it.keys) { const k = document.createElement("kbd"); k.textContent = it.keys; key.append(k); }
       const kind = document.createElement("span"); kind.className = "k"; kind.textContent = it.kind;
-      li.append(key, kind);
+      li.append(wrap, key, kind);
       li.addEventListener("pointermove", () => { if (palSel !== i) { palSel = i; markSel(); } });
       li.addEventListener("click", () => { palSel = i; markSel(); runSel(); });
       palList.append(li);
@@ -396,41 +375,48 @@
     else if (e.key === "Enter") { e.preventDefault(); runSel(); }
     else if (e.key === "Escape") { palQ.value = ""; palSel = 0; renderPalette(); }
   });
-  for (const b of $$(".try-chips button")) b.addEventListener("click", () => { palQ.value = b.dataset.q; palSel = 0; renderPalette(); palQ.focus({ preventScroll: true }); });
+  for (const b of $$(".tries button")) b.addEventListener("click", () => { palQ.value = b.dataset.q; palSel = 0; renderPalette(); palQ.focus({ preventScroll: true }); });
   renderPalette();
+  $("#mod-k").textContent = isMac ? "⌘ K" : "Ctrl K";
+  // Cmd or Ctrl + K, from anywhere on the page, takes you to the command bar
+  addEventListener("keydown", e => {
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      if (menuOpen) closeMenu(false);
+      go("#bar-demo");
+      palQ.focus({ preventScroll: true });
+    } else if (e.key === "Escape" && menuOpen) closeMenu(true);
+  });
 
-  // ---- the full feature list: search and categories ----
-  const items = $$("#fgrid .f"), cats = $$(".cat"), featQ = $("#feat-q"), result = $("#feat-result"), empty = $("#feat-empty"), grid = $("#fgrid");
+  // ---- the feature index: groups and search ----
+  const rows = $$("#fgrid .row"), cats = $$(".cat"), featQ = $("#feat-q"), result = $("#feat-result"), empty = $("#feat-empty");
   let cat = "all", query = "";
   function filter() {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     let shown = 0;
-    for (const li of items) {
+    for (const li of rows) {
       const ok = (cat === "all" || li.dataset.cat === cat) && words.every(w => (li.textContent + " " + li.dataset.cat).toLowerCase().includes(w));
       if (ok) {
-        li.style.setProperty("--i", String(shown));
-        if (li.hidden) { li.hidden = false; li.classList.add("out"); raf(() => raf(() => li.classList.remove("out"))); }
-        else li.classList.remove("out");
         shown++;
+        if (li.hidden) { li.hidden = false; li.classList.add("out"); raf(() => raf(() => li.classList.remove("out"))); } else li.classList.remove("out");
       } else if (!li.hidden) {
         li.classList.add("out");
-        setTimeout(() => { if (li.classList.contains("out")) li.hidden = true; }, reduce.matches ? 0 : 190);
+        setTimeout(() => { if (li.classList.contains("out")) li.hidden = true; }, reduceMQ.matches ? 0 : 190);
       }
     }
-    result.textContent = shown === items.length ? `Showing all ${items.length} features` : `Showing ${shown} of ${items.length} features`;
+    result.textContent = shown === rows.length ? `Showing all ${rows.length}` : `Showing ${shown} of ${rows.length}`;
     empty.hidden = shown !== 0;
   }
-  cats.forEach(b => b.addEventListener("click", () => {
+  for (const b of cats) b.addEventListener("click", () => {
     cat = b.dataset.cat;
-    cats.forEach(c => { const on = c === b; c.classList.toggle("on", on); c.setAttribute("aria-pressed", String(on)); });
+    for (const c of cats) { const on = c === b; c.classList.toggle("on", on); c.setAttribute("aria-pressed", String(on)); }
     filter();
-  }));
+  });
   let typing = 0;
   featQ.addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(() => { query = featQ.value; filter(); }, 90); });
-  grid.classList.toggle("in", !seen); // without IntersectionObserver the entrance runs at once
 
   // ---- accordions ----
-  for (const b of $$(".acc > h3 > button")) b.addEventListener("click", () => {
+  for (const b of $$(".acc button")) b.addEventListener("click", () => {
     const open = b.getAttribute("aria-expanded") !== "true";
     b.setAttribute("aria-expanded", String(open));
     b.closest(".acc").classList.toggle("open", open);
@@ -441,27 +427,29 @@
   copyMail.addEventListener("click", async () => {
     const ok = await copy(copyMail.dataset.mail);
     toast(ok ? "Email address copied" : "Select the address and copy it");
-    if (ok) { const s = $("span", copyMail); s.textContent = "Copied"; setTimeout(() => { s.textContent = "Copy"; }, 1800); }
+    if (ok) { const s = $("span", copyMail); s.textContent = "Copied"; setTimeout(() => { s.textContent = "Copy address"; }, 1800); }
   });
 
   // ---- downloads: the visitor's system, and the latest release ----
   const REPO = "mrmx485-sudo/alcove";
-  const API = `https://api.github.com/repos/${REPO}/releases/latest`;
+  // The list endpoint answers 200 with an empty list while nothing is published, so a fresh repository leaves no error in the console
+  // (releases/latest would answer 404). Drafts are never listed to visitors; pre-releases are skipped, as releases/latest does.
+  const API = `https://api.github.com/repos/${REPO}/releases?per_page=5`;
   const PREFIX = `https://github.com/${REPO}/releases/`;
   const FILES = { win: /^Alcove-Setup-.+-x64\.exe$/, "mac-arm64": /-mac-arm64\.dmg$/, "mac-x64": /-mac-x64\.dmg$/ };
-  const LABEL = { win: "Download Alcove for Windows", "mac-arm64": "Download Alcove for Apple silicon", "mac-x64": "Download Alcove for Intel" };
+  const LABEL = { win: "Download for Windows", "mac-arm64": "Download for Apple silicon", "mac-x64": "Download for Intel" };
   const mobile = /Android|iPhone|iPad|iPod/i.test(nav.userAgent) || (isMac && nav.maxTouchPoints > 1); // an iPad reports "MacIntel"
   const os = mobile ? "mobile" : /Win/i.test(platform) ? "win" : isMac ? "mac" : "other";
   html.dataset.os = os;
-  const heroBtn = $("#dl-hero"), heroText = $("span", heroBtn);
+  const heroBtn = $("#dl-hero"), heroSwap = $(".swap", heroBtn), dlRows = $$(".dl-row");
   let arch = "", release = null; // arch: "arm" or "x86" where the browser says (Chrome and Edge do; Safari and Firefox do not)
 
   function markDownloads() {
-    for (const card of $$(".dl-card")) {
-      const f = card.dataset.file;
+    for (const row of dlRows) {
+      const f = row.dataset.file;
       const yes = (os === "win" && f === "win") || (os === "mac" && (arch === "arm" ? f === "mac-arm64" : arch === "x86" ? f === "mac-x64" : f.startsWith("mac")));
-      card.classList.toggle("pick", yes);
-      $(".badge", card).hidden = !yes;
+      row.classList.toggle("pick", yes);
+      $(".rec", row).hidden = !yes;
     }
     const note = $("[data-mobile]");
     if (note) note.hidden = os !== "mobile";
@@ -469,20 +457,21 @@
   const want = () => os === "win" ? "win" : os === "mac" && arch === "arm" ? "mac-arm64" : os === "mac" && arch === "x86" ? "mac-x64" : "";
   function paintHero() {
     const f = want(), asset = release && f && release.files[f];
-    heroText.textContent = asset ? LABEL[f] : os === "mac" ? "Download for Mac" : os === "win" ? "Download for Windows" : os === "mobile" ? "Get Alcove for your computer" : "Download";
+    setSwap(heroSwap, asset ? LABEL[f] : os === "mac" ? "Download for Mac" : os === "win" ? "Download for Windows" : os === "mobile" ? "Get Alcove for your computer" : "Download");
     heroBtn.setAttribute("href", asset ? asset.url : "#download");
   }
   markDownloads(); paintHero();
   if (os === "mac" && uaData && uaData.getHighEntropyValues) {
     uaData.getHighEntropyValues(["architecture"]).then(v => { arch = v.architecture === "arm" ? "arm" : v.architecture === "x86" ? "x86" : ""; markDownloads(); paintHero(); }).catch(() => {});
   }
-
   const mb = n => (n >= 1048576 ? `${Math.round(n / 1048576)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
   async function latest() {
     try { const c = JSON.parse(sessionStorage.getItem("alcove-release") || "null"); if (c && Date.now() - c.at < 600000) return c.data; } catch {}
     const res = await fetch(API, { headers: { Accept: "application/vnd.github+json" } });
-    if (!res.ok) return null; // 404: nothing published yet
-    const j = await res.json();
+    if (!res.ok) return null;
+    const list = await res.json();
+    const j = Array.isArray(list) ? list.find(r => r && !r.draft && !r.prerelease) : null;
+    if (!j) return null; // nothing published yet
     const data = { tag: String(j.tag_name || ""), page: String(j.html_url || ""), assets: (j.assets || []).map(a => ({ name: String(a.name || ""), url: String(a.browser_download_url || ""), size: Number(a.size) || 0 })) };
     try { sessionStorage.setItem("alcove-release", JSON.stringify({ at: Date.now(), data })); } catch {}
     return data;
@@ -496,14 +485,14 @@
     }
     release = { files };
     const version = data.tag.replace(/^v/, "");
-    for (const card of $$(".dl-card")) {
-      const a = files[card.dataset.file];
+    for (const row of dlRows) {
+      const a = files[row.dataset.file];
       if (!a) continue;
-      $("a.btn", card).setAttribute("href", a.url);
-      $("[data-meta]", card).textContent = `Version ${version} · ${mb(a.size)}`;
+      $("a.go", row).setAttribute("href", a.url);
+      $("[data-meta]", row).textContent = `Version ${version} · ${mb(a.size)}`;
     }
     const line = $("[data-release-line]");
-    if (line) line.textContent = `Version ${version}. Installers for Mac (Apple silicon and Intel) and Windows (64-bit).`;
+    if (line) line.textContent = `Version ${version} · Free · Open source · No account · No telemetry`;
     const line2 = $("[data-release-line-2]");
     if (line2 && data.page.startsWith(PREFIX)) {
       line2.textContent = "Free and open source under the MIT license. ";

@@ -773,27 +773,60 @@ notification banners, and **everything on Windows**. Check those by hand before 
 ### 8.6 The web page (`site/`)
 
 The product page (https://mrmx485-sudo.github.io/alcove/) is plain HTML, CSS and JavaScript in `site/`: no build step, no framework, no web
-fonts, no third-party requests.
+fonts, no third-party requests. Preview it with `python3 -m http.server 8080 --directory site`.
 
-- **Preview:** `python3 -m http.server 8080 --directory site`.
-- **Deploy:** `.github/workflows/pages.yml` publishes `site/` on every push to `main` that changes it. One-time setup by the repository
-  owner: Settings › Pages › Build and deployment › Source: **GitHub Actions**.
-- **Feature list:** the "All features" section of `index.html` is hand-written HTML, one `<li class="f" data-cat="…">` per feature. Check
-  each entry against the code before adding it (`COMMANDS` in `ui/palette.js`, `ui/tools-page.js`, Settings) and keep it in step with
-  the app. The page's calculator and unit converter in `app.js` are copies of `calculate()` and `convertUnits()` in `ui/palette.js`.
-- **Downloads:** the buttons link to the latest-release page. `app.js` asks the GitHub API for the latest release and points them at the
-  files, matching `Alcove-Setup-*-x64.exe`, `*-mac-arm64.dmg` and `*-mac-x64.dmg` (`FILES`), so keep that naming. A draft release is
-  invisible to the page; a pre-release is too (`releases/latest` skips both).
-- **Security:** a CSP `<meta>` allows only the page's own files and `connect-src https://api.github.com`. There are no inline scripts or
-  style attributes (set styles from JS with `style.setProperty`). Theme, motion and layout work without the script except the demos.
-- **Screenshots** (`site/img/*.webp`, light and dark of each) are real captures from a throwaway instance (8.1) through CDP
-  `Page.captureScreenshot`, one view at a time (the page, the sidebar, the palette), laid over each other with CSS (`.window`). Use sample
-  data only, and check before publishing: the Markdown status bar and the palette's "Recently closed" rows show local file paths (crop
-  the first, close the start tab before capturing the second). Keep the test window in front while capturing, or the glass tint and the
-  sidebar's light/dark text follow a stale backdrop. `--host-resolver-rules="MAP *.example 127.0.0.1:8765"` gives sample tabs
-  believable addresses.
-- **Contact:** the support address appears in the support section and the footer of `index.html`.
+**Concept.** The page behaves like the product: the page gets the whole window, and everything else lives in an alcove you reach for.
+Register: quiet editorial (paper, ink, hairlines, mono labels, one accent that marks only what is live). The brief followed the awwwards
+method (concept, art direction, one signature moment, then build and audit); the rules that came out of it:
 
+- **Tokens, not values.** Colours are OKLCH roles in `:root` (`--bg`, `--bg-2`, `--ink`, `--ink-2`, `--line`, `--edge`, `--accent`); dark mode
+  is re-tuned, not inverted, and a visitor's choice sets `data-theme` on `<html>` (stored in `localStorage` inside try/catch). Type is two
+  system roles (a sans and a mono) on one fluid scale; space is one scale; two radii; one easing family. Text pairs are 6:1 or better,
+  control outlines (`--edge`) 3:1, decorative hairlines (`--line`) are allowed to be fainter.
+- **One signature, nothing else loud.** "The window opens" (`#window`): a pinned scene of 220 svh in which one number, `p` (0 to 1), drives
+  everything: the framed window scales to full bleed (`--s`, `--rad`), the sidebar slides out (`--sb`), the page re-centres in a short swap
+  (`--xf`), and the caption changes (`--cp`). `app.js` has ONE passive scroll listener and ONE `requestAnimationFrame`; layout is read only
+  on resize (`measure()`), never while scrolling; only `transform` and `opacity` change per frame (plus a small `border-radius`); `will-change`
+  is set only while the scene is on screen. Afterwards the pointer at the window's left edge, or the Show tabs button, brings the sidebar back.
+  Landing mid-scene (anchor, refresh) goes straight to the right state. Under `prefers-reduced-motion`, on windows shorter than 460 px, or
+  without script, the scene is a static framed window with the Show/Hide tabs button (a 0.2 s crossfade).
+- **No infinite motion, no blur layers, no decorative gradients.** Reveals are one rule (`.rv`: 20 px, once, groups only) and the content is
+  visible by default, so nothing depends on the script or on scrolling.
+- **The site's own navigation is the product's pattern.** The menu (`#menu`) opens from the left edge on fine pointers and from the Menu
+  button everywhere; closed it is `inert`; opened by button it is a dialog (scrim, focus trap, the rest of the page `inert`, Escape closes,
+  focus returns to the button). Cmd or Ctrl+K takes you to the command bar demo from anywhere.
+- **Targets and keys.** Controls are 44 px or taller, focus is a 2 px accent outline, the skip link is the first stop, there is one `<h1>`,
+  and Space, Page Down, Home and End scroll normally.
+- **Strict CSP.** A `<meta>` allows only the page's own files and `connect-src https://api.github.com`. No inline scripts or style
+  attributes: the script sets only CSS custom properties (`style.setProperty`). `404.html` uses absolute `/alcove/` paths because GitHub
+  Pages serves it for addresses of any depth.
+
+**Content.**
+
+- **Feature list.** The "All features" section is hand-written HTML, one `<li class="row" data-cat="…">` per feature with a three-digit
+  `.n` index. Check each entry against the code before adding it (`COMMANDS` in `ui/palette.js`, `ui/tools-page.js`, Settings) and keep the
+  indexes and the group counts in step. The page's calculator and unit converter in `app.js` copy `calculate()` and `convertUnits()` from
+  `ui/palette.js`.
+- **Downloads.** The buttons link to the latest-release page. `app.js` lists the repository's releases (`releases?per_page=5`, which answers
+  200 with an empty list while nothing is published, so a fresh repository leaves no console error), takes the first one that is neither a
+  draft nor a pre-release, and points each row at its file, matching `Alcove-Setup-*-x64.exe`, `*-mac-arm64.dmg` and `*-mac-x64.dmg`
+  (`FILES`). Keep that naming. Only URLs under this repository's `releases/download/` are accepted.
+- **Screenshots** (`site/img/*.webp`, a light and a dark version of each) are real captures from a throwaway instance (8.1) through CDP
+  `Page.captureScreenshot`, one view at a time (the page, the sidebar), laid over each other with CSS (`.win`). Use sample data only, and
+  check before publishing: the Markdown status bar shows local file paths (crop it), and a palette capture lists "Recently closed" rows with
+  the start page's `file://` address. Keep the test window in front while capturing, or the glass tint and the sidebar's light or dark
+  text follow a stale backdrop. `--host-resolver-rules="MAP *.example 127.0.0.1:8765"` gives sample tabs believable addresses.
+- **Contact.** The support address appears in the support section and the footer of `index.html` and in `404.html`.
+
+**Deploy.** `.github/workflows/pages.yml` publishes `site/` on every push to `main` that changes it. One-time setup by the repository owner:
+Settings › Pages › Build and deployment › Source: **GitHub Actions**.
+
+**Audit before changing the design.** Measured on the built page: no console messages; LCP 0.9 s and CLS 0.003 at 4x CPU and Fast 3G on a cold
+cache; 120 fps with no frame over 33 ms scrolling the pinned scene at 4x CPU; no horizontal overflow at 320, 390, 768, 1280 and 1920 px; all
+interactive targets at least 44 px (inline links in sentences excepted); a full keyboard pass. A bare Chromium window (the same engine as
+Alcove) is enough for this: start it with `--remote-debugging-port`, add `--force-prefers-reduced-motion` to check that variant, and read
+the numbers with `PerformanceObserver` over CDP, throttling with `Emulation.setCPUThrottlingRate` and `Network.emulateNetworkConditions`,
+and turning scripts off with `Emulation.setScriptExecutionDisabled`. CDP screenshot clips are in document coordinates, so follow `scrollY`.
 ---
 
 ## 9. Conventions
