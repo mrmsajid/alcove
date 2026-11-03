@@ -17,12 +17,29 @@
     .bar .spacer { flex: 1; }
     main { flex: 1; overflow-y: auto; padding: 22px 28px 60px; }
     #view.t-view { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(310px, 100%), 1fr)); gap: 14px; align-items: start; max-width: 1020px; margin: 0 auto; padding: 0; }
+    #view[data-tab="timers"], #view[data-tab="alarms"] { align-items: stretch; } /* cards in a row line up; elsewhere (to-do beside notes) each keeps its own height */
+    #view.enter { animation: viewin .2s ease-out; } /* only when the tab changes, never when a timer ticks the page back in */
+    @keyframes viewin { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+    /* what is running, on every tab except the one that already shows it in full */
+    .status { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 28px 0; flex: none; }
+    .status[hidden] { display: none; }
+    .live { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: 12.5px; }
+    .live .dot { flex: none; width: 8px; height: 8px; margin: 0 4px 0 9px; border-radius: 50%; background: #34c759; animation: livepulse 2s ease-in-out infinite; }
+    .live.paused .dot { background: var(--muted); animation: none; }
+    .live .go { padding: 4px 8px; border-radius: 999px; font-weight: 600; max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .live .go:hover { background: var(--hover); }
+    .live .time { padding: 0 8px 0 2px; font: 600 13px ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .live .act { min-height: 28px; padding: 0 11px; border-radius: 999px; background: var(--active); font-size: 12px; font-weight: 600; }
+    .live .act:hover { background: var(--hover); filter: brightness(1.15); }
+    @keyframes livepulse { 0%, 100% { box-shadow: 0 0 0 0 #34c75966; } 50% { box-shadow: 0 0 0 4px #34c75900; } }
+    .z-slot { flex: none; width: 26px; } /* keeps every clock's time in one column, with or without a remove button */
     #view .t-card { background: var(--surface); }
     #view .t-card.wide { grid-column: 1 / -1; }
     .t-big { font-size: 34px; }
     /* Narrow: the page sits beside the sidebar, so it can be a third of the window. The tabs get their own row. */
     @media (max-width: 600px) {
       .bar { flex-wrap: wrap; gap: 10px 12px; padding: 12px 16px; }
+      .status { padding: 10px 16px 0; }
       .bar h1 { font-size: 16px; }
       .bar nav { order: 3; flex: 1 0 100%; flex-wrap: wrap; overflow: visible; } /* every tab visible, none hidden off to the side */
       main { padding: 16px 14px 48px; }
@@ -104,11 +121,12 @@
   <div class="shell">
     <div class="bar">
       <h1>Tools</h1>
-      <nav id="nav"></nav>
+      <nav id="nav" role="tablist" aria-label="Tools"></nav>
       <span class="spacer"></span>
-      <button id="close" class="icon" title="Close (Esc)"><svg><use href="#i-x"/></svg></button>
+      <button id="close" class="icon" title="Close (Esc)" aria-label="Close Tools"><svg><use href="#i-x"/></svg></button>
     </div>
-    <main><div id="view" class="t-view"></div></main>
+    <div id="status" class="status" role="group" aria-label="Running now" hidden></div>
+    <main><div id="view" class="t-view" role="tabpanel"></div></main>
   </div>
   <svg width="0" height="0" style="position:absolute"><defs>
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>

@@ -176,7 +176,8 @@ function focusCard() {
         chips([25, 50, 90], m => { document.activeElement?.blur(); setTimeout(() => op("focus-start", m), 80); })]);
 }
 
-const timersView = () => [stopwatchCard(), timerCard(), pomodoroCard(), focusCard()];
+const wide = c => (c.classList.add("wide"), c); // a card that takes the whole row
+const timersView = () => [stopwatchCard(), timerCard(), pomodoroCard(), wide(focusCard())];
 
 // ---- alarms ----
 
@@ -225,7 +226,7 @@ function alarmsView() {
     el("div", { class: "at" }, fmtTime(a.time)),
     el("div", { class: "al" }, el("div", {}, a.label || (a.snooze ? "Snoozed" : "Alarm")), el("div", { class: "t-sub" }, repeatText(a))),
     el("button", { class: "t-switch" + (a.on ? " on" : ""), role: "switch", "aria-checked": a.on ? "true" : "false", "aria-label": `Alarm ${a.time}${a.label ? " " + a.label : ""}`, title: a.on ? "Turn off" : "Turn on", on: { click: () => op("alarm-toggle", a.id) } }),
-    el("button", { class: "icon sm", title: "Delete", on: { click: () => op("alarm-delete", a.id) } }, "×")))) : note("No alarms yet. Add one below.");
+    el("button", { class: "icon sm", title: "Delete", on: { click: () => op("alarm-delete", a.id) } }, "×")))) : note("No alarms yet.");
 
   // the new-alarm form: pick how it repeats, then the days that go with that
   const nowD = new Date();
@@ -273,7 +274,7 @@ function alarmsView() {
 
   return [
     card("Alarms",
-      next ? liveText("t-sub", () => `Next: ${next[1].toDateString() === new Date().toDateString() ? "today" : next[1].toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })} ${fmtTime(next[0].time)} · in ${untilText(next[1] - Date.now())}`) : el("div", { class: "t-sub" }, "Nothing scheduled"),
+      next ? liveText("t-sub", () => `Next: ${next[1].toDateString() === new Date().toDateString() ? "today" : next[1].toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })} ${fmtTime(next[0].time)} · in ${untilText(next[1] - Date.now())}`) : alarms.length ? el("div", { class: "t-sub" }, "All alarms are off") : null,
       list,
       note("Alarms ring while Alcove is open: a chime, a notification, and this page opens.")),
     card("New alarm", form),
@@ -357,7 +358,7 @@ function clocksView() {
     update();
     live.push(update);
     return el("div", { class: "z-row" }, dot, el("div", { class: "z-main" }, el("div", { class: "z-name" }, label), sub), time,
-      removable ? el("button", { class: "icon sm", title: "Remove", on: { click: () => op("zones", st.zones.filter(z => z[0] !== tz)) } }, "×") : null);
+      removable ? el("button", { class: "icon sm", title: "Remove", "aria-label": `Remove ${label}`, on: { click: () => op("zones", st.zones.filter(z => z[0] !== tz)) } }, "×") : el("span", { class: "z-slot" }));
   };
   const all = Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [];
   const input = el("input", { type: "text", list: "tz-list", placeholder: "Add a city, e.g. London or New_York", spellcheck: "false" });
@@ -569,13 +570,77 @@ function pageView() {
 
 // ---- shell ----
 
+// The tabs are built once (a redraw happens at every tick of the engine's state, and rebuilding them would drop the keyboard
+// focus). They are a real tab list: arrow keys, Home and End move between them, and the number keys 1 to 7 jump from anywhere.
+const tabEls = new Map();
+let entering = false; // the next render is a tab change, so the new tab fades in; a redraw of the same tab never does
+function setView(id, { focus = false } = {}) {
+  if (id === view || !TABS.some(t => t[0] === id)) return;
+  view = id;
+  try { localStorage.setItem(TAB_KEY, JSON.stringify(id)); } catch {}
+  entering = true;
+  render();
+  document.querySelector("main").scrollTop = 0;
+  if (focus) tabEls.get(id)?.focus();
+}
+TABS.forEach(([id, label], i) => {
+  const b = el("button", { type: "button", role: "tab", id: `tab-${id}`, "aria-controls": "view", "aria-keyshortcuts": String(i + 1), title: `${label} (${i + 1})`, on: { click: () => setView(id) } }, label);
+  tabEls.set(id, b);
+  $("nav").append(b);
+});
+$("nav").addEventListener("keydown", e => {
+  const i = TABS.findIndex(t => t[0] === view);
+  const to = e.key === "ArrowRight" ? (i + 1) % TABS.length : e.key === "ArrowLeft" ? (i + TABS.length - 1) % TABS.length : e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : -1;
+  if (to < 0) return;
+  e.preventDefault();
+  setView(TABS[to][0], { focus: true });
+});
+function paintNav() {
+  for (const [id, b] of tabEls) {
+    const on = id === view;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", String(on));
+    b.tabIndex = on ? 0 : -1;
+  }
+  $("view").setAttribute("aria-labelledby", `tab-${view}`);
+  $("view").dataset.tab = view;
+}
+
+// What is running, shown above every tab except the one that already shows it in full (the timers live on Timers, the task on
+// Track), so you can see and stop it from wherever you are. Each chip jumps to its tab; its times tick with the other live numbers.
+function statusStrip() {
+  const chips = [];
+  const add = (home, name, timeFn, paused, ...acts) => { if (home !== view) chips.push({ home, name, timeFn, paused, acts }); };
+  if (st.sw.start || swMs(st) > 0) add("timers", "Stopwatch", () => clock(swMs(st)), !st.sw.start, st.sw.start ? ["Stop", "sw-pause"] : ["Resume", "sw-start"]);
+  const t = st.timer;
+  if (t.end || t.left > 0) add("timers", "Timer", () => clock(timerLeft(st)), !t.end, t.end ? ["Pause", "timer-pause"] : ["Resume", "timer-resume"], ["Cancel", "timer-cancel"]);
+  const p = st.pomo;
+  if (p.phase) add("timers", p.phase === "work" ? "Focus" : "Break", () => clock(pomoLeft(st)), !p.end, p.end ? ["Pause", "pomo-pause"] : ["Resume", "pomo-resume"], ["Stop", "pomo-stop"]);
+  if (st.focusUntil > Date.now()) add("timers", "Focus mode", () => clock(st.focusUntil - Date.now()), false, ["End", "focus-end"]);
+  if (st.task) add("track", st.task.name, () => clock(Date.now() - st.task.start), false, ["Stop", "task-stop"]);
+  $("status").replaceChildren(...chips.map(c => {
+    const time = el("span", { class: "time" });
+    const update = () => { time.textContent = c.timeFn(); };
+    update();
+    live.push(update);
+    return el("div", { class: "live" + (c.paused ? " paused" : "") },
+      el("i", { class: "dot", title: c.paused ? "Paused" : "Running" }),
+      el("button", { type: "button", class: "go", title: `Go to ${c.home === "track" ? "Track" : "Timers"}`, on: { click: () => setView(c.home) } }, c.name),
+      time,
+      ...c.acts.map(([label, name]) => el("button", { type: "button", class: "act", "aria-label": `${label}: ${c.name}`, on: { click: () => op(name) } }, label)));
+  }));
+  $("status").hidden = !chips.length;
+}
+
 function render() {
   live = [];
   fast = [];
-  $("nav").replaceChildren(...TABS.map(([id, label]) =>
-    el("button", { class: id === view ? "on" : "", on: { click: () => { view = id; try { localStorage.setItem(TAB_KEY, JSON.stringify(id)); } catch {} render(); } } }, label)));
+  paintNav();
   const build = { timers: timersView, alarms: alarmsView, track: trackView, clocks: clocksView, notes: notesView, markdown: markdownView, page: pageView }[view];
-  $("view").replaceChildren(...[st.ringing ? ringingCard() : null, ...build()].filter(Boolean));
+  const v = $("view");
+  v.replaceChildren(...[st.ringing ? ringingCard() : null, ...build()].filter(Boolean));
+  statusStrip();
+  if (entering) { entering = false; v.classList.remove("enter"); void v.offsetWidth; v.classList.add("enter"); }
   if (refocusTodo) { refocusTodo = false; document.querySelector(".todo-input")?.focus(); }
 }
 
@@ -599,7 +664,10 @@ addEventListener("storage", e => {
 
 const closeTools = () => { flushNotes(); invoke("close_tools"); };
 $("close").addEventListener("click", closeTools);
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeTools(); });
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeTools();
+  else if (/^[1-7]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey && !typing()) setView(TABS[+e.key - 1][0]);
+});
 window.addEventListener("pagehide", flushNotes);
 window.addEventListener("focus", () => { st = loadState(); ctx = read(CTX_KEY, ctx); renderSoon(); });
 

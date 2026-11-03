@@ -435,6 +435,13 @@ Tools page <------------- storage event (alcove-tools-v1 changed) -----------+
 - **Single writer.** Only the engine writes `alcove-tools-v1`, `alcove-tools-ctx` and `alcove-time-v1`. The page
   sends **ops** and re-renders when the `storage` event fires. (Notes and to-dos are the exception: the page
   writes them itself, because no other code touches them.)
+- **The page shell.** The seven tabs are built once and are a real tab list (`role="tablist"`, roving `tabindex`, arrow keys, Home and
+  End, and the number keys 1 to 7 from anywhere unless a field has the focus): the engine's state changes redraw the view at every tick,
+  and rebuilding the tabs each time used to drop the keyboard focus. `setView` is the only way to change tab; it fades the new tab in
+  (`#view.enter`, only on a tab change, never on a redraw). Above the view, `statusStrip` shows what is running (stopwatch, timer,
+  Pomodoro, Focus mode, task timer) with its live time and a pause or stop button, on every tab except the one that already shows
+  it in full (the timers live on Timers, the task on Track). Cards in a row share a height on Timers and Alarms only
+  (`#view[data-tab]`); on Notes the to-do list and the notes keep their own heights.
 - `tools-shared.js` holds the state shape (`loadState`), formatters, `alarmDue`, the Amazon/link helpers, and is
   loaded by both sides.
 - **Timers use timestamps** (`end`, `start`+`acc`), never counters, so they survive reloads and background
