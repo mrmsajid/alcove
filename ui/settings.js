@@ -108,12 +108,15 @@ const SECTIONS = [
   ["gestures", "Gestures", () => [card(
     row("Swipe between pages", "Two fingers left or right on a trackpad go back or forward; on a touch screen, swipe in from the left or right edge. An arrow follows your fingers and turns blue when letting go will move.", toggle(S.swipeNav !== false, v => set("swipeNav", v))),
     row("Mouse back and forward buttons", "The extra side buttons on a mouse go back and forward.", toggle(S.mouseNav !== false, v => set("mouseNav", v))),
+    row("Capture an area", `Hold ${MAC ? "Option" : "Alt"} and drag across a page to take a screenshot of that area; on a touch screen, swipe down with three fingers.`, toggle(S.shotGesture !== false, v => set("shotGesture", v))),
   ), card(...[
     ["Two fingers left or right", "Back or forward (trackpad)"],
     ["Swipe in from the left or right edge", "Back or forward (touch screen)"],
     ["Pinch with two fingers", "Zoom the page in or out; Actual Size (⌘0 or Ctrl+0) resets it"],
     MAC ? null : ["Ctrl + scroll", "Zoom the page in or out"], // macOS doesn't send this one; there the pinch is the gesture
     ["Mouse side buttons", "Back or forward"],
+    [MAC ? "Option + drag" : "Alt + drag", "Screenshot of the area you drag across"],
+    ["Three fingers down", "Area screenshot (touch screen)"],
     ["Middle-click a link", "Open it in a new tab"],
     ["Point at the left edge", "Show the sidebar while it is hidden"],
   ].filter(Boolean).map(([what, does]) => row(what, does))),

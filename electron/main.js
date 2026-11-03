@@ -74,6 +74,7 @@ const DEFAULT_SETTINGS = {
   checkUpdates: false,                      // ask GitHub for a newer release when Alcove starts (at most once a day); off unless the user turns it on
   swipeNav: true,                           // two fingers sideways on a trackpad (or in from a touch screen's edge) go back or forward
   mouseNav: true,                           // the mouse's back and forward buttons do the same
+  shotGesture: true,                        // Option/Alt + drag on a page captures that area; three fingers down on a touch screen open the area tool
 };
 const SETTING_RULES = {
   searchEngine: v => typeof v === "string" && v.length < 30,
@@ -95,6 +96,7 @@ const SETTING_RULES = {
   checkUpdates: v => typeof v === "boolean",
   swipeNav: v => typeof v === "boolean",
   mouseNav: v => typeof v === "boolean",
+  shotGesture: v => typeof v === "boolean",
   glass: v => typeof v === "boolean",
   frost: v => typeof v === "number" && v >= 0 && v <= 100,
   sidebarMode: v => ["overlay", "docked"].includes(v),
@@ -1594,6 +1596,29 @@ ipcMain.handle("alcove-nav", (e, op, kind) => {
   if (!on) return false;
   if (op === "back" && h.canGoBack()) { h.goBack(); return true; }
   if (op === "forward" && h.canGoForward()) { h.goForward(); return true; }
+  return false;
+});
+
+// The area-capture gesture (yt-preload.js): "area" captures that rectangle of the tab (viewport CSS pixels) straight into the
+// screenshot window; "region" opens the drag-a-box tool. Only a tab's own top frame may ask, for itself.
+ipcMain.handle("alcove-shot", async (e, op, rect) => {
+  const wc = e.sender, id = [...tabs].find(([, v]) => v.webContents === wc)?.[0];
+  if (!e.senderFrame || e.senderFrame !== wc.mainFrame || !id) return null;
+  if (op === "can") return S().shotGesture !== false;
+  if (S().shotGesture === false || id !== shownId) return false;
+  if (op === "region") { await startRegion(id).catch(() => {}); return true; }
+  if (op === "area") {
+    const n = v => (typeof v === "number" && isFinite(v) ? v : NaN), r = rect || {};
+    const [vw, vh] = await wc.executeJavaScript("[innerWidth, innerHeight]").catch(() => [0, 0]);
+    const x = Math.max(0, Math.round(n(r.x))), y = Math.max(0, Math.round(n(r.y)));
+    const w = Math.min(Math.round(n(r.width)), vw - x), h = Math.min(Math.round(n(r.height)), vh - y);
+    if (!(w >= 8 && h >= 8)) return false;
+    // capturePage takes the area in the page's own pixels at zoom 1; a zoomed page's CSS pixels are scaled by its zoom factor
+    const z = wc.getZoomFactor(), img = await wc.capturePage({ x: Math.round(x * z), y: Math.round(y * z), width: Math.round(w * z), height: Math.round(h * z) });
+    if (img.isEmpty()) return false;
+    await showShotPopup(img.toPNG());
+    return true;
+  }
   return false;
 });
 

@@ -15,7 +15,8 @@ Built on [Electron](https://www.electronjs.org/) (Chromium). Plain HTML, CSS and
 - **Tools:** timers, stopwatch, Pomodoro, alarms, time tracking, focus mode (blocks distracting sites), world clock,
   notes and to-dos.
 - **Gestures:** swipe left or right with two fingers to go back or forward (or in from the screen's edge on a touch
-  screen), the mouse's back and forward buttons, pinch to zoom. Listed and switchable in Settings › Gestures.
+  screen), the mouse's back and forward buttons, pinch to zoom, and Option/Alt + drag (or three fingers down on a touch
+  screen) to screenshot an area. Listed and switchable in Settings › Gestures.
 - **Markdown editor:** Visual and Code views, folders you mount like vaults, search, tags, a graph of linked notes.
 - **Also:** Chrome Web Store extensions, screenshots, YouTube ad skipping and SponsorBlock, video download,
   import from other browsers, profiles, a frosted-glass look.

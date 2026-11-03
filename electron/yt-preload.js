@@ -264,3 +264,66 @@ if (window === window.top) {
   // the mouse's own back and forward buttons (the 4th and 5th)
   window.addEventListener("mouseup", e => { if (e.button === 3 || e.button === 4) nav(e.button === 3 ? "back" : "forward", "button"); }, true);
 }
+
+// ---- gesture: capture an area of the page ----
+// Hold Option (Alt) and drag: a box follows the pointer, the rest of the page dims, and letting go sends the box to the app, which
+// captures exactly that area into the usual screenshot window. On a touch screen, three fingers swiping down open the area tool.
+// A plain Option-click (no drag) still reaches the page. Settings › Gestures can turn it off ("alcove-shot" in main.js).
+if (window === window.top) {
+  const shot = (op, rect) => ipcRenderer.invoke("alcove-shot", op, rect);
+  let enabled = true, sel = null, justDragged = 0;
+  const refresh = () => shot("can").then(v => { enabled = !!v; }, () => {});
+  refresh(); window.addEventListener("focus", refresh); // the switch may change in Settings while this page is open
+  const drawSel = () => {
+    if (!sel.host) {
+      const host = document.createElement("alcove-area"), root = host.attachShadow({ mode: "closed" }), box = document.createElement("div"), tag = document.createElement("div");
+      host.style.cssText = "all:initial;position:fixed;inset:0;pointer-events:none;z-index:2147483647";
+      root.append(box, tag); document.documentElement.append(host);
+      Object.assign(sel, { host, box, tag });
+    }
+    const x = Math.min(sel.x0, sel.x), y = Math.min(sel.y0, sel.y), w = Math.abs(sel.x - sel.x0), h = Math.abs(sel.y - sel.y0);
+    sel.box.style.cssText = `position:absolute;left:${x}px;top:${y}px;width:${w}px;height:${h}px;box-sizing:border-box;border:1.5px solid #3b74ff;border-radius:3px;` +
+      "box-shadow:0 0 0 100vmax rgba(0,0,0,.32);background:rgba(59,116,255,.06)";
+    sel.tag.textContent = `${Math.round(w)} × ${Math.round(h)}`;
+    sel.tag.style.cssText = `position:absolute;left:${x}px;top:${Math.max(4, y - 26)}px;padding:3px 7px;border-radius:6px;background:#3b74ff;color:#fff;` +
+      "font:600 11px/1.3 -apple-system,'Segoe UI',system-ui,sans-serif";
+  };
+  const clear = () => { if (sel && sel.host) sel.host.remove(); sel = null; };
+  window.addEventListener("mousedown", e => {
+    if (e.button !== 0 || !e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    if (!enabled) { refresh(); return; } // ask again, so turning it back on works on the next try
+    sel = { x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, live: false };
+    e.preventDefault(); // no text selection or link drag while marking an area
+  }, true);
+  window.addEventListener("mousemove", e => {
+    if (!sel) return;
+    if (!(e.buttons & 1)) { clear(); return; }
+    sel.x = Math.max(0, Math.min(innerWidth, e.clientX)); sel.y = Math.max(0, Math.min(innerHeight, e.clientY));
+    if (!sel.live && Math.hypot(sel.x - sel.x0, sel.y - sel.y0) > 6) sel.live = true;
+    if (sel.live) { e.preventDefault(); drawSel(); }
+  }, true);
+  window.addEventListener("mouseup", e => {
+    if (!sel || e.button !== 0) return;
+    const s = sel, rect = { x: Math.min(s.x0, s.x), y: Math.min(s.y0, s.y), width: Math.abs(s.x - s.x0), height: Math.abs(s.y - s.y0) };
+    clear();
+    if (!s.live) return;
+    justDragged = performance.now();
+    if (rect.width < 8 || rect.height < 8) return;
+    // take the box away first and let the page paint without it, then capture
+    requestAnimationFrame(() => requestAnimationFrame(() => shot("area", rect)));
+  }, true);
+  window.addEventListener("click", e => { if (performance.now() - justDragged < 300) { e.preventDefault(); e.stopPropagation(); } }, true); // the drag isn't a click on a link
+  window.addEventListener("keydown", e => { if (e.key === "Escape" && sel) { clear(); e.preventDefault(); } }, true);
+  window.addEventListener("blur", clear);
+
+  // three fingers swiping down on a touch screen: the area tool
+  let tri = null;
+  const avg = t => [[...t].reduce((a, p) => a + p.clientX, 0) / t.length, [...t].reduce((a, p) => a + p.clientY, 0) / t.length];
+  window.addEventListener("touchstart", e => { tri = e.touches.length === 3 ? { p: avg(e.touches), t: performance.now() } : null; }, { passive: true, capture: true });
+  window.addEventListener("touchmove", e => {
+    if (!tri || e.touches.length !== 3) return;
+    const [x, y] = avg(e.touches), dx = x - tri.p[0], dy = y - tri.p[1];
+    if (dy > 90 && Math.abs(dx) < 70 && performance.now() - tri.t < 900) { tri = null; shot("region"); } // the app checks the switch
+  }, { passive: true, capture: true });
+  window.addEventListener("touchend", () => { tri = null; }, { passive: true, capture: true });
+}

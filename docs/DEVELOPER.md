@@ -355,6 +355,15 @@ web session (`applyBlocking`).
   forward, short swipe, vertical scroll, Shift+wheel, a sideways-scrolling strip, the setting off); not yet by hand on a real trackpad,
   a Magic Mouse, a Windows precision touchpad or a touch screen. Note that CDP's synthetic wheel events look like mouse notches
   (`wheelDeltaX` 120), so don't filter on that.
+- **Area screenshot gesture** (`shotGesture`). *Option/Alt + drag* on a page: the preload draws the box (`alcove-area`, the same closed
+  shadow-root technique, the rest of the page dimmed, the size in a tag), swallows the mousedown so no text gets selected and the click
+  that would follow the drag, removes the box, waits two frames, and sends the rectangle (viewport CSS px) to
+  `ipcMain.handle("alcove-shot")`, which captures exactly that area with `capturePage` (scaled by the tab's zoom factor, since
+  `capturePage` takes view pixels) into the usual screenshot window (`showShotPopup`). A plain Option-click without a drag still reaches
+  the page. *Three fingers swiping down on a touch screen* open the existing drag-a-box tool (`startRegion`). macOS keeps three-finger
+  trackpad swipes for itself, so Option-drag is the trackpad gesture. The page caches the switch and asks again on focus and on any
+  Option-mousedown while it's off. Tested over CDP: a 400 x 250 drag gives 800 x 500 px on a Retina screen, 300 x 180 at 150 % zoom
+  gives 900 x 540, plus Option-click, the switch, and a three-finger touch swipe.
 - **Staying up.** A page whose process dies is reloaded (`render-process-gone` -> `tab-crashed`); if the sidebar's own process dies its
   tabs are closed quietly and it reloads and reopens the active tab. Asking to open a tab that already has a view just shows it,
   and the sidebar marks a tab open before the call, so two activations at once can't make two views. Own-page tabs are saved as
