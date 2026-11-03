@@ -679,13 +679,18 @@ page on the wrong host.
 
 When a tab's main frame fails with `ERR_INTERNET_DISCONNECTED` (-106, and only that: a mistyped address or a dead site is a different
 problem and keeps the normal error page), the `did-fail-load` handler in `openTab` loads `offline.html?url=<failed address>`, the way
-`blocked.html` is used for Focus mode. It is one canvas (600 x 300 units) with no network use: a shaded tabby asleep on a cushion in an
-arch, under a round night window with a moon and twinkling stars and a warm glow. The cat has three pose families drawn from Bézier
-shapes (`poseLie`, `poseSit`, `poseStand`; tails are tapered fills from `tail()`, stripes are clipped to the body with `inside()`), and a
-change of family cross-fades for 0.22 s (`fade`). Holding the pointer on the cat purrs: happy eyes, hearts, a slight shiver and a soft
-purr synthesized with Web Audio (`purrSound`, brown noise through a low-pass filter pulsed at 25 Hz, only while held). A click
-elsewhere, Space or "Drop yarn" drops a ball of yarn with gravity and friction that unwinds a thread on the floor; the cat yawns
-(`wake`), chases and bats it with a raised paw (`bats`, 7 per toss), sits, and after `IDLE` ms with no input walks home and sleeps. On the `online` event the page reloads the original
+`blocked.html` is used for Focus mode. It is one canvas (600 x 300 units) with no network use: a shaded tabby on a cushion in an arch, under a round night window with a moon
+and twinkling stars and a warm glow. The cat is a small rig, not a set of pictures: hips, shoulders and a head on a spine (`rig`), four
+two-part legs solved to where their paws are (`limb`, joints bend backward and never go through the floor), a body that is the union of
+round parts (`capsule`, which also clips the stripes and the cream belly and chest), and a tail that is a chain of damped springs that
+lags behind the body's acceleration and lies on the floor (`tailAng`, `tailShape`). Each pose in `POSES` (stand, walk, run, crouch, air,
+sit, groom, lie, bow) is a set of targets with paw places from `feetFor`; the rig eases toward the current one every frame, so every
+change of pose is a motion, never a cut. Walking plants each paw for 60 % of its step (the gait phase advances with distance, so paws
+don't slide). Behaviour (`step`): asleep in a loaf with its chin on its paws; held, it purrs (happy eyes, hearts, a shiver, and a soft
+purr synthesized with Web Audio, `purrSound`, only while held); a click elsewhere, Space or "Drop yarn" drops a ball of yarn with gravity,
+a bouncing landing, rolling friction and a spin that matches its roll, unwinding a thread on the floor. The cat yawns awake (`wake`),
+runs to about 75 px from the yarn, crouches and wiggles, then leaps on an arc aimed so its front paws land on the ball and swats it
+(`bats`, 6 tries, a miss counts), sits, often grooms (paw to mouth), and after `IDLE` ms with no input walks home and sleeps. On the `online` event the page reloads the original
 address after a stretch, unless someone touched it in the last 3 s (then it says so). Reduced motion removes the breathing, drifting z's
 and tail sway. Test it by emulating offline with CDP `Network.emulateNetworkConditions` on a tab and navigating (an `online` event fires
 spuriously at load, hence the 2 s guard).
