@@ -736,6 +736,30 @@ notification banners, and **everything on Windows**. Check those by hand before 
    both views with a folder mounted; Settings changes applying live; sign in with Google on a site that uses a popup; quit with an
    unsaved note and relaunch (tabs restored, the edit offered back).
 
+### 8.6 The web page (`site/`)
+
+The product page (https://mrmx485-sudo.github.io/alcove/) is plain HTML, CSS and JavaScript in `site/`: no build step, no framework, no web
+fonts, no third-party requests.
+
+- **Preview:** `python3 -m http.server 8080 --directory site`.
+- **Deploy:** `.github/workflows/pages.yml` publishes `site/` on every push to `main` that changes it. One-time setup by the repository
+  owner: Settings › Pages › Build and deployment › Source: **GitHub Actions**.
+- **Feature list:** the "All features" section of `index.html` is hand-written HTML, one `<li class="f" data-cat="…">` per feature. Check
+  each entry against the code before adding it (`COMMANDS` in `ui/palette.js`, `ui/tools-page.js`, Settings) and keep it in step with
+  the app. The page's calculator and unit converter in `app.js` are copies of `calculate()` and `convertUnits()` in `ui/palette.js`.
+- **Downloads:** the buttons link to the latest-release page. `app.js` asks the GitHub API for the latest release and points them at the
+  files, matching `Alcove-Setup-*-x64.exe`, `*-mac-arm64.dmg` and `*-mac-x64.dmg` (`FILES`), so keep that naming. A draft release is
+  invisible to the page; a pre-release is too (`releases/latest` skips both).
+- **Security:** a CSP `<meta>` allows only the page's own files and `connect-src https://api.github.com`. There are no inline scripts or
+  style attributes (set styles from JS with `style.setProperty`). Theme, motion and layout work without the script except the demos.
+- **Screenshots** (`site/img/*.webp`, light and dark of each) are real captures from a throwaway instance (8.1) through CDP
+  `Page.captureScreenshot`, one view at a time (the page, the sidebar, the palette), laid over each other with CSS (`.window`). Use sample
+  data only, and check before publishing: the Markdown status bar and the palette's "Recently closed" rows show local file paths (crop
+  the first, close the start tab before capturing the second). Keep the test window in front while capturing, or the glass tint and the
+  sidebar's light/dark text follow a stale backdrop. `--host-resolver-rules="MAP *.example 127.0.0.1:8765"` gives sample tabs
+  believable addresses.
+- **Contact:** the support address appears in the support section and the footer of `index.html`.
+
 ---
 
 ## 9. Conventions

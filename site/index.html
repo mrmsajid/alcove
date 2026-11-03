@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alcove: a calmer browser with your tools built in</title>
+  <meta name="description" content="Alcove is a bezel-less, privacy focused browser for Mac and Windows with a floating sidebar, a universal command bar, a built-in ad blocker, screenshots, timers, notes and a Markdown editor. Free and open source.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://mrmx485-sudo.github.io/alcove/">
+  <link rel="icon" type="image/png" href="img/favicon-64.png">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Alcove: a calmer browser with your tools built in">
+  <meta property="og:description" content="A bezel-less, privacy focused browser for Mac and Windows. Floating sidebar, universal command bar, built-in ad blocker and tools. Free and open source.">
+  <meta property="og:url" content="https://mrmx485-sudo.github.io/alcove/">
+  <meta property="og:image" content="https://mrmx485-sudo.github.io/alcove/img/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <!-- Icons: one sprite, drawn with the text colour. -->
+  <svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
+    <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></symbol>
+    <symbol id="i-command" viewBox="0 0 24 24"><path d="M9 9h6v6H9zM9 9V7a2 2 0 1 0-2 2h2zM15 9V7a2 2 0 1 1 2 2h-2zM9 15v2a2 2 0 1 1-2-2h2zM15 15v2a2 2 0 1 0 2-2h-2z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="13" r="7"/><path d="M12 13V9M9 3h6"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4M14 5l-4 14"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="10" rx="2"/><path d="M3 19h18"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 3-6.2M4 4v4h4"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6zM4 4l16 16"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 4l9 5-9 5-9-5zM3 14l9 5 9-5"/></symbol>
+  </svg>
+
+  <div class="progress" aria-hidden="true"><i></i></div>
+  <a class="skip" href="#main">Skip to the content</a>
+
+  <header class="top">
+    <div class="wrap bar">
+      <a class="brand" href="#top" aria-label="Alcove, back to the top">
+        <img src="img/icon-512.png" alt="" width="32" height="32">
+        <span>Alcove</span>
+      </a>
+      <nav class="links" aria-label="Main">
+        <a href="#showcase">Tour</a>
+        <a href="#try">Try it</a>
+        <a href="#features">All features</a>
+        <a href="#privacy">Privacy</a>
+        <a href="#download">Download</a>
+        <a href="#support">Support</a>
+      </nav>
+      <div class="bar-actions">
+        <button class="icon-btn" id="theme" type="button" aria-label="Switch between light and dark" aria-pressed="false">
+          <svg class="icon i-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+          <svg class="icon i-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+        </button>
+        <a class="btn btn-primary btn-sm" href="#download">Download</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- ================= Hero ================= -->
+    <section class="hero" id="top">
+      <div class="blobs" aria-hidden="true"><i class="b1"></i><i class="b2"></i><i class="b3"></i></div>
+      <div class="wrap">
+        <p class="eyebrow pill rise"><span class="dot"></span>Early release · Free and open source</p>
+        <h1 class="rise">A calmer browser, with your <span class="grad">tools built in</span>.</h1>
+        <p class="lead rise">Alcove is bezel-less: no toolbar, no title bar, just your page. Tabs live in a floating sidebar, one command bar does everything, and the tools you reach for all day are already inside.</p>
+        <div class="cta rise">
+          <a class="btn btn-primary btn-lg" id="dl-hero" href="#download"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Download</span></a>
+          <a class="btn btn-ghost btn-lg" href="#try"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg><span>Try it in your browser</span></a>
+        </div>
+        <p class="fine rise" data-release-line>Installers for Mac (Apple silicon and Intel) and Windows (64-bit).</p>
+        <ul class="trust rise" aria-label="Highlights">
+          <li><svg class="icon" aria-hidden="true"><use href="#i-eye-off"/></svg>No telemetry</li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>No account</li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg>Built-in ad blocker</li>
+          <li><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg>Open source, MIT</li>
+        </ul>
+
+        <div class="stage rise" id="stage">
+          <div class="tilt" id="tilt">
+            <div class="window" id="win" data-sidebar="on" role="img" aria-label="The Alcove window: a floating sidebar of tabs over a start page with a search bar, pinned sites and a report of today's to-dos, time and Pomodoros. A button below hides the sidebar so the page fills the whole window.">
+              <picture class="p-inset">
+                <source media="(prefers-color-scheme: dark)" srcset="img/hero-page-dark.webp">
+                <img class="w-page w-inset" src="img/hero-page-light.webp" alt="" width="2768" height="1686" fetchpriority="high">
+              </picture>
+              <picture class="p-full">
+                <source media="(prefers-color-scheme: dark)" srcset="img/hero-page-full-dark.webp">
+                <img class="w-page w-full" src="img/hero-page-full-light.webp" alt="" width="2768" height="1686">
+              </picture>
+              <picture class="p-side">
+                <source media="(prefers-color-scheme: dark)" srcset="img/hero-sidebar-dark.webp">
+                <img class="w-side" src="img/hero-sidebar-light.webp" alt="" width="560" height="1686">
+              </picture>
+            </div>
+            <div class="chip chip-pomo" aria-hidden="true">
+              <svg viewBox="0 0 44 44" class="ring"><circle class="trk" cx="22" cy="22" r="18"/><circle class="val" cx="22" cy="22" r="18" id="chip-ring"/></svg>
+              <div><b id="chip-time">24:57</b><span>Focus</span></div>
+            </div>
+            <div class="chip chip-cmd" aria-hidden="true">
+              <kbd class="mod">⌘ K</kbd>
+              <div><b id="chip-q">12 × (3 + 4)</b><span id="chip-a">= 84</span></div>
+            </div>
+            <div class="chip chip-done" aria-hidden="true">
+              <svg class="icon tick" aria-hidden="true"><use href="#i-check"/></svg>
+              <div><b>7 to-dos done</b><span>Today</span></div>
+            </div>
+          </div>
+          <div class="seg" role="group" aria-label="Sidebar">
+            <button type="button" class="on" data-side="on" aria-pressed="true">Sidebar shown</button>
+            <button type="button" data-side="off" aria-pressed="false">Sidebar hidden</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Marquee ================= -->
+    <div class="marquee" aria-hidden="true"><div class="track"><span>Bezel-less window</span><span>Floating sidebar</span><span>Spaces</span><span>Split view</span><span>Peek</span><span>Command bar</span><span>Calculator</span><span>Unit converter</span><span>Currency converter</span><span>Ad blocker</span><span>YouTube ad skipping</span><span>Screenshots</span><span>Pomodoro</span><span>Alarms</span><span>Time tracking</span><span>Focus mode</span><span>World clock</span><span>Markdown editor</span><span>Graph view</span><span>To-do lists</span><span>Colour picker</span><span>QR codes</span><span>Chrome extensions</span><span>Picture in Picture</span><span>Frosted glass</span><span>Profiles</span><span>Bezel-less window</span><span>Floating sidebar</span><span>Spaces</span><span>Split view</span><span>Peek</span><span>Command bar</span><span>Calculator</span><span>Unit converter</span><span>Currency converter</span><span>Ad blocker</span><span>YouTube ad skipping</span><span>Screenshots</span><span>Pomodoro</span><span>Alarms</span><span>Time tracking</span><span>Focus mode</span><span>World clock</span><span>Markdown editor</span><span>Graph view</span><span>To-do lists</span><span>Colour picker</span><span>QR codes</span><span>Chrome extensions</span><span>Picture in Picture</span><span>Frosted glass</span><span>Profiles</span></div></div>
+
+    <!-- ================= Pillars ================= -->
+    <section class="pillars" aria-label="What makes Alcove different">
+      <div class="wrap grid3">
+        <article class="reveal spot">
+          <svg class="icon big" aria-hidden="true"><use href="#i-sidebar"/></svg>
+          <h2>The page comes first</h2>
+          <p>A bezel-less window with no toolbar and no title bar. Tabs, spaces and pinned sites float in a sidebar that slides away, so the site you are reading gets everything.</p>
+        </article>
+        <article class="reveal spot" data-d="1">
+          <svg class="icon big" aria-hidden="true"><use href="#i-command"/></svg>
+          <h2>One bar for everything</h2>
+          <p>Press Cmd or Ctrl+K to search tabs, history and the web, run any command, do maths, convert units and currencies, and jump anywhere without touching the mouse.</p>
+        </article>
+        <article class="reveal spot" data-d="2">
+          <svg class="icon big" aria-hidden="true"><use href="#i-shield"/></svg>
+          <h2>Private by default</h2>
+          <p>A built-in ad and tracker blocker, no account and no telemetry. Your history, notes, timers and time tracking never leave your device.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ================= Tour ================= -->
+    <section class="showcase" id="showcase" aria-labelledby="tour-title">
+      <div class="wrap">
+        <header class="sec-head reveal">
+          <p class="eyebrow">Take the tour</p>
+          <h2 id="tour-title">Five screens, one calm window</h2>
+          <p class="sub">Real screenshots of Alcove. Pick a screen, or let the tour run.</p>
+        </header>
+        <div class="tour reveal">
+          <div class="tabs" role="tablist" aria-label="Product tour" aria-orientation="vertical">
+            <button class="tab on" role="tab" id="t1" aria-controls="p1" aria-selected="true" type="button"><b>Your start page</b><span>Search, pinned sites and a live report of your day.</span><i class="bar"><u></u></i></button>
+            <button class="tab" role="tab" id="t2" aria-controls="p2" aria-selected="false" tabindex="-1" type="button"><b>Frosted glass sidebar</b><span>Tabs that float over the page and tint to match it.</span><i class="bar"><u></u></i></button>
+            <button class="tab" role="tab" id="t3" aria-controls="p3" aria-selected="false" tabindex="-1" type="button"><b>Universal command bar</b><span>Tabs, history, commands, maths and the web in one box.</span><i class="bar"><u></u></i></button>
+            <button class="tab" role="tab" id="t4" aria-controls="p4" aria-selected="false" tabindex="-1" type="button"><b>Tools, built in</b><span>Timers, Pomodoro, alarms, tracking and focus mode.</span><i class="bar"><u></u></i></button>
+            <button class="tab" role="tab" id="t5" aria-controls="p5" aria-selected="false" tabindex="-1" type="button"><b>Markdown notebook</b><span>A visual editor over plain files on your disk.</span><i class="bar"><u></u></i></button>
+          </div>
+          <div class="panels">
+            <div class="panel on" role="tabpanel" id="p1" aria-labelledby="t1">
+              <div class="window static" role="img" aria-label="The start page with a search bar, eight pinned sites and a Today report showing 7 to-dos done, 5 Markdown to-dos done, 1 hour 21 minutes of browsing and 4 Pomodoros.">
+                <picture><source media="(prefers-color-scheme: dark)" srcset="img/hero-page-dark.webp"><img class="w-page" src="img/hero-page-light.webp" alt="" width="2768" height="1686" loading="lazy"></picture>
+                <picture><source media="(prefers-color-scheme: dark)" srcset="img/hero-sidebar-dark.webp"><img class="w-side" src="img/hero-sidebar-light.webp" alt="" width="560" height="1686" loading="lazy"></picture>
+              </div>
+            </div>
+            <div class="panel" role="tabpanel" id="p2" aria-labelledby="t2" inert>
+              <div class="window static" role="img" aria-label="An article open in Alcove. The sidebar is frosted glass that picks up the colours of the page underneath it.">
+                <picture><source media="(prefers-color-scheme: dark)" srcset="img/browse-page-dark.webp"><img class="w-page" src="img/browse-page-light.webp" alt="" width="2768" height="1686" loading="lazy"></picture>
+                <picture><source media="(prefers-color-scheme: dark)" srcset="img/browse-sidebar-dark.webp"><img class="w-side" src="img/browse-sidebar-light.webp" alt="" width="560" height="1686" loading="lazy"></picture>
+              </div>
+            </div>
+            <div class="panel" role="tabpanel" id="p3" aria-labelledby="t3" inert>
+              <div class="window static" role="img" aria-label="The command bar open over an article, listing tabs, a web search and commands such as Show Tools and Reopen Closed Tab with their shortcuts.">
+                <picture><source media="(prefers-color-scheme: dark)" srcset="img/browse-page-dark.webp"><img class="w-page" src="img/browse-page-light.webp" alt="" width="2768" height="1686" loading="lazy"></picture>
+                <picture><source media="(prefers-color-scheme: dark)" srcset="img/browse-sidebar-dark.webp"><img class="w-side" src="img/browse-sidebar-light.webp" alt="" width="560" height="1686" loading="lazy"></picture>
+                <picture class="w-pal"><source media="(prefers-color-scheme: dark)" srcset="img/palette-dark.png"><img src="img/palette-light.png" alt="" width="1160" height="840" loading="lazy"></picture>
+              </div>
+            </div>
+            <div class="panel" role="tabpanel" id="p4" aria-labelledby="t4" inert>
+              <figure class="shot">
+                <picture><source media="(prefers-color-scheme: dark)" srcset="img/tools-dark.webp"><img src="img/tools-light.webp" alt="The Tools page with a stopwatch, a timer, a Pomodoro counting down from 25 minutes and focus mode." width="2208" height="1280" loading="lazy"></picture>
+              </figure>
+            </div>
+            <div class="panel" role="tabpanel" id="p5" aria-labelledby="t5" inert>
+              <figure class="shot">
+                <picture><source media="(prefers-color-scheme: dark)" srcset="img/markdown-dark.webp"><img src="img/markdown-light.webp" alt="The Markdown editor showing a note called Launch plan with tags, a to-do list, a numbered list and a table." width="2768" height="1612" loading="lazy"></picture>
+              </figure>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Try it ================= -->
+    <section class="try band" id="try" aria-labelledby="try-title">
+      <div class="wrap">
+        <header class="sec-head reveal">
+          <p class="eyebrow">Try it right here</p>
+          <h2 id="try-title">Small replicas that really work</h2>
+          <p class="sub">Type into the command bar, start the Pomodoro, tick off a to-do. This is the same logic Alcove runs.</p>
+        </header>
+        <div class="demos">
+          <article class="demo demo-cmd reveal" aria-labelledby="dc-t">
+            <header><h3 id="dc-t">Universal command bar</h3><kbd class="mod" id="mod-k">⌘ K</kbd></header>
+            <div class="pal">
+              <label class="sr" for="pal-q">Type a command, a search, a sum or a conversion</label>
+              <div class="pal-in"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+                <input id="pal-q" type="text" autocomplete="off" spellcheck="false" placeholder="Try: 12*(3+4)   5 mi to km   yt lofi   pomodoro" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list"></div>
+              <ul class="pal-list" id="pal-list" role="listbox" aria-label="Results"></ul>
+              <p class="pal-hint" id="pal-hint" aria-live="polite">Use the arrow keys and Enter, or click a result.</p>
+            </div>
+            <div class="try-chips" role="group" aria-label="Examples">
+              <button type="button" data-q="12*(3+4)">12*(3+4)</button>
+              <button type="button" data-q="5 mi to km">5 mi to km</button>
+              <button type="button" data-q="72 f to c">72 f to c</button>
+              <button type="button" data-q="2 gb to mb">2 gb to mb</button>
+              <button type="button" data-q="yt lofi">yt lofi</button>
+              <button type="button" data-q="split mail">split mail</button>
+              <button type="button" data-q="dark">dark</button>
+            </div>
+          </article>
+
+          <article class="demo demo-pomo reveal" data-d="1" aria-labelledby="dp-t">
+            <header><h3 id="dp-t">Pomodoro</h3><span class="tag" id="pomo-phase">Focus</span></header>
+            <div class="ring-wrap">
+              <svg viewBox="0 0 120 120" class="big-ring" aria-hidden="true"><circle class="trk" cx="60" cy="60" r="54"/><circle class="val" id="pomo-ring" cx="60" cy="60" r="54"/></svg>
+              <div class="ring-text"><b id="pomo-time" role="timer" aria-live="off">25:00</b><span id="pomo-sessions">0 sessions today</span></div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary" id="pomo-go" type="button"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg><span>Start</span></button>
+              <button class="btn btn-ghost" id="pomo-reset" type="button"><svg class="icon" aria-hidden="true"><use href="#i-reset"/></svg><span>Reset</span></button>
+              <button class="btn btn-ghost" id="pomo-skip" type="button">Skip</button>
+            </div>
+          </article>
+
+          <article class="demo demo-report reveal" data-d="2" aria-labelledby="dr-t">
+            <header><h3 id="dr-t">Your day, live</h3><button class="mini" id="rep-copy" type="button"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy report</span></button></header>
+            <ul class="todos" id="todos"></ul>
+            <div class="stats">
+              <div class="stat"><b id="rep-done" data-v="2">2</b><span>To-dos done</span></div>
+              <div class="stat"><b id="rep-open">3</b><span>Open</span></div>
+              <div class="stat"><b id="rep-pct">40%</b><span>Of today</span></div>
+            </div>
+            <div class="meter" aria-hidden="true"><i id="rep-bar"></i></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Every feature ================= -->
+    <section class="features" id="features" aria-labelledby="feat-title">
+      <div class="wrap">
+        <header class="sec-head reveal">
+          <p class="eyebrow">Everything in the box</p>
+          <h2 id="feat-title"><span class="grad" id="feat-count" data-count="104">104</span> features, listed</h2>
+          <p class="sub">No add-ons needed. Search the list or pick a category.</p>
+        </header>
+        <div class="finder reveal">
+          <label class="sr" for="feat-q">Search features</label>
+          <div class="search"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><input id="feat-q" type="search" placeholder="Search features: screenshot, calculator, adblock, pomodoro…" autocomplete="off"></div>
+          <div class="cats" role="group" aria-label="Categories"><button type="button" class="cat on" data-cat="all" aria-pressed="true">All <i>104</i></button><button type="button" class="cat" data-cat="browse" aria-pressed="false">Browsing <i>20</i></button><button type="button" class="cat" data-cat="search" aria-pressed="false">Search and command <i>13</i></button><button type="button" class="cat" data-cat="privacy" aria-pressed="false">Privacy and security <i>15</i></button><button type="button" class="cat" data-cat="tools" aria-pressed="false">Productivity tools <i>15</i></button><button type="button" class="cat" data-cat="notes" aria-pressed="false">Notes and Markdown <i>10</i></button><button type="button" class="cat" data-cat="capture" aria-pressed="false">Capture and media <i>7</i></button><button type="button" class="cat" data-cat="page" aria-pressed="false">Page tools <i>10</i></button><button type="button" class="cat" data-cat="custom" aria-pressed="false">Make it yours <i>14</i></button></div>
+        </div>
+        <p class="result" id="feat-result" aria-live="polite">Showing all 104 features</p>
+        <ul class="fgrid" id="fgrid">
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Bezel-less window</h3><p>No toolbar and no title bar. The page fills the window, and the window buttons appear when you hover the corner.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Floating sidebar</h3><p>Your tabs sit in a sidebar that floats over the page and slides away when you do not need it.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Show or hide in one move</h3><p>Toggle the sidebar with a button, a shortcut, or by touching the edge of the screen.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Docked mode</h3><p>Prefer a fixed sidebar beside the page? Switch from Overlay to Docked in Settings.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Spaces</h3><p>Keep separate sets of tabs for work, home or a project, each with a name and an icon.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Pinned tabs</h3><p>Pin the sites you always need so they are one click away.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Tab groups</h3><p>Collect related tabs into groups to keep the sidebar tidy.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Tidy tabs</h3><p>Group tabs by site, close duplicates, close the others, or close everything below.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Recently closed</h3><p>Reopen a closed tab with the usual shortcut, or pick it from the command bar.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Split view</h3><p>Show two pages side by side with a divider you can drag.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Peek</h3><p>Preview a link in a floating window, then promote it to a tab or close it.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Link routing</h3><p>Open a link here, in a new tab, in the background, in Peek or in split view.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Picture in Picture</h3><p>Float a video above your other windows and keep browsing.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Mute controls</h3><p>Mute one tab or all tabs, with a sound indicator on the tabs that are playing.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Find in page</h3><p>Search the text of the page with the standard shortcut.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Zoom</h3><p>Zoom in and out, and choose the default zoom level for every page.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Force dark mode</h3><p>Turn any website dark. Alcove remembers the sites you chose.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Bookmarks, history and downloads</h3><p>A library for each of them, one shortcut away.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Crash recovery</h3><p>A crashed tab can be reloaded without touching your other tabs.</p></div></li>
+          <li class="f" data-cat="browse"><span class="tile c-browse"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></span><div><h3>Pick up where you left off</h3><p>Restore your tabs at start-up, or open a new tab or a page you choose.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>One bar for everything</h3><p>Press Cmd or Ctrl+K to search tabs, history, bookmarks, commands and the web from one box.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Search inside open pages</h3><p>Find text that appears inside your open tabs, not just their titles.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Close to 60 commands</h3><p>Every feature is a command. Type a few letters and press Enter.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Calculator</h3><p>Type 12*(3+4) and press Enter to copy the answer. Handles + - * / % ^ and brackets.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Unit converter</h3><p>Try 5 mi to km, 72 f to c or 2 gb to mb. Length, weight, volume, data and temperature.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Currency converter</h3><p>Type 100 usd to eur for a conversion at today's exchange rate.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Site shortcuts</h3><p>yt lofi, gh alcove or w lisbon search YouTube, GitHub or Wikipedia straight from the bar.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Your search engine</h3><p>DuckDuckGo, Google, Bing, Brave Search, Ecosia, Startpage, Perplexity, or your own URL.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Jump by name</h3><p>Switch to any tab, space or profile by typing part of its name.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Split by name</h3><p>Type split mail to show another tab beside the one you are on.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Move tabs</h3><p>Type move tab to work to send the current tab to another space.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Amazon product lookup</h3><p>Paste an ASIN into the bar to open that product page.</p></div></li>
+          <li class="f" data-cat="search"><span class="tile c-search"><svg class="icon" aria-hidden="true"><use href="#i-command"/></svg></span><div><h3>Keyboard first</h3><p>Shortcuts for the common commands are shown right in the results.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Built-in ad and tracker blocker</h3><p>Filter lists run inside the browser, with no extension to install.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Shield with a blocked counter</h3><p>See how many requests were blocked on the page you are on.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Per-site control</h3><p>Allow ads on a site you want to support, and only on that site.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>YouTube ad skipping</h3><p>Skips video ads automatically, without the black waiting screen.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>SponsorBlock</h3><p>Skips sponsor segments in YouTube videos. Switch it on or off any time.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Do Not Track</h3><p>Sent by default on every request.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>HTTPS-only mode</h3><p>An optional switch that upgrades plain http addresses to https, except local ones.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Permissions ask first</h3><p>Camera, microphone, location and notifications ask each time, and Block is the default answer.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Site permission manager</h3><p>Review what each site may do, and reset it in one click.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Pop-up protection</h3><p>Pop-ups open only when they come from something you clicked.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Clear cookies and cache</h3><p>Wipe them whenever you choose, from Settings.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Vetted extensions</h3><p>Alcove checks the package signature and shows an extension's permissions before it installs.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Sandboxed websites</h3><p>Sites run sandboxed and never get access to Alcove's own pages or commands.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>No account, no telemetry</h3><p>Nothing to sign up for, and nothing is sent anywhere about how you use it.</p></div></li>
+          <li class="f" data-cat="privacy"><span class="tile c-privacy"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg></span><div><h3>Open source</h3><p>MIT licensed. Read every line, build it yourself, or send a fix.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Stopwatch</h3><p>Start, stop and record laps.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Timer</h3><p>One-tap presets from 1 to 45 minutes, or any number of minutes you type.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Pomodoro</h3><p>Focus and break lengths you choose, with a count of the sessions you finished today.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Alarms</h3><p>Once, daily, weekly on chosen days, or monthly. Snooze them, and mute the sound if you like.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Focus mode</h3><p>Blocks a list of distracting sites for 25, 50 or 90 minutes. Edit the list to suit you.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Time tracking</h3><p>See how long you spent on each site, in each space and on each task.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Task timer</h3><p>Name a task, start the clock, and it lands in today's report.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>World clock</h3><p>Cities and time zones side by side, with day offsets and working-hours hints.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Daily report</h3><p>The start page shows your day live: to-dos, Markdown to-dos, browsing time, task time and Pomodoros.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Copy report</h3><p>One click copies today's report as text for a stand-up or a journal.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Notes</h3><p>A scratchpad for each space, kept on your device.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>To-do lists</h3><p>One list per space. Ticked items count toward your day.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Notifications</h3><p>Timers and alarms notify you even when Alcove is in the background.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Start page shortcuts</h3><p>Pin up to 24 of your favourite sites to the start page.</p></div></li>
+          <li class="f" data-cat="tools"><span class="tile c-tools"><svg class="icon" aria-hidden="true"><use href="#i-timer"/></svg></span><div><h3>Start from the start page</h3><p>Begin a timer or a Pomodoro straight from a new tab.</p></div></li>
+          <li class="f" data-cat="notes"><span class="tile c-notes"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg></span><div><h3>Visual editor</h3><p>Write formatted text and Alcove saves it as plain Markdown.</p></div></li>
+          <li class="f" data-cat="notes"><span class="tile c-notes"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg></span><div><h3>Code and split views</h3><p>Edit the raw Markdown, with a live preview beside it.</p></div></li>
+          <li class="f" data-cat="notes"><span class="tile c-notes"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg></span><div><h3>Graph view</h3><p>See how your notes link to each other.</p></div></li>
+          <li class="f" data-cat="notes"><span class="tile c-notes"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg></span><div><h3>Folders like vaults</h3><p>Mount several folders at once and search across all of them.</p></div></li>
+          <li class="f" data-cat="notes"><span class="tile c-notes"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg></span><div><h3>Tags</h3><p>Front-matter tags and inline #tags, with a tag bar and one-click tag search.</p></div></li>
+          <li class="f" data-cat="notes"><span class="tile c-notes"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg></span><div><h3>Tables, to-dos, code and quotes</h3><p>A formatting toolbar plus typing shortcuts such as # for headings and [] for a to-do.</p></div></li>
+          <li class="f" data-cat="notes"><span class="tile c-notes"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg></span><div><h3>Never lose a word</h3><p>Unsaved edits are kept as drafts, and Alcove asks before you quit with an unsaved note.</p></div></li>
+          <li class="f" data-cat="notes"><span class="tile c-notes"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg></span><div><h3>Plain files</h3><p>Notes are ordinary .md files on your disk. Open one from anywhere and it opens in the editor.</p></div></li>
+          <li class="f" data-cat="notes"><span class="tile c-notes"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg></span><div><h3>Counts toward your day</h3><p>Ticking a Markdown to-do shows up in the daily report on the start page.</p></div></li>
+          <li class="f" data-cat="notes"><span class="tile c-notes"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg></span><div><h3>Recent files and folders</h3><p>The Markdown tab in Tools lists the notes and folders you opened last.</p></div></li>
+          <li class="f" data-cat="capture"><span class="tile c-capture"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg></span><div><h3>Screenshot a region</h3><p>Drag over the part of the page you want.</p></div></li>
+          <li class="f" data-cat="capture"><span class="tile c-capture"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg></span><div><h3>Screenshot the visible area</h3><p>Capture exactly what is on screen.</p></div></li>
+          <li class="f" data-cat="capture"><span class="tile c-capture"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg></span><div><h3>Screenshot the full page</h3><p>Capture a long page in one image.</p></div></li>
+          <li class="f" data-cat="capture"><span class="tile c-capture"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg></span><div><h3>Screenshot preview</h3><p>Save, save as, copy to the clipboard or discard, right after you capture.</p></div></li>
+          <li class="f" data-cat="capture"><span class="tile c-capture"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg></span><div><h3>Download YouTube videos</h3><p>Set up the optional video tools once, then save a video with a shortcut.</p></div></li>
+          <li class="f" data-cat="capture"><span class="tile c-capture"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg></span><div><h3>Save and copy images</h3><p>Right-click any image to save it, copy it, or copy its address.</p></div></li>
+          <li class="f" data-cat="capture"><span class="tile c-capture"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg></span><div><h3>Download all images</h3><p>Grab every image on a page in one go.</p></div></li>
+          <li class="f" data-cat="page"><span class="tile c-page"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></span><div><h3>Auto-refresh</h3><p>Reload a tab every 30 seconds, 1, 5, 15 or 30 minutes. Handy for dashboards.</p></div></li>
+          <li class="f" data-cat="page"><span class="tile c-page"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></span><div><h3>Colour picker</h3><p>Pick any colour on the page and copy its hex code.</p></div></li>
+          <li class="f" data-cat="page"><span class="tile c-page"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></span><div><h3>QR code for this page</h3><p>Show a QR code to open the page on your phone.</p></div></li>
+          <li class="f" data-cat="page"><span class="tile c-page"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></span><div><h3>Copy link without tracking</h3><p>Strips utm and similar tracking parameters before you share.</p></div></li>
+          <li class="f" data-cat="page"><span class="tile c-page"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></span><div><h3>Copy as Markdown link</h3><p>Copies the page as a ready-made Markdown link.</p></div></li>
+          <li class="f" data-cat="page"><span class="tile c-page"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></span><div><h3>Translate page</h3><p>Opens the page in Google Translate.</p></div></li>
+          <li class="f" data-cat="page"><span class="tile c-page"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></span><div><h3>Archived copy</h3><p>Opens the Wayback Machine copy of the page.</p></div></li>
+          <li class="f" data-cat="page"><span class="tile c-page"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></span><div><h3>Amazon helpers</h3><p>Copy a product's ASIN, or open it in Keepa for price history.</p></div></li>
+          <li class="f" data-cat="page"><span class="tile c-page"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></span><div><h3>Add to start page</h3><p>Pin the site you are on as a shortcut.</p></div></li>
+          <li class="f" data-cat="page"><span class="tile c-page"><svg class="icon" aria-hidden="true"><use href="#i-code"/></svg></span><div><h3>View page source</h3><p>Available on any website, from the right-click menu.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Light, dark or system</h3><p>Follow your computer's setting, or pick one.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Accent colour</h3><p>Choose the colour used for highlights across the app.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Frosted glass sidebar</h3><p>Adjust blur, frost and shine, or switch to clear glass. The tint adapts to the page behind it.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Text size and compact mode</h3><p>Small, default or large text, and a tighter layout when you want more on screen.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Choose your new tab</h3><p>The start page, your search engine, a blank page or any address you like.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Chrome Web Store extensions</h3><p>Use the Add to Alcove button on a Web Store page. Extension pop-ups work too.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Import from other browsers</h3><p>Bring your data from Chrome, Edge, Brave, Arc or Vivaldi.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Profiles</h3><p>Separate browsing data for work and personal use.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Default browser</h3><p>Set Alcove as your default browser from Settings.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Downloads your way</h3><p>Pick a folder, or be asked where to save each file.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Spell check</h3><p>On by default, and easy to switch off.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Update check</h3><p>Press Check for updates, or switch on a quiet daily check at start-up.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Mac and Windows</h3><p>Apple silicon and Intel Macs, and 64-bit Windows 10 and 11.</p></div></li>
+          <li class="f" data-cat="custom"><span class="tile c-custom"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></span><div><h3>Chromium engine</h3><p>The same engine as Chrome, so sites behave the way you expect.</p></div></li>
+        </ul>
+        <p class="empty" id="feat-empty" hidden>Nothing matches that. Try a shorter word, or clear the search.</p>
+      </div>
+    </section>
+
+    <!-- ================= Privacy ================= -->
+    <section class="privacy" id="privacy" aria-labelledby="privacy-title">
+      <div class="wrap">
+        <div class="priv-card reveal">
+          <div class="priv-copy">
+            <p class="eyebrow">Privacy</p>
+            <h2 id="privacy-title">Your browsing is yours</h2>
+            <p class="lead">Alcove has no account, no analytics and no telemetry. Your history, bookmarks, tabs, notes, to-dos, timers and time tracking are stored on your device only.</p>
+            <ul class="ticks">
+              <li>Ad and tracker blocking is built in, with a shield that shows what was blocked on each page.</li>
+              <li>Do Not Track is on by default, and HTTPS-only mode is one switch away.</li>
+              <li>Camera, microphone, location and notifications ask first, and Block is the default answer.</li>
+              <li>Websites run sandboxed and never get access to Alcove's own pages or commands.</li>
+              <li>The code is open, so anyone can check all of this.</li>
+            </ul>
+          </div>
+          <div class="priv-side">
+            <div class="big-stats">
+              <div><b data-count="0">0</b><span>accounts needed</span></div>
+              <div><b data-count="0">0</b><span>telemetry or analytics</span></div>
+              <div><b>MIT</b><span>licensed, open source</span></div>
+            </div>
+            <div class="acc">
+              <h3><button type="button" aria-expanded="false" aria-controls="acc-net">Exactly what Alcove contacts</button></h3>
+              <div class="acc-p" id="acc-net" role="region"><div>
+                <table class="net">
+                  <thead><tr><th>Service</th><th>Why, and when</th></tr></thead>
+                  <tbody>
+                    <tr><td>Ad filter lists (GitHub)</td><td>Ad blocking. Fetched at start-up when your saved copy is over a day old; never while blocking is off.</td></tr>
+                    <tr><td>sponsor.ajay.app</td><td>SponsorBlock on YouTube. Sends a short hash prefix of the video id, not the id.</td></tr>
+                    <tr><td>Chrome Web Store</td><td>Only when you install an extension.</td></tr>
+                    <tr><td>GitHub releases</td><td>Only the video tools (yt-dlp, ffmpeg) you choose to set up, and the update check below.</td></tr>
+                    <tr><td>Exchange rates</td><td>Only when you type a currency conversion in the command bar.</td></tr>
+                    <tr><td>api.github.com</td><td>Check for updates: when you press the button, or daily at start-up if you switch that on (off by default).</td></tr>
+                    <tr><td>Sites you use</td><td>Each site's favicon, for the icons in the sidebar and on the start page.</td></tr>
+                  </tbody>
+                </table>
+                <p class="muted small">The full, always up-to-date list is in the <a href="https://github.com/mrmx485-sudo/alcove#privacy">README</a>.</p>
+              </div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Download ================= -->
+    <section class="download" id="download" aria-labelledby="download-title">
+      <div class="wrap">
+        <header class="sec-head reveal">
+          <p class="eyebrow">Get Alcove</p>
+          <h2 id="download-title">Download for Mac or Windows</h2>
+          <p class="sub" data-release-line-2>Free and open source under the MIT license.</p>
+        </header>
+        <p class="center note" data-mobile hidden>Alcove is a desktop browser. Open this page on your Mac or Windows computer to download it.</p>
+        <div class="grid3 dl">
+          <article class="card dl-card reveal spot" data-file="win">
+            <span class="badge" hidden>Recommended for you</span>
+            <svg class="icon big" aria-hidden="true"><use href="#i-monitor"/></svg>
+            <h3>Windows</h3>
+            <p class="muted">64-bit installer for Windows 10 and 11.</p>
+            <a class="btn btn-primary" href="https://github.com/mrmx485-sudo/alcove/releases/latest"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Download for Windows</span></a>
+            <p class="meta" data-meta></p>
+          </article>
+          <article class="card dl-card reveal spot" data-d="1" data-file="mac-arm64">
+            <span class="badge" hidden>Recommended for you</span>
+            <svg class="icon big" aria-hidden="true"><use href="#i-laptop"/></svg>
+            <h3>Mac, Apple silicon</h3>
+            <p class="muted">For Macs with an M1 chip or later.</p>
+            <a class="btn btn-primary" href="https://github.com/mrmx485-sudo/alcove/releases/latest"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Download for Apple silicon</span></a>
+            <p class="meta" data-meta></p>
+          </article>
+          <article class="card dl-card reveal spot" data-d="2" data-file="mac-x64">
+            <span class="badge" hidden>Recommended for you</span>
+            <svg class="icon big" aria-hidden="true"><use href="#i-laptop"/></svg>
+            <h3>Mac, Intel</h3>
+            <p class="muted">For Macs with an Intel processor.</p>
+            <a class="btn btn-primary" href="https://github.com/mrmx485-sudo/alcove/releases/latest"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Download for Intel</span></a>
+            <p class="meta" data-meta></p>
+          </article>
+        </div>
+        <p class="center muted small">Not sure which Mac you have? Open the Apple menu, choose <strong>About This Mac</strong>, and look at <em>Chip</em> (Apple silicon) or <em>Processor</em> (Intel).</p>
+
+        <ol class="steps reveal" aria-label="How to install">
+          <li><b>1</b><div><h3>Download</h3><p>Pick the file for your computer above.</p></div></li>
+          <li><b>2</b><div><h3>Open it</h3><p>Run the installer, or drag Alcove to Applications.</p></div></li>
+          <li><b>3</b><div><h3>Allow it once</h3><p>The installers are not code signed yet, so your system asks the first time.</p></div></li>
+        </ol>
+
+        <div class="help reveal">
+          <div class="acc">
+            <h3><button type="button" aria-expanded="false" aria-controls="h1">Windows says the app is “uncommon” or “dangerous”</button></h3>
+            <div class="acc-p" id="h1" role="region"><div><p>In Chrome, open the downloads list, click the three dots next to the file, choose <strong>Keep</strong>, then <strong>Keep anyway</strong>. When SmartScreen appears, choose <strong>More info</strong>, then <strong>Run anyway</strong>.</p></div></div>
+          </div>
+          <div class="acc">
+            <h3><button type="button" aria-expanded="false" aria-controls="h2">Mac blocks the first launch</button></h3>
+            <div class="acc-p" id="h2" role="region"><div><p>Open <strong>System Settings › Privacy &amp; Security</strong>, scroll to the message about Alcove, and choose <strong>Open Anyway</strong>.</p></div></div>
+          </div>
+          <div class="acc">
+            <h3><button type="button" aria-expanded="false" aria-controls="h3">How do I update?</button></h3>
+            <div class="acc-p" id="h3" role="region"><div><p>Open <strong>Settings › About › Check for updates</strong> in Alcove, or run <em>Check for Updates</em> from the command bar. When a newer release exists it opens the download page, and you install over the old version. Your tabs, settings and notes are kept.</p></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= FAQ ================= -->
+    <section class="faq band" id="faq" aria-labelledby="faq-title">
+      <div class="wrap narrow">
+        <header class="sec-head reveal">
+          <p class="eyebrow">Questions</p>
+          <h2 id="faq-title">Good to know</h2>
+        </header>
+        <div class="reveal">
+          <div class="acc">
+            <h3><button type="button" aria-expanded="false" aria-controls="f1">Is Alcove really free?</button></h3>
+            <div class="acc-p" id="f1" role="region"><div><p>Yes. Alcove is free and open source under the MIT license, with no accounts, subscriptions or ads in the app.</p></div></div>
+          </div>
+          <div class="acc">
+            <h3><button type="button" aria-expanded="false" aria-controls="f2">Does Alcove collect my data?</button></h3>
+            <div class="acc-p" id="f2" role="region"><div><p>No. There is no account, no analytics and no telemetry. Your history, notes and timers stay on your device. A few features contact a service when you use them, and the <a href="#privacy">privacy section</a> lists every one.</p></div></div>
+          </div>
+          <div class="acc">
+            <h3><button type="button" aria-expanded="false" aria-controls="f3">What is it built on?</button></h3>
+            <div class="acc-p" id="f3" role="region"><div><p>Electron and Chromium, the same engine as Chrome, so sites behave the way you expect. Alcove's own pages are plain HTML, CSS and JavaScript, with no framework.</p></div></div>
+          </div>
+          <div class="acc">
+            <h3><button type="button" aria-expanded="false" aria-controls="f4">Do Chrome extensions work?</button></h3>
+            <div class="acc-p" id="f4" role="region"><div><p>Yes. Open a Chrome Web Store page and use <em>Add to Alcove</em>. Alcove checks the package signature and shows what the extension can access before it installs. Installed extensions are not updated automatically yet.</p></div></div>
+          </div>
+          <div class="acc">
+            <h3><button type="button" aria-expanded="false" aria-controls="f5">Can I bring my data from another browser?</button></h3>
+            <div class="acc-p" id="f5" role="region"><div><p>Alcove can import from Chrome, Edge, Brave, Arc and Vivaldi. Run <em>Import from Browser</em> from the command bar or the File menu.</p></div></div>
+          </div>
+          <div class="acc">
+            <h3><button type="button" aria-expanded="false" aria-controls="f6">Why are the installers unsigned?</button></h3>
+            <div class="acc-p" id="f6" role="region"><div><p>Code signing certificates cost money, and this is a young open-source project. We plan to apply for free code signing for open-source projects (the SignPath Foundation). Until then your computer will warn you once, and the steps above get you past it.</p></div></div>
+          </div>
+          <div class="acc">
+            <h3><button type="button" aria-expanded="false" aria-controls="f7">Where are my notes stored?</button></h3>
+            <div class="acc-p" id="f7" role="region"><div><p>As ordinary <code>.md</code> files wherever you save them. The Markdown editor only reads files you opened and folders you mounted.</p></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Support ================= -->
+    <section class="support" id="support" aria-labelledby="support-title">
+      <div class="wrap narrow">
+        <header class="sec-head reveal">
+          <p class="eyebrow">Support and contact</p>
+          <h2 id="support-title">Something not working? Write to us.</h2>
+          <p class="sub">Bug reports, feature ideas and questions are all welcome.</p>
+        </header>
+        <div class="contact reveal spot">
+          <svg class="icon big" aria-hidden="true"><use href="#i-mail"/></svg>
+          <div>
+            <p class="label">Email support</p>
+            <p class="mail-row"><a class="mail" href="mailto:mr.mx.485@gmail.com?subject=Alcove%20support">mr.mx.485@gmail.com</a>
+              <button class="mini" id="copy-mail" type="button" data-mail="mr.mx.485@gmail.com"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button></p>
+            <p class="muted small">Please include your Alcove version (Settings › About) and your system, such as Windows 11 or macOS on Apple silicon.</p>
+          </div>
+        </div>
+        <ul class="ticks wide reveal">
+          <li><strong>Bugs and feature ideas:</strong> <a href="https://github.com/mrmx485-sudo/alcove/issues">open an issue on GitHub</a>.</li>
+          <li><strong>A security problem:</strong> please report it privately through the repository's <a href="https://github.com/mrmx485-sudo/alcove/security">Security tab</a> (Report a vulnerability) or by email, and not in a public issue.</li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <footer class="foot">
+    <div class="wrap foot-grid">
+      <div>
+        <div class="foot-brand"><img src="img/icon-512.png" alt="" width="28" height="28"><span>Alcove</span></div>
+        <p class="muted small">A bezel-less, privacy focused browser for Mac and Windows. Built on Electron and Chromium.</p>
+      </div>
+      <nav aria-label="Footer: product">
+        <h3>Product</h3>
+        <a href="#showcase">Tour</a><a href="#try">Try it</a><a href="#features">All features</a><a href="#privacy">Privacy</a><a href="#download">Download</a>
+      </nav>
+      <nav aria-label="Footer: resources">
+        <h3>Resources</h3>
+        <a href="https://github.com/mrmx485-sudo/alcove">Source on GitHub</a>
+        <a href="https://github.com/mrmx485-sudo/alcove/releases">Releases</a>
+        <a href="https://github.com/mrmx485-sudo/alcove/blob/main/LICENSE">MIT license</a>
+        <a href="https://github.com/mrmx485-sudo/alcove/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</a>
+        <a href="https://github.com/mrmx485-sudo/alcove/blob/main/SECURITY.md">Security policy</a>
+      </nav>
+      <nav aria-label="Footer: contact">
+        <h3>Contact</h3>
+        <a href="mailto:mr.mx.485@gmail.com?subject=Alcove%20support">mr.mx.485@gmail.com</a>
+        <a href="https://github.com/mrmx485-sudo/alcove/issues">GitHub issues</a>
+        <a href="#support">Support</a>
+      </nav>
+    </div>
+    <div class="wrap"><p class="muted small legal">© 2026 Alcove contributors. This page has no trackers, no web fonts and no third-party scripts. Its only request is to GitHub, to find the latest release.</p></div>
+  </footer>
+</body>
+</html>
