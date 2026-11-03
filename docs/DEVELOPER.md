@@ -666,9 +666,13 @@ page on the wrong host.
 
 When a tab's main frame fails with `ERR_INTERNET_DISCONNECTED` (-106, and only that: a mistyped address or a dead site is a different
 problem and keeps the normal error page), the `did-fail-load` handler in `openTab` loads `offline.html?url=<failed address>`, the way
-`blocked.html` is used for Focus mode. It is a canvas page with no network use: a cat asleep in an arch. Holding the pointer on the cat
-purrs (hearts); a click elsewhere, Space or "Drop yarn" drops a ball of yarn with gravity and friction, the cat wakes, chases and bats it
-(`bats`, 7 per toss), sits, and after `IDLE` ms with no input walks home and sleeps. On the `online` event the page reloads the original
+`blocked.html` is used for Focus mode. It is one canvas (600 x 300 units) with no network use: a shaded tabby asleep on a cushion in an
+arch, under a round night window with a moon and twinkling stars and a warm glow. The cat has three pose families drawn from Bézier
+shapes (`poseLie`, `poseSit`, `poseStand`; tails are tapered fills from `tail()`, stripes are clipped to the body with `inside()`), and a
+change of family cross-fades for 0.22 s (`fade`). Holding the pointer on the cat purrs: happy eyes, hearts, a slight shiver and a soft
+purr synthesized with Web Audio (`purrSound`, brown noise through a low-pass filter pulsed at 25 Hz, only while held). A click
+elsewhere, Space or "Drop yarn" drops a ball of yarn with gravity and friction that unwinds a thread on the floor; the cat yawns
+(`wake`), chases and bats it with a raised paw (`bats`, 7 per toss), sits, and after `IDLE` ms with no input walks home and sleeps. On the `online` event the page reloads the original
 address after a stretch, unless someone touched it in the last 3 s (then it says so). Reduced motion removes the breathing, drifting z's
 and tail sway. Test it by emulating offline with CDP `Network.emulateNetworkConditions` on a tab and navigating (an `online` event fires
 spuriously at load, hence the 2 s guard).
