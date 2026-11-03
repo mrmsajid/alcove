@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://mrmx485-sudo.github.io/alcove/sitemap.xml
+Sitemap: https://mrmsajid.github.io/alcove/sitemap.xml

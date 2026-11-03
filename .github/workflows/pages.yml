@@ -1,4 +1,4 @@
-# Publishes the web page in site/ to GitHub Pages (https://mrmx485-sudo.github.io/alcove/).
+# Publishes the web page in site/ to GitHub Pages (https://mrmsajid.github.io/alcove/).
 #
 # One-time setup by the repository owner: Settings > Pages > Build and deployment > Source: "GitHub Actions". After that, every push
 # to main that changes site/ updates the page. The page is plain files, so there is no build step. Actions are pinned to commit SHAs

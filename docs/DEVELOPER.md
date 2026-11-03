@@ -797,7 +797,7 @@ notification banners, and **everything on Windows**. Check those by hand before 
 
 ### 8.6 The web page (`site/`)
 
-The product page (https://mrmx485-sudo.github.io/alcove/) is plain HTML, CSS and JavaScript in `site/`: no build step, no framework, no web
+The product page (https://mrmsajid.github.io/alcove/) is plain HTML, CSS and JavaScript in `site/`: no build step, no framework, no web
 fonts, no third-party requests. Preview it with `python3 -m http.server 8080 --directory site`.
 
 **Concept.** The page behaves like the product: the page gets the whole window, and everything else lives in an alcove you reach for.

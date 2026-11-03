@@ -431,7 +431,7 @@
   });
 
   // ---- downloads: the visitor's system, and the latest release ----
-  const REPO = "mrmx485-sudo/alcove";
+  const REPO = "mrmsajid/alcove";
   // The list endpoint answers 200 with an empty list while nothing is published, so a fresh repository leaves no error in the console
   // (releases/latest would answer 404). Drafts are never listed to visitors; pre-releases are skipped, as releases/latest does.
   const API = `https://api.github.com/repos/${REPO}/releases?per_page=5`;
