@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>You're offline</title>
+  <style>
+    /* What a tab shows when there is no internet (main.js loads it on ERR_INTERNET_DISCONNECTED): a cat asleep in an alcove. Pet it and it
+       purrs; click anywhere to drop a ball of yarn and it wakes up to chase it, then goes back to sleep. When the connection returns the
+       page reloads by itself (after a stretch). Self-contained: no network, nothing stored. */
+    :root { color-scheme: dark light; --bg: #1d1d20; --surface: #26262a; --text: #ededf0; --muted: #abaab5; --line: #ffffff2e; --ink: #ededf0; --arch: #17171a; --accent: #ff9f5a; }
+    @media (prefers-color-scheme: light) { :root { --bg: #f4f4f6; --surface: #ffffff; --text: #1c1c1f; --muted: #5a5a64; --line: #00000030; --ink: #3a3a42; --arch: #e3e3e8; --accent: #d9660f; } }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { height: 100%; margin: 0; }
+    body { display: grid; place-items: center; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; user-select: none; -webkit-user-select: none; }
+    main { width: min(640px, 100%); padding: 24px; text-align: center; }
+    h1 { margin: 0 0 6px; font-size: 22px; font-weight: 600; letter-spacing: -.01em; }
+    p { margin: 0; color: var(--muted); }
+    #stage { margin: 24px 0 18px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); overflow: hidden; touch-action: manipulation; cursor: pointer; }
+    #stage:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    canvas { display: block; width: 100%; height: auto; aspect-ratio: 600 / 300; }
+    .row { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+    button { font: inherit; padding: 7px 16px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--text); cursor: pointer; }
+    button:hover { background: var(--surface); }
+    button.primary { background: var(--text); color: var(--bg); border-color: transparent; font-weight: 600; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    #back { margin-bottom: 14px; color: var(--text); }
+    #hint { margin-top: 16px; font-size: 12.5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>You're offline</h1>
+    <p id="host">Alcove can't reach the internet.</p>
+    <div id="stage" tabindex="0" role="application" aria-label="A cat asleep in an alcove. Click or tap the cat to pet it. Click or tap anywhere else, or press Space, to drop a ball of yarn.">
+      <canvas id="c" width="1200" height="600"></canvas>
+    </div>
+    <p id="back" hidden>You're back online.</p>
+    <div class="row"><button id="retry" class="primary" type="button">Try again</button><button id="yarn" type="button">Drop yarn</button></div>
+    <p id="hint">Pet the cat, or drop some yarn. Alcove reloads the page by itself when the connection returns.</p>
+  </main>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const target = /^https?:\/\//i.test(q.get("url") || "") ? q.get("url") : "";
+    if (target) { try { document.getElementById("host").textContent = `Alcove can't reach ${new URL(target).hostname}.`; } catch {} }
+    const retry = () => { if (target) location.href = target; else history.back(); };
+    document.getElementById("retry").addEventListener("click", retry);
+
+    const cv = document.getElementById("c"), g = cv.getContext("2d");
+    const W = 600, H = 300, GROUND = 236, HOME = 300, SC = cv.width / W;
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches; // no idle breathing or drifting, only what you ask for
+    const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    const IDLE = 7000; // how long the cat sits awake before going home to sleep (ms)
+
+    // the cat: sleep | purr | sit | chase | home | stretch
+    const cat = { x: HOME, face: 1, mode: "sleep", t: 0, hop: 0, vy: 0, bats: 0, since: 0 };
+    let yarn = null, hearts = [], act = performance.now(), last = performance.now(), held = false, wasSleeping = true;
+    const touch = () => { act = performance.now(); };
+
+    function toss(x) {
+      yarn = { x: Math.max(24, Math.min(W - 24, x)), y: 40, vx: (Math.random() - .5) * 120, vy: 0, spin: 0 };
+      cat.bats = 7; touch();
+      if (cat.mode !== "purr") { cat.mode = "chase"; cat.since = 0; }
+    }
+    const catBox = () => ({ x: cat.x - 44, y: GROUND - (cat.mode === "sleep" || cat.mode === "purr" ? 40 : 62), w: 88, h: cat.mode === "sleep" || cat.mode === "purr" ? 44 : 66 });
+    function point(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; }
+
+    document.getElementById("stage").addEventListener("pointerdown", e => {
+      e.preventDefault(); const p = point(e), b = catBox(); touch();
+      if (p.x > b.x && p.x < b.x + b.w && p.y > b.y && p.y < b.y + b.h && cat.mode !== "chase") { wasSleeping = cat.mode === "sleep"; held = true; cat.mode = "purr"; }
+      else toss(p.x);
+    });
+    const release = () => { if (!held) return; held = false; touch(); cat.mode = wasSleeping && Math.abs(cat.x - HOME) < 4 ? "sleep" : "sit"; cat.since = 0; };
+    addEventListener("pointerup", release); addEventListener("pointercancel", release);
+    document.getElementById("yarn").addEventListener("click", () => toss(60 + Math.random() * (W - 120)));
+    addEventListener("keydown", e => {
+      if (e.key === " " && document.activeElement && document.activeElement.tagName === "BUTTON") return;
+      if (e.key === " ") { e.preventDefault(); toss(60 + Math.random() * (W - 120)); }
+      else if (e.key === "Enter" && document.activeElement === document.body) retry();
+    });
+
+    // back online: reload by itself once nobody has touched the page for a few seconds (after a stretch), else say so
+    function backOnline() {
+      if (!target || performance.now() < 2000) return; // an "online" event right at load is the browser settling, not the connection returning
+      if (performance.now() - act < 3000 || cat.mode === "chase") { document.getElementById("back").hidden = false; return; }
+      cat.mode = "stretch"; cat.since = 0; setTimeout(retry, still ? 100 : 1100);
+    }
+    addEventListener("online", backOnline);
+    addEventListener("offline", () => { document.getElementById("back").hidden = true; });
+
+    function step(dt) {
+      cat.t += dt; cat.since += dt;
+      const now = performance.now();
+      if (yarn) { // a ball with gravity, bounces and rolling friction
+        yarn.vy += 900 * dt; yarn.x += yarn.vx * dt; yarn.y += yarn.vy * dt; yarn.spin += yarn.vx * dt / 11;
+        if (yarn.y > GROUND - 11) { yarn.y = GROUND - 11; if (Math.abs(yarn.vy) > 60) yarn.vy *= -.45; else yarn.vy = 0; yarn.vx *= Math.pow(.35, dt); }
+        if (yarn.x < 16 || yarn.x > W - 16) { yarn.x = Math.max(16, Math.min(W - 16, yarn.x)); yarn.vx *= -.6; }
+      }
+      const walk = (tx, sp) => { const d = tx - cat.x; if (Math.abs(d) < 3) return true; cat.face = d > 0 ? 1 : -1; cat.x += Math.sign(d) * Math.min(Math.abs(d), sp * dt); return false; };
+      if (cat.hop > 0 || cat.vy) { cat.vy += 1400 * dt; cat.hop = Math.max(0, cat.hop - cat.vy * dt); if (cat.hop === 0) cat.vy = 0; }
+      if (cat.mode === "chase") {
+        if (!yarn) cat.mode = "sit";
+        else {
+          const d = yarn.x - cat.x; cat.face = d > 0 ? 1 : -1;
+          if (Math.abs(d) > 40) walk(yarn.x - Math.sign(d) * 30, 280);
+          else if (yarn.y > GROUND - 24 && Math.abs(yarn.vx) < 40 && cat.hop === 0) { // pounce and bat it away
+            if (cat.bats-- > 0) { cat.vy = -380; cat.hop = .01; yarn.vx = cat.face * (200 + Math.random() * 160); yarn.vy = -260; touch(); }
+            else { cat.mode = "sit"; cat.since = 0; yarn = null; }
+          }
+        }
+      } else if (cat.mode === "sit") {
+        if (yarn) { cat.face = yarn.x > cat.x ? 1 : -1; }
+        if (now - act > IDLE) { cat.mode = "home"; yarn = null; }
+      } else if (cat.mode === "home") { if (walk(HOME, 120)) { cat.face = 1; cat.mode = "sleep"; } }
+      for (const h of hearts) { h.y -= 26 * dt; h.x += Math.sin(h.t += dt * 3) * 6 * dt; h.a -= dt * .55; }
+      hearts = hearts.filter(h => h.a > 0);
+      if (cat.mode === "purr" && (cat.since % .5) < dt && !still) hearts.push({ x: cat.x + 24 * cat.face + (Math.random() - .5) * 16, y: GROUND - 54, a: 1, t: Math.random() * 6 });
+      if (cat.mode === "purr" && still && !hearts.length) hearts.push({ x: cat.x + 24, y: GROUND - 54, a: 1, t: 0 });
+    }
+
+    function rr(x, y, w, h, r) { g.beginPath(); g.roundRect(x, y, w, h, r); g.fill(); }
+    function draw() {
+      g.setTransform(SC, 0, 0, SC, 0, 0); g.clearRect(0, 0, W, H);
+      const ink = css("--ink"), muted = css("--muted"), arch = css("--arch"), accent = css("--accent"), surface = css("--surface");
+      // the alcove: an arch cut into the wall, a floor, a cushion
+      g.fillStyle = arch; g.beginPath(); g.moveTo(HOME - 130, GROUND); g.lineTo(HOME - 130, 110); g.arc(HOME, 110, 130, Math.PI, 0); g.lineTo(HOME + 130, GROUND); g.fill();
+      g.strokeStyle = muted; g.globalAlpha = .45; g.lineWidth = 1.5; g.beginPath(); g.moveTo(0, GROUND + .5); g.lineTo(W, GROUND + .5); g.stroke(); g.globalAlpha = 1;
+      g.fillStyle = accent; g.globalAlpha = .85; g.beginPath(); g.ellipse(HOME, GROUND - 5, 70, 9, 0, 0, 7); g.fill(); g.globalAlpha = 1;
+      // yarn
+      if (yarn) {
+        g.save(); g.translate(yarn.x, yarn.y); g.rotate(yarn.spin);
+        g.fillStyle = accent; g.beginPath(); g.arc(0, 0, 11, 0, 7); g.fill();
+        g.strokeStyle = surface; g.globalAlpha = .7; g.lineWidth = 1.3; g.beginPath(); g.arc(0, 0, 7, .4, 3.6); g.moveTo(-9, -3); g.quadraticCurveTo(0, 7, 9, -4); g.stroke(); g.restore(); g.globalAlpha = 1;
+      }
+      const f = cat.face, x = cat.x, hop = cat.hop;
+      g.fillStyle = ink; g.strokeStyle = ink; g.lineCap = "round"; g.lineJoin = "round";
+      const sleeping = cat.mode === "sleep" || cat.mode === "purr";
+      const breath = still ? 0 : Math.sin(cat.t * (cat.mode === "purr" ? 9 : 2.2)) * (cat.mode === "purr" ? .05 : .035);
+      if (sleeping) {
+        g.beginPath(); g.ellipse(x, GROUND - 22, 38 * (1 + breath * .6), 17 * (1 + breath), 0, 0, 7); g.fill();               // curled body
+        g.beginPath(); g.arc(x + 24 * f, GROUND - 19, 12, 0, 7); g.fill();                                                    // head resting
+        g.beginPath(); g.moveTo(x + (18) * f, GROUND - 28); g.lineTo(x + 19 * f, GROUND - 40); g.lineTo(x + 26 * f, GROUND - 30); g.fill(); // ears
+        g.beginPath(); g.moveTo(x + 27 * f, GROUND - 30); g.lineTo(x + 32 * f, GROUND - 40); g.lineTo(x + 34 * f, GROUND - 27); g.fill();
+        g.lineWidth = 6; g.beginPath(); g.moveTo(x - 34 * f, GROUND - 14); g.quadraticCurveTo(x - 4 * f, GROUND + 2, x + 28 * f, GROUND - 5); g.stroke(); // tail around the front
+        g.strokeStyle = surface; g.lineWidth = 1.8; g.beginPath(); g.arc(x + 28 * f, GROUND - 19, 3.2, .15 * Math.PI, .85 * Math.PI); g.stroke(); // a closed eye
+        if (!still && cat.mode === "sleep") { g.fillStyle = muted; g.font = "600 15px ui-monospace, Menlo, Consolas, monospace"; for (let i = 0; i < 3; i++) { const k = ((cat.t * .35 + i / 3) % 1); g.globalAlpha = Math.sin(k * Math.PI) * .8; g.fillText("z", x + 34 * f + k * 22 * f + i * 4, GROUND - 40 - k * 40); } g.globalAlpha = 1; }
+      } else {
+        const moving = cat.mode === "chase" || cat.mode === "home", ph = moving ? Math.sin(cat.t * (cat.mode === "chase" ? 26 : 14)) : 0, stretch = cat.mode === "stretch" ? Math.min(1, cat.since / .5) : 0;
+        const by = GROUND - 28 - hop;
+        g.lineWidth = 4;
+        for (const [lx, s] of [[-20, ph], [-12, -ph], [14, -ph], [22, ph]]) { g.beginPath(); g.moveTo(x + lx * f, by + 6); g.lineTo(x + (lx + s * 6) * f, GROUND - hop * .2); g.stroke(); }
+        g.beginPath(); g.ellipse(x - 2 * f * stretch, by - 4 * stretch, 30 + 6 * stretch, 14 - 3 * stretch, -.08 * f * stretch, 0, 7); g.fill();
+        g.beginPath(); g.arc(x + (32 + 4 * stretch) * f, by - 8 + 6 * stretch, 11, 0, 7); g.fill();
+        g.beginPath(); g.moveTo(x + 26 * f, by - 15 + 6 * stretch); g.lineTo(x + 28 * f, by - 28 + 6 * stretch); g.lineTo(x + 34 * f, by - 17 + 6 * stretch); g.fill();
+        g.beginPath(); g.moveTo(x + 35 * f, by - 17 + 6 * stretch); g.lineTo(x + 40 * f, by - 28 + 6 * stretch); g.lineTo(x + 42 * f, by - 14 + 6 * stretch); g.fill();
+        g.lineWidth = 4.4; g.beginPath(); g.moveTo(x - 28 * f, by - 4); g.quadraticCurveTo(x - 46 * f, by - 10 + (still ? 0 : Math.sin(cat.t * 4) * 7), x - 40 * f, by - 36 + (still ? 0 : Math.sin(cat.t * 4) * 5)); g.stroke();
+        g.fillStyle = surface; g.beginPath(); g.arc(x + 36 * f, by - 10 + 6 * stretch, 1.8, 0, 7); g.fill();
+      }
+      for (const h of hearts) { g.globalAlpha = Math.max(0, h.a); g.fillStyle = accent; g.font = "16px system-ui, sans-serif"; g.fillText("♥", h.x, h.y); }
+      g.globalAlpha = 1;
+    }
+
+    function frame(now) {
+      const dt = Math.min(.05, (now - last) / 1000); last = now;
+      step(dt); draw(); requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+    document.getElementById("stage").focus({ preventScroll: true });
+  </script>
+</body>
+</html>

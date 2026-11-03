@@ -939,6 +939,11 @@ function openTab(id, url) {
     if (isMainFrame && code === -20 /* ERR_BLOCKED_BY_CLIENT */ && focusBlocks(failedUrl)) {
       wc.loadFile(uiFile("blocked.html"), { query: { host: hostKey(failedUrl), until: String(focus.until), url: failedUrl } }).catch(() => {});
     }
+    // No internet at all (only this code: a mistyped address or a dead site is a different problem): the sleeping cat, which reloads the page
+    // by itself when the connection comes back.
+    else if (isMainFrame && code === -106 /* ERR_INTERNET_DISCONNECTED */ && /^https?:/i.test(failedUrl)) {
+      wc.loadFile(uiFile("offline.html"), { query: { url: failedUrl } }).catch(() => {});
+    }
   });
   wc.on("did-navigate", (_e, u) => {
     const f = mdFileOfUrl(u);

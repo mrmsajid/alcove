@@ -662,6 +662,17 @@ the next time they check. The check needs the repository's releases to be readab
 Tested with a local stand-in server (`ALCOVE_UPDATE_API`): newer, same, older, minor bump, 404, 500, unreadable body, no tag, and a release
 page on the wrong host.
 
+### 6.9b The offline cat (`ui/offline.html`)
+
+When a tab's main frame fails with `ERR_INTERNET_DISCONNECTED` (-106, and only that: a mistyped address or a dead site is a different
+problem and keeps the normal error page), the `did-fail-load` handler in `openTab` loads `offline.html?url=<failed address>`, the way
+`blocked.html` is used for Focus mode. It is a canvas page with no network use: a cat asleep in an arch. Holding the pointer on the cat
+purrs (hearts); a click elsewhere, Space or "Drop yarn" drops a ball of yarn with gravity and friction, the cat wakes, chases and bats it
+(`bats`, 7 per toss), sits, and after `IDLE` ms with no input walks home and sleeps. On the `online` event the page reloads the original
+address after a stretch, unless someone touched it in the last 3 s (then it says so). Reduced motion removes the breathing, drifting z's
+and tail sway. Test it by emulating offline with CDP `Network.emulateNetworkConditions` on a tab and navigating (an `online` event fires
+spuriously at load, hence the 2 s guard).
+
 ### 6.9 Private mode
 
 A **private session** is a throwaway profile (`PRIVATE` in `main.js`, never in `config.profiles`). Alcove has one window, so starting it
